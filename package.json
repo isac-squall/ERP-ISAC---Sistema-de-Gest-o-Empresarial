@@ -1,0 +1,15 @@
+{
+  "name": "erp-isac",
+  "version": "1.0.0",
+  "description": "Sistema de gestão empresarial ERP ISAC",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}

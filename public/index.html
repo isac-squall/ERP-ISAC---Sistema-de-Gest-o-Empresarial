@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ERP ISAC - Sistema de gestão empresarial</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <!-- Login -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-box">
+      <div class="login-logo">
+        <i class="fas fa-building"></i>
+        <h1>ERP ISAC</h1>
+        <p>Sistema de gestão empresarial</p>
+      </div>
+      <form id="login-form">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="login-email" value="admin@erpisac.com" required>
+        </div>
+        <div class="form-group">
+          <label>Senha</label>
+          <input type="password" id="login-senha" value="admin123" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="app hidden">
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">
+          <i class="fas fa-building"></i>
+        </div>
+        <div class="sidebar-brand">
+          <span class="brand-sub">Sistema de gestão empresarial</span>
+          <span class="brand-title">ERP ISAC</span>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-page="dashboard">
+          <i class="fas fa-tachometer-alt"></i> Dashboard
+        </a>
+        <a href="#" class="nav-item" data-page="vendas">
+          <i class="fas fa-shopping-cart"></i> Realizar vendas
+        </a>
+        <a href="#" class="nav-item" data-page="caixa">
+          <i class="fas fa-cash-register"></i> Gerenciar caixa
+        </a>
+        <a href="#" class="nav-item" data-page="financeiro">
+          <i class="fas fa-dollar-sign"></i> Financeiro
+        </a>
+        <a href="#" class="nav-item" data-page="clientes">
+          <i class="fas fa-users"></i> Clientes
+        </a>
+        <a href="#" class="nav-item" data-page="produtos">
+          <i class="fas fa-box"></i> Produtos
+        </a>
+        <a href="#" class="nav-item" data-page="ordens-servico">
+          <i class="fas fa-wrench"></i> Ordens de serviço
+        </a>
+        <a href="#" class="nav-item" data-page="usuarios">
+          <i class="fas fa-user"></i> Usuários
+        </a>
+        <a href="#" class="nav-item" data-page="fornecedores">
+          <i class="fas fa-truck"></i> Fornecedores
+        </a>
+        <a href="#" class="nav-item" data-page="historico-vendas">
+          <i class="fas fa-shopping-bag"></i> Histórico de vendas
+        </a>
+        <a href="#" class="nav-item" data-page="relatorio">
+          <i class="fas fa-chart-pie"></i> Relatório geral
+        </a>
+        <a href="#" class="nav-item" data-page="configuracoes">
+          <i class="fas fa-cog"></i> Configurações
+        </a>
+        <a href="#" class="nav-item" data-page="manual">
+          <i class="fas fa-book"></i> Manual
+        </a>
+      </nav>
+    </aside>
+
+    <!-- Main -->
+    <div class="main-wrapper">
+      <!-- Header -->
+      <header class="top-header">
+        <button id="sidebar-toggle" class="header-btn"><i class="fas fa-bars"></i></button>
+        <div class="header-actions">
+          <button class="header-btn" id="notif-btn" title="Notificações">
+            <i class="fas fa-bell"></i>
+            <span id="notif-badge" class="notif-badge hidden">0</span>
+          </button>
+          <div id="notif-panel" class="notif-panel hidden"></div>
+          <button class="header-btn" id="settings-btn" title="Configurações"><i class="fas fa-cog"></i></button>
+          <label class="theme-toggle" title="Modo escuro/claro">
+            <input type="checkbox" id="theme-switch">
+            <span class="toggle-slider"></span>
+          </label>
+          <button class="header-btn" id="calc-btn" title="Calculadora"><i class="fas fa-calculator"></i></button>
+          <button class="header-btn" id="fullscreen-btn" title="Tela cheia"><i class="fas fa-expand"></i></button>
+          <div class="user-menu">
+            <div class="user-avatar"><i class="fas fa-user"></i></div>
+            <span id="user-name">Administrador</span>
+            <i class="fas fa-chevron-down"></i>
+            <div class="user-dropdown">
+              <a href="#" id="logout-btn"><i class="fas fa-sign-out-alt"></i> Sair</a>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Content -->
+      <main id="content" class="content"></main>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-overlay"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-title">Modal</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+      <div id="modal-footer" class="modal-footer"></div>
+    </div>
+  </div>
+
+  <!-- Calculator -->
+  <div id="calculator" class="calculator hidden">
+    <div class="calc-header">
+      <span>Calculadora</span>
+      <button id="calc-close">&times;</button>
+    </div>
+    <input type="text" id="calc-display" readonly value="0">
+    <div class="calc-buttons">
+      <button data-val="C">C</button><button data-val="(">(</button><button data-val=")">)</button><button data-val="/">/</button>
+      <button data-val="7">7</button><button data-val="8">8</button><button data-val="9">9</button><button data-val="*">*</button>
+      <button data-val="4">4</button><button data-val="5">5</button><button data-val="6">6</button><button data-val="-">-</button>
+      <button data-val="1">1</button><button data-val="2">2</button><button data-val="3">3</button><button data-val="+">+</button>
+      <button data-val="0" class="wide">0</button><button data-val=".">.</button><button data-val="=">=</button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <div id="print-area" class="print-area hidden"></div>
+
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
