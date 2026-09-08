@@ -167,6 +167,7 @@ app.get('/api/clientes/:id', (req, res) => {
 
 app.post('/api/clientes', (req, res) => {
   const { nome, cpf_cnpj, telefone, email, endereco, cidade, estado } = req.body;
+  if (!nome) return res.status(400).json({ error: 'Nome é obrigatório' });
   const result = db.prepare('INSERT INTO clientes (nome, cpf_cnpj, telefone, email, endereco, cidade, estado) VALUES (?,?,?,?,?,?,?)').run(nome, cpf_cnpj, telefone, email, endereco, cidade, estado);
   res.json({ id: result.lastInsertRowid, message: 'Cliente criado' });
 });
@@ -204,8 +205,15 @@ app.get('/api/fornecedores/all', (req, res) => {
   res.json(db.prepare('SELECT id, nome FROM fornecedores WHERE ativo = 1 ORDER BY nome').all());
 });
 
+app.get('/api/fornecedores/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM fornecedores WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Fornecedor não encontrado' });
+  res.json(row);
+});
+
 app.post('/api/fornecedores', (req, res) => {
   const { nome, cnpj, telefone, email, endereco } = req.body;
+  if (!nome) return res.status(400).json({ error: 'Nome é obrigatório' });
   const result = db.prepare('INSERT INTO fornecedores (nome, cnpj, telefone, email, endereco) VALUES (?,?,?,?,?)').run(nome, cnpj, telefone, email, endereco);
   res.json({ id: result.lastInsertRowid });
 });
@@ -244,13 +252,20 @@ app.get('/api/produtos/all', (req, res) => {
 });
 
 app.get('/api/produtos/codigo/:codigo', (req, res) => {
-  const row = db.prepare('SELECT id, nome, preco, estoque, codigo FROM produtos WHERE ativo = 1 AND codigo = ?').get(req.params.codigo);
+  const row = db.prepare('SELECT id, nome, preco, estoque, estoque_minimo, codigo FROM produtos WHERE ativo = 1 AND codigo = ?').get(req.params.codigo);
+  if (!row) return res.status(404).json({ error: 'Produto não encontrado' });
+  res.json(row);
+});
+
+app.get('/api/produtos/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Produto não encontrado' });
   res.json(row);
 });
 
 app.post('/api/produtos', (req, res) => {
   const { nome, codigo, descricao, preco, estoque, estoque_minimo, categoria, fornecedor_id } = req.body;
+  if (!nome) return res.status(400).json({ error: 'Nome é obrigatório' });
   const result = db.prepare('INSERT INTO produtos (nome, codigo, descricao, preco, estoque, estoque_minimo, categoria, fornecedor_id) VALUES (?,?,?,?,?,?,?,?)').run(nome, codigo, descricao, preco, estoque, estoque_minimo, categoria, fornecedor_id || null);
   res.json({ id: result.lastInsertRowid });
 });
@@ -272,6 +287,15 @@ app.get('/api/ordens-servico/stats', (req, res) => {
   const prontas = db.prepare("SELECT COUNT(*) as total FROM ordens_servico WHERE status = 'Pronta para entrega'").get();
   const valor = db.prepare("SELECT COALESCE(SUM(valor_previsto),0) as total FROM ordens_servico WHERE status NOT IN ('Entregue','Cancelada')").get();
   res.json({ abertas: abertas.total, prontas: prontas.total, valorPrevisto: valor.total });
+});
+
+app.get('/api/ordens-servico/:id', (req, res) => {
+  const row = db.prepare(`
+    SELECT os.*, c.nome as cliente_nome FROM ordens_servico os
+    LEFT JOIN clientes c ON os.cliente_id = c.id WHERE os.id = ?
+  `).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Ordem não encontrada' });
+  res.json(row);
 });
 
 app.get('/api/ordens-servico', (req, res) => {
@@ -326,8 +350,15 @@ app.get('/api/usuarios', (req, res) => {
   res.json({ data, total, page: +page, limit: +limit, totalPages: Math.ceil(total / limit) || 1 });
 });
 
+app.get('/api/usuarios/:id', (req, res) => {
+  const row = db.prepare('SELECT id, nome, email, cargo, ativo, criado_em FROM usuarios WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Usuário não encontrado' });
+  res.json(row);
+});
+
 app.post('/api/usuarios', (req, res) => {
   const { nome, email, senha, cargo } = req.body;
+  if (!nome || !email || !senha) return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
   try {
     const result = db.prepare('INSERT INTO usuarios (nome, email, senha, cargo) VALUES (?,?,?,?)').run(nome, email, senha, cargo || 'Operador');
     res.json({ id: result.lastInsertRowid });
@@ -360,7 +391,13 @@ app.get('/api/caixa/status', (req, res) => {
     FROM caixa WHERE date(criado_em) = date('now','localtime')
   `).get();
   const saldo = (status?.valor_inicial || 0) + movimentos.entradas - movimentos.saidas;
-  res.json({ ...status, entradas: movimentos.entradas, saidas: movimentos.saidas, saldo });
+  res.json({
+    ...status,
+    aberto: status?.aberto === 1,
+    entradas: movimentos.entradas,
+    saidas: movimentos.saidas,
+    saldo
+  });
 });
 
 app.post('/api/caixa/abrir', (req, res) => {
@@ -520,6 +557,17 @@ app.get('/api/financeiro/stats', (req, res) => {
   res.json({ receitas: receitas.total, despesas: despesas.total, pendentes: pendentes.total, saldo: receitas.total - despesas.total });
 });
 
+app.get('/api/financeiro/:id', (req, res) => {
+  const row = db.prepare(`
+    SELECT f.*, c.nome as cliente_nome, fo.nome as fornecedor_nome FROM financeiro f
+    LEFT JOIN clientes c ON f.cliente_id = c.id
+    LEFT JOIN fornecedores fo ON f.fornecedor_id = fo.id
+    WHERE f.id = ?
+  `).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Lançamento não encontrado' });
+  res.json(row);
+});
+
 app.post('/api/financeiro', (req, res) => {
   const { tipo, categoria, descricao, valor, data_vencimento, data_pagamento, status, cliente_id, fornecedor_id } = req.body;
   const result = db.prepare('INSERT INTO financeiro (tipo, categoria, descricao, valor, data_vencimento, data_pagamento, status, cliente_id, fornecedor_id) VALUES (?,?,?,?,?,?,?,?,?)').run(tipo, categoria, descricao, valor, data_vencimento, data_pagamento, status || 'Pendente', cliente_id || null, fornecedor_id || null);
@@ -561,9 +609,17 @@ app.get('/api/relatorio', (req, res) => {
 });
 
 app.get('*', (req, res) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ error: 'Rota não encontrada' });
+  }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: err.message || 'Erro interno' });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`ERP ISAC rodando em http://localhost:${PORT}`);
 });
