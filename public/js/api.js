@@ -1,11 +1,19 @@
 const API = {
   async request(url, options = {}) {
-    const res = await fetch(`/api${url}`, {
-      headers: { 'Content-Type': 'application/json' },
-      ...options,
-      body: options.body ? JSON.stringify(options.body) : undefined
-    });
-    const data = await res.json();
+    let res;
+    try {
+      res = await fetch(`/api${url}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+    } catch {
+      throw new Error('Não foi possível conectar ao servidor');
+    }
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; }
+    catch { throw new Error(res.ok ? 'Resposta inválida do servidor' : 'Erro na requisição'); }
     if (!res.ok) throw new Error(data.error || 'Erro na requisição');
     return data;
   },
@@ -31,6 +39,7 @@ const API = {
   fornecedores: {
     list: (p) => API.request(`/fornecedores?${new URLSearchParams(p)}`),
     all: () => API.request('/fornecedores/all'),
+    get: (id) => API.request(`/fornecedores/${id}`),
     create: (d) => API.request('/fornecedores', { method: 'POST', body: d }),
     update: (id, d) => API.request(`/fornecedores/${id}`, { method: 'PUT', body: d }),
     delete: (id) => API.request(`/fornecedores/${id}`, { method: 'DELETE' })
@@ -39,6 +48,7 @@ const API = {
   produtos: {
     list: (p) => API.request(`/produtos?${new URLSearchParams(p)}`),
     all: () => API.request('/produtos/all'),
+    get: (id) => API.request(`/produtos/${id}`),
     byCodigo: (codigo) => API.request(`/produtos/codigo/${encodeURIComponent(codigo)}`),
     create: (d) => API.request('/produtos', { method: 'POST', body: d }),
     update: (id, d) => API.request(`/produtos/${id}`, { method: 'PUT', body: d }),
@@ -48,6 +58,7 @@ const API = {
   ordensServico: {
     stats: () => API.request('/ordens-servico/stats'),
     list: (p) => API.request(`/ordens-servico?${new URLSearchParams(p)}`),
+    get: (id) => API.request(`/ordens-servico/${id}`),
     create: (d) => API.request('/ordens-servico', { method: 'POST', body: d }),
     update: (id, d) => API.request(`/ordens-servico/${id}`, { method: 'PUT', body: d }),
     delete: (id) => API.request(`/ordens-servico/${id}`, { method: 'DELETE' })
@@ -55,6 +66,7 @@ const API = {
 
   usuarios: {
     list: (p) => API.request(`/usuarios?${new URLSearchParams(p)}`),
+    get: (id) => API.request(`/usuarios/${id}`),
     create: (d) => API.request('/usuarios', { method: 'POST', body: d }),
     update: (id, d) => API.request(`/usuarios/${id}`, { method: 'PUT', body: d }),
     delete: (id) => API.request(`/usuarios/${id}`, { method: 'DELETE' })
@@ -77,6 +89,7 @@ const API = {
 
   financeiro: {
     list: (p) => API.request(`/financeiro?${new URLSearchParams(p)}`),
+    get: (id) => API.request(`/financeiro/${id}`),
     stats: () => API.request('/financeiro/stats'),
     create: (d) => API.request('/financeiro', { method: 'POST', body: d }),
     update: (id, d) => API.request(`/financeiro/${id}`, { method: 'PUT', body: d }),
@@ -90,18 +103,39 @@ function formatCurrency(v) {
   return 'R$' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function parseDate(d) {
+  if (!d) return null;
+  if (d instanceof Date) return isNaN(d) ? null : d;
+  const raw = String(d).trim();
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) {
+    return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+  }
+  const dt = new Date(raw);
+  return isNaN(dt) ? null : dt;
+}
+
 function formatDate(d) {
-  if (!d) return '-';
-  const dt = new Date(d);
-  if (isNaN(dt)) return d;
+  const dt = parseDate(d);
+  if (!dt) return d || '-';
   return dt.toLocaleDateString('pt-BR');
 }
 
 function formatDateTime(d) {
-  if (!d) return '-';
-  const dt = new Date(d);
-  if (isNaN(dt)) return d;
+  const dt = parseDate(d);
+  if (!dt) return d || '-';
   return dt.toLocaleString('pt-BR');
+}
+
+function escapeHtml(v) {
+  return String(v ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function toInputDate(d) {
+  if (!d) return '';
+  return String(d).slice(0, 10);
 }
 
 function statusClass(status) {
@@ -118,7 +152,9 @@ function showToast(msg, type = '') {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'toast ' + type;
-  setTimeout(() => t.classList.add('hidden'), 3000);
+  t.classList.remove('hidden');
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => t.classList.add('hidden'), 3000);
 }
 
 function openModal(title, body, footer) {

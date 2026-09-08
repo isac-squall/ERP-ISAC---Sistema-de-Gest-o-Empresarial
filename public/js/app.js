@@ -19,10 +19,15 @@ const PAGES = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  const saved = localStorage.getItem('erp_user');
-  if (saved) {
-    currentUser = JSON.parse(saved);
-    showApp();
+  try {
+    const saved = localStorage.getItem('erp_user');
+    if (saved) {
+      currentUser = JSON.parse(saved);
+      if (currentUser && currentUser.id) showApp();
+      else currentUser = null;
+    }
+  } catch {
+    localStorage.removeItem('erp_user');
   }
   bindGlobalEvents();
 });
@@ -75,6 +80,7 @@ function bindGlobalEvents() {
     panel.classList.toggle('hidden');
     if (!panel.classList.contains('hidden')) await refreshNotificacoes(true);
   };
+  document.getElementById('notif-panel').onclick = (e) => e.stopPropagation();
   document.addEventListener('click', () => document.getElementById('notif-panel')?.classList.add('hidden'));
 
   document.getElementById('fullscreen-btn').onclick = () => {
@@ -148,9 +154,16 @@ async function renderPage() {
     usuarios: renderUsuarios,
     fornecedores: renderFornecedores,
     'historico-vendas': renderHistoricoVendas,
-    relatorio: renderRelatorio
+    relatorio: renderRelatorio,
+    configuracoes: renderConfiguracoes,
+    manual: renderManual
   };
-  try { await renderers[currentPage](); }
+  const renderer = renderers[currentPage];
+  if (!renderer) {
+    content.innerHTML = `<div class="card"><p>Página não encontrada.</p></div>`;
+    return;
+  }
+  try { await renderer(); }
   catch (err) { content.innerHTML = `<div class="card"><p style="color:red">Erro: ${err.message}</p></div>`; }
 }
 
@@ -160,7 +173,9 @@ function pageHeader(title, breadcrumb) {
 
 // ===================== DASHBOARD =====================
 async function renderDashboard() {
-  const d = await API.dashboard();
+  const [d, charts] = await Promise.all([API.dashboard(), API.charts('semana')]);
+  const maxReceita = Math.max(...(charts.receita || []).map(r => r.receita || 0), 1);
+  const cc = charts.contasClientes || {};
   document.getElementById('content').innerHTML = `
     ${pageHeader('Dashboard', 'Dashboard')}
     <div class="stats-row">
@@ -180,12 +195,35 @@ async function renderDashboard() {
     </div>
     <div class="dashboard-grid">
       <div class="card">
-        <h3>Contas a receber</h3>
-        <div class="stat-value" style="color:var(--success);font-size:24px">${formatCurrency(d.contasReceber)}</div>
+        <div class="card-head">
+          <h3>Receita da semana</h3>
+          <select id="chart-periodo">
+            <option value="semana">Semana</option>
+            <option value="mes">Mês</option>
+            <option value="ano">Ano</option>
+          </select>
+        </div>
+        <div class="chart-placeholder" id="dash-chart">
+          ${renderChartBars(charts.receita, maxReceita)}
+        </div>
       </div>
       <div class="card">
-        <h3>Contas a pagar</h3>
-        <div class="stat-value" style="color:var(--danger);font-size:24px">${formatCurrency(d.contasPagar)}</div>
+        <h3>Contas de clientes</h3>
+        <div class="contas-resumo">
+          <div><span>Vence hoje</span><strong>${cc.venceHoje?.qtd || 0} · ${formatCurrency(cc.venceHoje?.total)}</strong></div>
+          <div><span>Atrasado</span><strong class="text-danger">${cc.atrasado?.qtd || 0} · ${formatCurrency(cc.atrasado?.total)}</strong></div>
+          <div><span>Pendente</span><strong>${cc.pendente?.qtd || 0} · ${formatCurrency(cc.pendente?.total)}</strong></div>
+        </div>
+        <div class="dashboard-grid" style="margin-top:16px">
+          <div>
+            <h4 class="muted">A receber</h4>
+            <div class="stat-value" style="color:var(--success);font-size:22px">${formatCurrency(d.contasReceber)}</div>
+          </div>
+          <div>
+            <h4 class="muted">A pagar</h4>
+            <div class="stat-value" style="color:var(--danger);font-size:22px">${formatCurrency(d.contasPagar)}</div>
+          </div>
+        </div>
       </div>
     </div>
     <div class="card">
@@ -193,11 +231,24 @@ async function renderDashboard() {
       <table class="data-table">
         <thead><tr><th>#</th><th>Cliente</th><th>Total</th><th>Pagamento</th><th>Data</th></tr></thead>
         <tbody>${d.vendasRecentes.length ? d.vendasRecentes.map(v => `
-          <tr><td>${v.id}</td><td>${v.cliente_nome || 'Avulso'}</td><td>${formatCurrency(v.total)}</td><td>${v.forma_pagamento || '-'}</td><td>${formatDateTime(v.criado_em)}</td></tr>
+          <tr><td>${v.id}</td><td>${escapeHtml(v.cliente_nome || 'Avulso')}</td><td>${formatCurrency(v.total)}</td><td>${escapeHtml(v.forma_pagamento || '-')}</td><td>${formatDateTime(v.criado_em)}</td></tr>
         `).join('') : '<tr class="empty-row"><td colspan="5">Nenhuma venda recente</td></tr>'}
         </tbody>
       </table>
     </div>`;
+  document.getElementById('chart-periodo').onchange = async (e) => {
+    const c = await API.charts(e.target.value);
+    const max = Math.max(...(c.receita || []).map(r => r.receita || 0), 1);
+    document.getElementById('dash-chart').innerHTML = renderChartBars(c.receita, max);
+  };
+}
+
+function renderChartBars(rows, max) {
+  if (!rows || !rows.length) return '<p class="muted">Sem dados no período</p>';
+  return rows.map(v => `
+    <div class="chart-bar" style="height:${((v.receita || 0) / max * 160)}px" title="${escapeHtml(v.label)} ${formatCurrency(v.receita)}">
+      <span>${escapeHtml(v.label)}</span>
+    </div>`).join('');
 }
 
 // ===================== ORDENS DE SERVIÇO =====================
@@ -238,9 +289,9 @@ function renderOSTableRows(data) {
     <tr>
       <td>${o.id}</td>
       <td><span class="status-badge ${statusClass(o.status)}">${o.status}</span></td>
-      <td>${o.cliente_nome || '-'}</td>
-      <td>${o.equipamento || '-'}</td>
-      <td>${o.solicitacao || '-'}</td>
+      <td>${escapeHtml(o.cliente_nome || '-')}</td>
+      <td>${escapeHtml(o.equipamento || '-')}</td>
+      <td>${escapeHtml(o.solicitacao || '-')}</td>
       <td>${formatDate(o.data_prevista)}</td>
       <td>${formatDate(o.data_final)}</td>
       <td>${formatDate(o.data_entrega)}</td>
@@ -264,10 +315,7 @@ async function loadOrdensServico() {
 
 async function showOSForm(id) {
   let data = {};
-  if (id) {
-    const list = await API.ordensServico.list({ search: '', page: 1, limit: 1000 });
-    data = list.data.find(o => o.id === id) || {};
-  }
+  if (id) data = await API.ordensServico.get(id);
   const clientes = await API.clientes.all();
   openModal(id ? 'Editar Ordem de Serviço' : 'Nova Ordem de Serviço', `
     <form id="os-form">
@@ -282,17 +330,17 @@ async function showOSForm(id) {
             ${clientes.map(c => `<option value="${c.id}" ${data.cliente_id == c.id ? 'selected' : ''}>${c.nome}</option>`).join('')}
           </select></div>
       </div>
-      <div class="form-group"><label>Equipamento</label><input name="equipamento" value="${data.equipamento || ''}"></div>
-      <div class="form-group"><label>Solicitação</label><textarea name="solicitacao" rows="3">${data.solicitacao || ''}</textarea></div>
+      <div class="form-group"><label>Equipamento</label><input name="equipamento" value="${escapeHtml(data.equipamento || '')}"></div>
+      <div class="form-group"><label>Solicitação</label><textarea name="solicitacao" rows="3">${escapeHtml(data.solicitacao || '')}</textarea></div>
       <div class="form-row">
         <div class="form-group"><label>Valor previsto</label><input name="valor_previsto" type="number" step="0.01" value="${data.valor_previsto || 0}"></div>
-        <div class="form-group"><label>Data prevista</label><input name="data_prevista" type="date" value="${data.data_prevista || ''}"></div>
+        <div class="form-group"><label>Data prevista</label><input name="data_prevista" type="date" value="${toInputDate(data.data_prevista)}"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Data final</label><input name="data_final" type="date" value="${data.data_final || ''}"></div>
-        <div class="form-group"><label>Data entrega</label><input name="data_entrega" type="date" value="${data.data_entrega || ''}"></div>
+        <div class="form-group"><label>Data final</label><input name="data_final" type="date" value="${toInputDate(data.data_final)}"></div>
+        <div class="form-group"><label>Data entrega</label><input name="data_entrega" type="date" value="${toInputDate(data.data_entrega)}"></div>
       </div>
-      <div class="form-group"><label>Observações</label><textarea name="observacoes" rows="2">${data.observacoes || ''}</textarea></div>
+      <div class="form-group"><label>Observações</label><textarea name="observacoes" rows="2">${escapeHtml(data.observacoes || '')}</textarea></div>
     </form>`,
     `<button class="btn btn-outline modal-close-btn">Cancelar</button>
      <button class="btn btn-primary" id="os-save">Salvar</button>`);
@@ -313,9 +361,11 @@ async function showOSForm(id) {
 
 async function deleteOS(id) {
   if (!confirm('Deseja excluir esta ordem?')) return;
-  await API.ordensServico.delete(id);
-  showToast('Ordem excluída', 'success');
-  renderOrdensServico();
+  try {
+    await API.ordensServico.delete(id);
+    showToast('Ordem excluída', 'success');
+    renderOrdensServico();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 // ===================== CLIENTES =====================
@@ -339,8 +389,8 @@ async function renderClientes() {
 function renderClientesRows(data) {
   if (!data.length) return '<tr class="empty-row"><td colspan="7">Nenhum registro encontrado</td></tr>';
   return data.map(c => `<tr>
-    <td>${c.id}</td><td>${c.nome}</td><td>${c.cpf_cnpj || '-'}</td><td>${c.telefone || '-'}</td>
-    <td>${c.email || '-'}</td><td>${c.cidade || '-'}</td>
+    <td>${c.id}</td><td>${escapeHtml(c.nome)}</td><td>${escapeHtml(c.cpf_cnpj || '-')}</td><td>${escapeHtml(c.telefone || '-')}</td>
+    <td>${escapeHtml(c.email || '-')}</td><td>${escapeHtml(c.cidade || '-')}</td>
     <td class="actions-cell">
       <button class="btn-icon edit" onclick="showClienteForm(${c.id})"><i class="fas fa-edit"></i></button>
       <button class="btn-icon delete" onclick="deleteCliente(${c.id})"><i class="fas fa-trash"></i></button>
@@ -362,16 +412,16 @@ async function showClienteForm(id) {
   if (id) data = await API.clientes.get(id);
   openModal(id ? 'Editar Cliente' : 'Novo Cliente', `
     <form id="entity-form">
-      <div class="form-group"><label>Nome *</label><input name="nome" value="${data.nome || ''}" required></div>
+      <div class="form-group"><label>Nome *</label><input name="nome" value="${escapeHtml(data.nome || '')}" required></div>
       <div class="form-row">
-        <div class="form-group"><label>CPF/CNPJ</label><input name="cpf_cnpj" value="${data.cpf_cnpj || ''}"></div>
-        <div class="form-group"><label>Telefone</label><input name="telefone" value="${data.telefone || ''}"></div>
+        <div class="form-group"><label>CPF/CNPJ</label><input name="cpf_cnpj" value="${escapeHtml(data.cpf_cnpj || '')}"></div>
+        <div class="form-group"><label>Telefone</label><input name="telefone" value="${escapeHtml(data.telefone || '')}"></div>
       </div>
-      <div class="form-group"><label>Email</label><input name="email" type="email" value="${data.email || ''}"></div>
-      <div class="form-group"><label>Endereço</label><input name="endereco" value="${data.endereco || ''}"></div>
+      <div class="form-group"><label>Email</label><input name="email" type="email" value="${escapeHtml(data.email || '')}"></div>
+      <div class="form-group"><label>Endereço</label><input name="endereco" value="${escapeHtml(data.endereco || '')}"></div>
       <div class="form-row">
-        <div class="form-group"><label>Cidade</label><input name="cidade" value="${data.cidade || ''}"></div>
-        <div class="form-group"><label>Estado</label><input name="estado" value="${data.estado || ''}"></div>
+        <div class="form-group"><label>Cidade</label><input name="cidade" value="${escapeHtml(data.cidade || '')}"></div>
+        <div class="form-group"><label>Estado</label><input name="estado" value="${escapeHtml(data.estado || '')}"></div>
       </div>
     </form>`,
     `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
@@ -380,8 +430,10 @@ async function showClienteForm(id) {
 
 async function deleteCliente(id) {
   if (!confirm('Deseja excluir este cliente?')) return;
-  await API.clientes.delete(id);
-  showToast('Cliente excluído', 'success'); renderClientes();
+  try {
+    await API.clientes.delete(id);
+    showToast('Cliente excluído', 'success'); renderClientes();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 // ===================== PRODUTOS =====================
@@ -405,9 +457,9 @@ async function renderProdutos() {
 function renderProdutosRows(data) {
   if (!data.length) return '<tr class="empty-row"><td colspan="8">Nenhum registro encontrado</td></tr>';
   return data.map(p => `<tr>
-    <td>${p.id}</td><td>${p.nome}</td><td>${p.codigo || '-'}</td><td>${formatCurrency(p.preco)}</td>
-    <td>${p.estoque}${p.estoque <= p.estoque_minimo ? ' ⚠️' : ''}</td><td>${p.categoria || '-'}</td>
-    <td>${p.fornecedor_nome || '-'}</td>
+    <td>${p.id}</td><td>${escapeHtml(p.nome)}</td><td>${escapeHtml(p.codigo || '-')}</td><td>${formatCurrency(p.preco)}</td>
+    <td>${p.estoque}${p.estoque <= p.estoque_minimo ? ' <span class="stock-alert">baixo</span>' : ''}</td><td>${escapeHtml(p.categoria || '-')}</td>
+    <td>${escapeHtml(p.fornecedor_nome || '-')}</td>
     <td class="actions-cell">
       <button class="btn-icon edit" onclick="showProdutoForm(${p.id})"><i class="fas fa-edit"></i></button>
       <button class="btn-icon delete" onclick="deleteProduto(${p.id})"><i class="fas fa-trash"></i></button>
@@ -426,19 +478,16 @@ async function loadProdutos() {
 
 async function showProdutoForm(id) {
   let data = {};
-  if (id) {
-    const list = await API.produtos.list({ page: 1, limit: 1000 });
-    data = list.data.find(p => p.id === id) || {};
-  }
+  if (id) data = await API.produtos.get(id);
   const fornecedores = await API.fornecedores.all();
   openModal(id ? 'Editar Produto' : 'Novo Produto', `
     <form id="entity-form">
-      <div class="form-group"><label>Nome *</label><input name="nome" value="${data.nome || ''}" required></div>
+      <div class="form-group"><label>Nome *</label><input name="nome" value="${escapeHtml(data.nome || '')}" required></div>
       <div class="form-row">
-        <div class="form-group"><label>Código</label><input name="codigo" value="${data.codigo || ''}"></div>
-        <div class="form-group"><label>Categoria</label><input name="categoria" value="${data.categoria || ''}"></div>
+        <div class="form-group"><label>Código</label><input name="codigo" value="${escapeHtml(data.codigo || '')}"></div>
+        <div class="form-group"><label>Categoria</label><input name="categoria" value="${escapeHtml(data.categoria || '')}"></div>
       </div>
-      <div class="form-group"><label>Descrição</label><textarea name="descricao" rows="2">${data.descricao || ''}</textarea></div>
+      <div class="form-group"><label>Descrição</label><textarea name="descricao" rows="2">${escapeHtml(data.descricao || '')}</textarea></div>
       <div class="form-row-3">
         <div class="form-group"><label>Preço</label><input name="preco" type="number" step="0.01" value="${data.preco || 0}"></div>
         <div class="form-group"><label>Estoque</label><input name="estoque" type="number" value="${data.estoque || 0}"></div>
@@ -455,8 +504,10 @@ async function showProdutoForm(id) {
 
 async function deleteProduto(id) {
   if (!confirm('Deseja excluir este produto?')) return;
-  await API.produtos.delete(id);
-  showToast('Produto excluído', 'success'); renderProdutos();
+  try {
+    await API.produtos.delete(id);
+    showToast('Produto excluído', 'success'); renderProdutos();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 // ===================== FORNECEDORES =====================
@@ -480,7 +531,7 @@ async function renderFornecedores() {
 function renderFornecedoresRows(data) {
   if (!data.length) return '<tr class="empty-row"><td colspan="6">Nenhum registro encontrado</td></tr>';
   return data.map(f => `<tr>
-    <td>${f.id}</td><td>${f.nome}</td><td>${f.cnpj || '-'}</td><td>${f.telefone || '-'}</td><td>${f.email || '-'}</td>
+    <td>${f.id}</td><td>${escapeHtml(f.nome)}</td><td>${escapeHtml(f.cnpj || '-')}</td><td>${escapeHtml(f.telefone || '-')}</td><td>${escapeHtml(f.email || '-')}</td>
     <td class="actions-cell">
       <button class="btn-icon edit" onclick="showFornecedorForm(${f.id})"><i class="fas fa-edit"></i></button>
       <button class="btn-icon delete" onclick="deleteFornecedor(${f.id})"><i class="fas fa-trash"></i></button>
@@ -499,19 +550,16 @@ async function loadFornecedores() {
 
 async function showFornecedorForm(id) {
   let data = {};
-  if (id) {
-    const list = await API.fornecedores.list({ page: 1, limit: 1000 });
-    data = list.data.find(f => f.id === id) || {};
-  }
+  if (id) data = await API.fornecedores.get(id);
   openModal(id ? 'Editar Fornecedor' : 'Novo Fornecedor', `
     <form id="entity-form">
-      <div class="form-group"><label>Nome *</label><input name="nome" value="${data.nome || ''}" required></div>
+      <div class="form-group"><label>Nome *</label><input name="nome" value="${escapeHtml(data.nome || '')}" required></div>
       <div class="form-row">
-        <div class="form-group"><label>CNPJ</label><input name="cnpj" value="${data.cnpj || ''}"></div>
-        <div class="form-group"><label>Telefone</label><input name="telefone" value="${data.telefone || ''}"></div>
+        <div class="form-group"><label>CNPJ</label><input name="cnpj" value="${escapeHtml(data.cnpj || '')}"></div>
+        <div class="form-group"><label>Telefone</label><input name="telefone" value="${escapeHtml(data.telefone || '')}"></div>
       </div>
-      <div class="form-group"><label>Email</label><input name="email" type="email" value="${data.email || ''}"></div>
-      <div class="form-group"><label>Endereço</label><input name="endereco" value="${data.endereco || ''}"></div>
+      <div class="form-group"><label>Email</label><input name="email" type="email" value="${escapeHtml(data.email || '')}"></div>
+      <div class="form-group"><label>Endereço</label><input name="endereco" value="${escapeHtml(data.endereco || '')}"></div>
     </form>`,
     `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
   bindEntitySave(id, 'fornecedores', renderFornecedores);
@@ -519,8 +567,10 @@ async function showFornecedorForm(id) {
 
 async function deleteFornecedor(id) {
   if (!confirm('Deseja excluir este fornecedor?')) return;
-  await API.fornecedores.delete(id);
-  showToast('Fornecedor excluído', 'success'); renderFornecedores();
+  try {
+    await API.fornecedores.delete(id);
+    showToast('Fornecedor excluído', 'success'); renderFornecedores();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 // ===================== USUÁRIOS =====================
@@ -544,7 +594,7 @@ async function renderUsuarios() {
 function renderUsuariosRows(data) {
   if (!data.length) return '<tr class="empty-row"><td colspan="7">Nenhum registro encontrado</td></tr>';
   return data.map(u => `<tr>
-    <td>${u.id}</td><td>${u.nome}</td><td>${u.email}</td><td>${u.cargo}</td>
+    <td>${u.id}</td><td>${escapeHtml(u.nome)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.cargo)}</td>
     <td><span class="status-badge ${u.ativo ? 'ativo' : 'inativo'}">${u.ativo ? 'Ativo' : 'Inativo'}</span></td>
     <td>${formatDateTime(u.criado_em)}</td>
     <td class="actions-cell">
@@ -565,15 +615,12 @@ async function loadUsuarios() {
 
 async function showUsuarioForm(id) {
   let data = {};
-  if (id) {
-    const list = await API.usuarios.list({ page: 1, limit: 1000 });
-    data = list.data.find(u => u.id === id) || {};
-  }
+  if (id) data = await API.usuarios.get(id);
   openModal(id ? 'Editar Usuário' : 'Novo Usuário', `
     <form id="entity-form">
-      <div class="form-group"><label>Nome *</label><input name="nome" value="${data.nome || ''}" required></div>
+      <div class="form-group"><label>Nome *</label><input name="nome" value="${escapeHtml(data.nome || '')}" required></div>
       <div class="form-row">
-        <div class="form-group"><label>Email *</label><input name="email" type="email" value="${data.email || ''}" required></div>
+        <div class="form-group"><label>Email *</label><input name="email" type="email" value="${escapeHtml(data.email || '')}" required></div>
         <div class="form-group"><label>Senha ${id ? '(deixe vazio p/ manter)' : '*'}</label><input name="senha" type="password" ${id ? '' : 'required'}></div>
       </div>
       <div class="form-row">
@@ -592,17 +639,23 @@ async function showUsuarioForm(id) {
 
 async function deleteUsuario(id) {
   if (!confirm('Deseja desativar este usuário?')) return;
-  await API.usuarios.delete(id);
-  showToast('Usuário desativado', 'success'); renderUsuarios();
+  try {
+    await API.usuarios.delete(id);
+    showToast('Usuário desativado', 'success'); renderUsuarios();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 // ===================== VENDAS (POS) =====================
 let cart = [];
+let posProdutos = [];
+let erpConfig = {};
 
 async function renderVendas() {
-  const [produtos, clientes, caixaStatus] = await Promise.all([
-    API.produtos.all(), API.clientes.all(), API.caixa.status()
+  const [produtos, clientes, caixaStatus, cfg] = await Promise.all([
+    API.produtos.all(), API.clientes.all(), API.caixa.status(), API.config.get()
   ]);
+  posProdutos = produtos;
+  erpConfig = cfg || {};
 
   if (!caixaStatus.aberto) {
     document.getElementById('content').innerHTML = `
@@ -621,17 +674,10 @@ async function renderVendas() {
     <div class="pos-layout">
       <div class="pos-products">
         <div class="search-box" style="margin-bottom:12px;max-width:100%">
-          <i class="fas fa-search"></i>
-          <input type="text" id="pos-search" placeholder="Buscar produto...">
+          <i class="fas fa-barcode"></i>
+          <input type="text" id="pos-search" placeholder="Buscar produto ou código de barras..." autofocus>
         </div>
-        <div class="product-grid" id="product-grid">
-          ${produtos.map(p => `
-            <div class="product-card" onclick="addToCart(${p.id}, '${p.nome.replace(/'/g,"\\'")}', ${p.preco}, ${p.estoque})">
-              <h4>${p.nome}</h4>
-              <div class="price">${formatCurrency(p.preco)}</div>
-              <div class="stock">Estoque: ${p.estoque}</div>
-            </div>`).join('')}
-        </div>
+        <div class="product-grid" id="product-grid">${renderPosGrid(produtos)}</div>
       </div>
       <div class="cart-panel">
         <div class="cart-header"><h3><i class="fas fa-shopping-cart"></i> Carrinho</h3></div>
@@ -639,16 +685,21 @@ async function renderVendas() {
         <div class="cart-footer">
           <div class="form-group"><label>Cliente</label>
             <select id="venda-cliente"><option value="">Avulso</option>
-              ${clientes.map(c => `<option value="${c.id}">${c.nome}</option>`).join('')}
+              ${clientes.map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('')}
             </select></div>
           <div class="form-row">
-            <div class="form-group"><label>Desconto</label><input id="venda-desconto" type="number" step="0.01" value="0"></div>
+            <div class="form-group"><label>Desconto</label><input id="venda-desconto" type="number" step="0.01" min="0" value="0"></div>
             <div class="form-group"><label>Pagamento</label>
               <select id="venda-pagamento">
                 <option>Dinheiro</option><option>Cartão Débito</option><option>Cartão Crédito</option><option>PIX</option>
               </select></div>
           </div>
+          <div class="form-row" id="pos-extra-fields">
+            <div class="form-group"><label>Valor recebido</label><input id="venda-recebido" type="number" step="0.01" min="0" value="0"></div>
+            <div class="form-group"><label>Parcelas</label><input id="venda-parcelas" type="number" min="1" value="1"></div>
+          </div>
           <div class="cart-total"><span>Total:</span><span id="cart-total">${formatCurrency(0)}</span></div>
+          <div class="cart-troco muted" id="cart-troco"></div>
           <button class="btn btn-success btn-block" id="finalizar-venda"><i class="fas fa-check"></i> Finalizar Venda</button>
         </div>
       </div>
@@ -656,27 +707,83 @@ async function renderVendas() {
 
   cart = [];
   updateCart();
-  document.getElementById('pos-search').oninput = debounce((e) => {
-    const q = e.target.value.toLowerCase();
-    document.querySelectorAll('.product-card').forEach(card => {
-      card.style.display = card.querySelector('h4').textContent.toLowerCase().includes(q) ? '' : 'none';
-    });
-  }, 300);
-
+  const searchEl = document.getElementById('pos-search');
+  searchEl.oninput = debounce((e) => filterPosProducts(e.target.value), 200);
+  searchEl.onkeydown = async (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const q = e.target.value.trim();
+    if (!q) return;
+    try {
+      const p = await API.produtos.byCodigo(q);
+      await addToCart(p.id, p.nome, p.preco, p.estoque);
+      e.target.value = '';
+      filterPosProducts('');
+    } catch {
+      filterPosProducts(q);
+    }
+  };
   document.getElementById('venda-desconto').oninput = updateCart;
+  document.getElementById('venda-recebido').oninput = updateCart;
+  document.getElementById('venda-pagamento').onchange = updateCart;
   document.getElementById('finalizar-venda').onclick = finalizarVenda;
 }
 
-function addToCart(id, nome, preco, estoque) {
+function renderPosGrid(produtos) {
+  if (!produtos.length) return '<p class="muted">Nenhum produto cadastrado</p>';
+  return produtos.map(p => `
+    <div class="product-card" data-id="${p.id}" data-nome="${escapeHtml(p.nome)}" data-codigo="${escapeHtml(p.codigo || '')}">
+      <h4>${escapeHtml(p.nome)}</h4>
+      <div class="price">${formatCurrency(p.preco)}</div>
+      <div class="stock">Estoque: ${p.estoque}</div>
+    </div>`).join('');
+}
+
+function filterPosProducts(q) {
+  const term = (q || '').toLowerCase();
+  document.querySelectorAll('.product-card').forEach(card => {
+    const nome = (card.dataset.nome || '').toLowerCase();
+    const codigo = (card.dataset.codigo || '').toLowerCase();
+    card.style.display = (!term || nome.includes(term) || codigo.includes(term)) ? '' : 'none';
+  });
+}
+
+document.addEventListener('click', (e) => {
+  const card = e.target.closest('.product-card');
+  if (!card || !card.closest('#product-grid')) return;
+  const id = +card.dataset.id;
+  const p = posProdutos.find(x => x.id === id);
+  if (p) addToCart(p.id, p.nome, p.preco, p.estoque);
+});
+
+async function addToCart(id, nome, preco, estoque) {
   if (estoque <= 0) { showToast('Produto sem estoque', 'error'); return; }
   const existing = cart.find(i => i.produto_id === id);
+  let qtd = 1;
+  if (erpConfig.perguntar_quantidade === '1' && !existing) {
+    const asked = prompt('Quantidade:', '1');
+    if (asked === null) return;
+    qtd = parseInt(asked, 10) || 1;
+  }
   if (existing) {
-    if (existing.quantidade >= estoque) { showToast('Estoque insuficiente', 'error'); return; }
-    existing.quantidade++;
+    if (existing.quantidade + qtd > estoque) { showToast('Estoque insuficiente', 'error'); return; }
+    existing.quantidade += qtd;
   } else {
-    cart.push({ produto_id: id, nome, preco_unitario: preco, quantidade: 1, estoque });
+    if (qtd > estoque) { showToast('Estoque insuficiente', 'error'); return; }
+    cart.push({ produto_id: id, nome, preco_unitario: preco, quantidade: qtd, estoque });
   }
   updateCart();
+}
+
+function getCartTotal() {
+  const desconto = parseFloat(document.getElementById('venda-desconto')?.value) || 0;
+  const subtotal = cart.reduce((s, i) => s + i.quantidade * i.preco_unitario, 0);
+  const forma = document.getElementById('venda-pagamento')?.value || '';
+  let taxa = 0;
+  let total = Math.max(0, subtotal - desconto);
+  if (forma === 'Cartão Crédito') taxa = total * (parseFloat(erpConfig.taxa_credito || 0) / 100);
+  if (forma === 'Cartão Débito') taxa = total * (parseFloat(erpConfig.taxa_debito || 0) / 100);
+  return { subtotal, desconto, taxa, total: total + taxa };
 }
 
 function updateCart() {
@@ -687,20 +794,37 @@ function updateCart() {
   } else {
     container.innerHTML = cart.map((item, idx) => `
       <div class="cart-item">
-        <div class="cart-item-info"><strong>${item.nome}</strong><br>${formatCurrency(item.preco_unitario)}</div>
+        <div class="cart-item-info"><strong>${escapeHtml(item.nome)}</strong><br>${formatCurrency(item.preco_unitario)}</div>
         <div class="cart-item-qty">
-          <button onclick="changeQty(${idx},-1)">-</button>
+          <button type="button" data-qty="${idx}" data-delta="-1">-</button>
           <span>${item.quantidade}</span>
-          <button onclick="changeQty(${idx},1)">+</button>
+          <button type="button" data-qty="${idx}" data-delta="1">+</button>
         </div>
         <div>${formatCurrency(item.quantidade * item.preco_unitario)}</div>
-        <button class="btn-icon delete" onclick="removeFromCart(${idx})"><i class="fas fa-times"></i></button>
+        <button class="btn-icon delete" type="button" data-remove="${idx}"><i class="fas fa-times"></i></button>
       </div>`).join('');
+    container.querySelectorAll('[data-qty]').forEach(btn => {
+      btn.onclick = () => changeQty(+btn.dataset.qty, +btn.dataset.delta);
+    });
+    container.querySelectorAll('[data-remove]').forEach(btn => {
+      btn.onclick = () => removeFromCart(+btn.dataset.remove);
+    });
   }
-  const desconto = parseFloat(document.getElementById('venda-desconto')?.value) || 0;
-  const total = cart.reduce((s, i) => s + i.quantidade * i.preco_unitario, 0) - desconto;
+  const { total } = getCartTotal();
   const totalEl = document.getElementById('cart-total');
-  if (totalEl) totalEl.textContent = formatCurrency(Math.max(0, total));
+  if (totalEl) totalEl.textContent = formatCurrency(total);
+  const recebido = parseFloat(document.getElementById('venda-recebido')?.value) || 0;
+  const trocoEl = document.getElementById('cart-troco');
+  if (trocoEl) {
+    const forma = document.getElementById('venda-pagamento')?.value;
+    if (forma === 'Dinheiro' && recebido > 0) {
+      trocoEl.textContent = 'Troco: ' + formatCurrency(Math.max(0, recebido - total));
+    } else if (forma && forma.startsWith('Cartão')) {
+      trocoEl.textContent = 'Taxa cartão inclusa no total';
+    } else {
+      trocoEl.textContent = '';
+    }
+  }
 }
 
 function changeQty(idx, delta) {
@@ -714,17 +838,50 @@ function removeFromCart(idx) { cart.splice(idx, 1); updateCart(); }
 
 async function finalizarVenda() {
   if (!cart.length) { showToast('Adicione produtos ao carrinho', 'error'); return; }
+  const { total } = getCartTotal();
+  const forma = document.getElementById('venda-pagamento').value;
+  const recebido = parseFloat(document.getElementById('venda-recebido').value);
+  if (forma === 'Dinheiro' && recebido > 0 && recebido < total) {
+    showToast('Valor recebido menor que o total', 'error');
+    return;
+  }
   try {
-    await API.vendas.create({
+    const venda = await API.vendas.create({
       cliente_id: document.getElementById('venda-cliente').value || null,
       itens: cart.map(i => ({ produto_id: i.produto_id, quantidade: i.quantidade, preco_unitario: i.preco_unitario })),
       desconto: parseFloat(document.getElementById('venda-desconto').value) || 0,
-      forma_pagamento: document.getElementById('venda-pagamento').value,
-      usuario_id: currentUser.id
+      forma_pagamento: forma,
+      usuario_id: currentUser.id,
+      valor_recebido: recebido || total,
+      parcelas: parseInt(document.getElementById('venda-parcelas').value, 10) || 1
     });
     showToast('Venda realizada com sucesso!', 'success');
+    if (confirm('Deseja imprimir o cupom?')) await printCupom(venda.id);
     renderVendas();
   } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function printCupom(id) {
+  const v = await API.vendas.get(id);
+  const c = v.cupom || {};
+  const area = document.getElementById('print-area');
+  area.innerHTML = `
+    <div class="cupom">
+      <h3>${escapeHtml(c.cupom_titulo || 'ERP ISAC')}</h3>
+      <pre>${escapeHtml(c.cupom_cabecalho || '')}</pre>
+      <p>Venda #${v.id} · ${formatDateTime(v.criado_em)}</p>
+      <p>Cliente: ${escapeHtml(v.cliente_nome || 'Avulso')}</p>
+      <table>
+        ${(v.itens || []).map(i => `<tr><td>${escapeHtml(i.produto_nome)} x${i.quantidade}</td><td>${formatCurrency(i.subtotal)}</td></tr>`).join('')}
+      </table>
+      <p><strong>Total: ${formatCurrency(v.total)}</strong></p>
+      <p>Pagamento: ${escapeHtml(v.forma_pagamento || '-')}</p>
+      ${v.troco ? `<p>Troco: ${formatCurrency(v.troco)}</p>` : ''}
+      <pre>${escapeHtml(c.cupom_rodape || '')}</pre>
+    </div>`;
+  area.classList.remove('hidden');
+  window.print();
+  area.classList.add('hidden');
 }
 
 // ===================== CAIXA =====================
@@ -735,12 +892,13 @@ async function renderCaixa() {
 
   document.getElementById('content').innerHTML = `
     ${pageHeader('Gerenciar caixa', 'Dashboard / Gerenciar caixa')}
-    <div class="stats-row">
+    <div class="stats-row stats-row-4">
       <div class="stat-card ${status.aberto ? 'green' : 'red'}">
         <h4>Status</h4><div class="stat-value">${status.aberto ? 'Aberto' : 'Fechado'}</div>
       </div>
       <div class="stat-card blue"><h4>Saldo atual</h4><div class="stat-value">${formatCurrency(status.saldo)}</div></div>
       <div class="stat-card teal"><h4>Entradas hoje</h4><div class="stat-value">${formatCurrency(status.entradas)}</div></div>
+      <div class="stat-card orange"><h4>Saídas hoje</h4><div class="stat-value">${formatCurrency(status.saidas)}</div></div>
     </div>
     <div class="card" style="text-align:center;padding:24px">
       ${status.aberto ? `
@@ -766,8 +924,10 @@ async function renderCaixa() {
   if (status.aberto) {
     document.getElementById('fechar-caixa').onclick = async () => {
       if (!confirm('Deseja fechar o caixa?')) return;
-      await API.caixa.fechar();
-      showToast('Caixa fechado', 'success'); renderCaixa();
+      try {
+        await API.caixa.fechar();
+        showToast('Caixa fechado', 'success'); renderCaixa();
+      } catch (err) { showToast(err.message, 'error'); }
     };
     document.getElementById('nova-saida').onclick = () => showMovimentoForm('Saída');
   } else {
@@ -807,8 +967,10 @@ function showMovimentoForm(tipo) {
     body.tipo = tipo;
     body.valor = parseFloat(body.valor);
     body.usuario_id = currentUser.id;
-    await API.caixa.movimento(body);
-    closeModal(); showToast('Movimento registrado', 'success'); renderCaixa();
+    try {
+      await API.caixa.movimento(body);
+      closeModal(); showToast('Movimento registrado', 'success'); renderCaixa();
+    } catch (err) { showToast(err.message, 'error'); }
   };
 }
 
@@ -821,9 +983,10 @@ async function renderFinanceiro() {
   ]);
 
   document.getElementById('content').innerHTML = `
-    <div class="stats-row">
+    <div class="stats-row stats-row-4">
       <div class="stat-card green"><h4>Receitas</h4><div class="stat-value">${formatCurrency(stats.receitas)}</div></div>
       <div class="stat-card red"><h4>Despesas</h4><div class="stat-value">${formatCurrency(stats.despesas)}</div></div>
+      <div class="stat-card orange"><h4>Pendentes</h4><div class="stat-value">${formatCurrency(stats.pendentes)}</div></div>
       <div class="stat-card blue"><h4>Saldo</h4><div class="stat-value">${formatCurrency(stats.saldo)}</div></div>
     </div>
     ${pageHeader('Financeiro', 'Dashboard / Financeiro')}
@@ -843,7 +1006,7 @@ function renderFinanceiroRows(data) {
   if (!data.length) return '<tr class="empty-row"><td colspan="8">Nenhum registro encontrado</td></tr>';
   return data.map(f => `<tr>
     <td>${f.id}</td><td><span class="status-badge ${f.tipo === 'Receita' ? 'pago' : 'cancelada'}">${f.tipo}</span></td>
-    <td>${f.categoria || '-'}</td><td>${f.descricao || '-'}</td><td>${formatCurrency(f.valor)}</td>
+    <td>${escapeHtml(f.categoria || '-')}</td><td>${escapeHtml(f.descricao || '-')}</td><td>${formatCurrency(f.valor)}</td>
     <td>${formatDate(f.data_vencimento)}</td><td><span class="status-badge ${statusClass(f.status)}">${f.status}</span></td>
     <td class="actions-cell">
       <button class="btn-icon edit" onclick="showFinanceiroForm(${f.id})"><i class="fas fa-edit"></i></button>
@@ -863,10 +1026,7 @@ async function loadFinanceiro() {
 
 async function showFinanceiroForm(id) {
   let data = {};
-  if (id) {
-    const list = await API.financeiro.list({ page: 1, limit: 1000 });
-    data = list.data.find(f => f.id === id) || {};
-  }
+  if (id) data = await API.financeiro.get(id);
   openModal(id ? 'Editar Lançamento' : 'Novo Lançamento', `
     <form id="entity-form">
       <div class="form-row">
@@ -876,13 +1036,13 @@ async function showFinanceiroForm(id) {
           <select name="status"><option ${data.status === 'Pendente' ? 'selected' : ''}>Pendente</option><option ${data.status === 'Pago' ? 'selected' : ''}>Pago</option></select></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Categoria</label><input name="categoria" value="${data.categoria || ''}"></div>
+        <div class="form-group"><label>Categoria</label><input name="categoria" value="${escapeHtml(data.categoria || '')}"></div>
         <div class="form-group"><label>Valor</label><input name="valor" type="number" step="0.01" value="${data.valor || 0}" required></div>
       </div>
-      <div class="form-group"><label>Descrição</label><input name="descricao" value="${data.descricao || ''}"></div>
+      <div class="form-group"><label>Descrição</label><input name="descricao" value="${escapeHtml(data.descricao || '')}"></div>
       <div class="form-row">
-        <div class="form-group"><label>Vencimento</label><input name="data_vencimento" type="date" value="${data.data_vencimento || ''}"></div>
-        <div class="form-group"><label>Pagamento</label><input name="data_pagamento" type="date" value="${data.data_pagamento || ''}"></div>
+        <div class="form-group"><label>Vencimento</label><input name="data_vencimento" type="date" value="${toInputDate(data.data_vencimento)}"></div>
+        <div class="form-group"><label>Pagamento</label><input name="data_pagamento" type="date" value="${toInputDate(data.data_pagamento)}"></div>
       </div>
     </form>`,
     `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
@@ -891,8 +1051,10 @@ async function showFinanceiroForm(id) {
 
 async function deleteFinanceiro(id) {
   if (!confirm('Deseja excluir este lançamento?')) return;
-  await API.financeiro.delete(id);
-  showToast('Lançamento excluído', 'success'); renderFinanceiro();
+  try {
+    await API.financeiro.delete(id);
+    showToast('Lançamento excluído', 'success'); renderFinanceiro();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 // ===================== HISTÓRICO DE VENDAS =====================
@@ -915,11 +1077,15 @@ async function renderHistoricoVendas() {
 function renderVendasRows(data) {
   if (!data.length) return '<tr class="empty-row"><td colspan="9">Nenhum registro encontrado</td></tr>';
   return data.map(v => `<tr>
-    <td>${v.id}</td><td>${v.cliente_nome || 'Avulso'}</td><td>${formatCurrency(v.total)}</td>
-    <td>${formatCurrency(v.desconto)}</td><td>${v.forma_pagamento || '-'}</td>
-    <td><span class="status-badge pago">${v.status}</span></td><td>${v.usuario_nome || '-'}</td>
+    <td>${v.id}</td><td>${escapeHtml(v.cliente_nome || 'Avulso')}</td><td>${formatCurrency(v.total)}</td>
+    <td>${formatCurrency(v.desconto)}</td><td>${escapeHtml(v.forma_pagamento || '-')}</td>
+    <td><span class="status-badge ${statusClass(v.status)}">${escapeHtml(v.status)}</span></td><td>${escapeHtml(v.usuario_nome || '-')}</td>
     <td>${formatDateTime(v.criado_em)}</td>
-    <td><button class="btn-icon view" onclick="viewVenda(${v.id})"><i class="fas fa-eye"></i></button></td>
+    <td class="actions-cell">
+      <button class="btn-icon view" onclick="viewVenda(${v.id})" title="Detalhes"><i class="fas fa-eye"></i></button>
+      <button class="btn-icon print" onclick="printCupom(${v.id})" title="Cupom"><i class="fas fa-print"></i></button>
+      ${v.status !== 'Cancelada' ? `<button class="btn-icon delete" onclick="cancelarVenda(${v.id})" title="Cancelar"><i class="fas fa-ban"></i></button>` : ''}
+    </td>
   </tr>`).join('');
 }
 
@@ -936,20 +1102,37 @@ async function loadHistoricoVendas() {
 async function viewVenda(id) {
   const v = await API.vendas.get(id);
   openModal(`Venda #${v.id}`, `
-    <p><strong>Cliente:</strong> ${v.cliente_nome || 'Avulso'}</p>
+    <p><strong>Cliente:</strong> ${escapeHtml(v.cliente_nome || 'Avulso')}</p>
     <p><strong>Total:</strong> ${formatCurrency(v.total)} | <strong>Desconto:</strong> ${formatCurrency(v.desconto)}</p>
-    <p><strong>Pagamento:</strong> ${v.forma_pagamento} | <strong>Data:</strong> ${formatDateTime(v.criado_em)}</p>
+    <p><strong>Pagamento:</strong> ${escapeHtml(v.forma_pagamento || '-')} | <strong>Data:</strong> ${formatDateTime(v.criado_em)}</p>
+    <p><strong>Status:</strong> ${escapeHtml(v.status || '-')}${v.troco ? ` | <strong>Troco:</strong> ${formatCurrency(v.troco)}` : ''}</p>
     <table class="data-table" style="margin-top:12px">
       <thead><tr><th>Produto</th><th>Qtd</th><th>Preço</th><th>Subtotal</th></tr></thead>
-      <tbody>${v.itens.map(i => `<tr><td>${i.produto_nome}</td><td>${i.quantidade}</td><td>${formatCurrency(i.preco_unitario)}</td><td>${formatCurrency(i.subtotal)}</td></tr>`).join('')}
-      </tbody></table>`, `<button class="btn btn-outline modal-close-btn">Fechar</button>`);
+      <tbody>${(v.itens || []).map(i => `<tr><td>${escapeHtml(i.produto_nome)}</td><td>${i.quantidade}</td><td>${formatCurrency(i.preco_unitario)}</td><td>${formatCurrency(i.subtotal)}</td></tr>`).join('')}
+      </tbody></table>`,
+    `<button class="btn btn-outline modal-close-btn">Fechar</button>
+     <button class="btn btn-primary" id="venda-print">Imprimir</button>
+     ${v.status !== 'Cancelada' ? '<button class="btn btn-danger" id="venda-cancel">Cancelar venda</button>' : ''}`);
   document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('venda-print').onclick = () => { closeModal(); printCupom(id); };
+  const cancelBtn = document.getElementById('venda-cancel');
+  if (cancelBtn) cancelBtn.onclick = () => { closeModal(); cancelarVenda(id); };
+}
+
+async function cancelarVenda(id) {
+  if (!confirm('Deseja cancelar esta venda? O estoque será devolvido.')) return;
+  try {
+    await API.vendas.cancelar(id);
+    showToast('Venda cancelada', 'success');
+    renderHistoricoVendas();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 // ===================== RELATÓRIO =====================
 async function renderRelatorio() {
   const r = await API.relatorio();
-  const maxVenda = Math.max(...r.vendasPorMes.map(v => v.total || 0), 1);
+  const vendasMes = [...(r.vendasPorMes || [])].reverse();
+  const maxVenda = Math.max(...vendasMes.map(v => v.total || 0), 1);
 
   document.getElementById('content').innerHTML = `
     ${pageHeader('Relatório geral', 'Dashboard / Relatório geral')}
@@ -962,9 +1145,9 @@ async function renderRelatorio() {
       <div class="card report-section">
         <h3>Vendas por mês</h3>
         <div class="chart-placeholder">
-          ${r.vendasPorMes.reverse().map(v => `
+          ${vendasMes.map(v => `
             <div class="chart-bar" style="height:${((v.total || 0) / maxVenda * 160)}px" title="${formatCurrency(v.total)}">
-              <span>${v.mes}</span>
+              <span>${escapeHtml(v.mes)}</span>
             </div>`).join('')}
         </div>
       </div>
@@ -973,7 +1156,7 @@ async function renderRelatorio() {
         <table class="report-table">
           <thead><tr><th>Produto</th><th>Qtd</th><th>Total</th></tr></thead>
           <tbody>${r.produtosMaisVendidos.length ? r.produtosMaisVendidos.map(p => `
-            <tr><td>${p.nome}</td><td>${p.qtd}</td><td>${formatCurrency(p.total)}</td></tr>
+            <tr><td>${escapeHtml(p.nome)}</td><td>${p.qtd}</td><td>${formatCurrency(p.total)}</td></tr>
           `).join('') : '<tr><td colspan="3">Sem dados</td></tr>'}
           </tbody>
         </table>
@@ -985,7 +1168,7 @@ async function renderRelatorio() {
         <table class="report-table">
           <thead><tr><th>Cliente</th><th>Compras</th><th>Total</th></tr></thead>
           <tbody>${r.clientesTop.length ? r.clientesTop.map(c => `
-            <tr><td>${c.nome}</td><td>${c.qtd}</td><td>${formatCurrency(c.total)}</td></tr>
+            <tr><td>${escapeHtml(c.nome)}</td><td>${c.qtd}</td><td>${formatCurrency(c.total)}</td></tr>
           `).join('') : '<tr><td colspan="3">Sem dados</td></tr>'}
           </tbody>
         </table>
@@ -995,11 +1178,77 @@ async function renderRelatorio() {
         <table class="report-table">
           <thead><tr><th>Tipo</th><th>Status</th><th>Total</th></tr></thead>
           <tbody>${r.financeiroResumo.length ? r.financeiroResumo.map(f => `
-            <tr><td>${f.tipo}</td><td>${f.status}</td><td>${formatCurrency(f.total)}</td></tr>
+            <tr><td>${escapeHtml(f.tipo)}</td><td>${escapeHtml(f.status)}</td><td>${formatCurrency(f.total)}</td></tr>
           `).join('') : '<tr><td colspan="3">Sem dados</td></tr>'}
           </tbody>
         </table>
       </div>
+    </div>`;
+}
+
+// ===================== CONFIGURAÇÕES =====================
+async function renderConfiguracoes() {
+  const cfg = await API.config.get();
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Configurações', 'Dashboard / Configurações')}
+    <form id="config-form">
+      <div class="card">
+        <h3>Cupom fiscal</h3>
+        <div class="form-group"><label>Título</label><input name="cupom_titulo" value="${escapeHtml(cfg.cupom_titulo || '')}"></div>
+        <div class="form-group"><label>Cabeçalho</label><textarea name="cupom_cabecalho" rows="3">${escapeHtml(cfg.cupom_cabecalho || '')}</textarea></div>
+        <div class="form-group"><label>Rodapé</label><textarea name="cupom_rodape" rows="2">${escapeHtml(cfg.cupom_rodape || '')}</textarea></div>
+      </div>
+      <div class="card">
+        <h3>PDV</h3>
+        <div class="form-group">
+          <label class="check-label"><input type="checkbox" id="cfg-perguntar" ${cfg.perguntar_quantidade === '1' ? 'checked' : ''}> Perguntar quantidade ao adicionar produto</label>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Taxa cartão crédito (%)</label><input name="taxa_credito" type="number" step="0.01" value="${escapeHtml(cfg.taxa_credito || '0')}"></div>
+          <div class="form-group"><label>Taxa cartão débito (%)</label><input name="taxa_debito" type="number" step="0.01" value="${escapeHtml(cfg.taxa_debito || '0')}"></div>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Salvar configurações</button>
+    </form>`;
+  document.getElementById('config-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = Object.fromEntries(fd);
+    body.perguntar_quantidade = document.getElementById('cfg-perguntar').checked ? '1' : '0';
+    try {
+      await API.config.save(body);
+      erpConfig = { ...erpConfig, ...body };
+      showToast('Configurações salvas', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function renderManual() {
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Manual', 'Dashboard / Manual')}
+    <div class="card manual-card">
+      <h3>Como usar o ERP ISAC</h3>
+      <ol class="manual-list">
+        <li><strong>Login</strong> — Acesse com email e senha. Padrão: admin@erpisac.com / admin123.</li>
+        <li><strong>Dashboard</strong> — Acompanhe vendas, estoque, OS e contas. Troque o período do gráfico.</li>
+        <li><strong>Caixa</strong> — Abra o caixa com um valor inicial antes de vender. Feche ao final do dia.</li>
+        <li><strong>Vendas</strong> — Busque por nome ou código de barras, monte o carrinho e finalize o pagamento.</li>
+        <li><strong>Clientes / Produtos / Fornecedores</strong> — Cadastre, edite e pesquise registros com paginação.</li>
+        <li><strong>Ordens de serviço</strong> — Controle status, datas e valor previsto de cada OS.</li>
+        <li><strong>Financeiro</strong> — Lance receitas e despesas, marque como pago ou pendente.</li>
+        <li><strong>Histórico</strong> — Consulte vendas, imprima cupom ou cancele (estoque volta automaticamente).</li>
+        <li><strong>Relatório</strong> — Veja faturamento mensal, produtos mais vendidos e top clientes.</li>
+        <li><strong>Configurações</strong> — Personalize cupom, taxas de cartão e pergunta de quantidade no PDV.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h3>Atalhos do cabeçalho</h3>
+      <ul class="manual-list">
+        <li>Sino: notificações de estoque baixo, OS pronta e contas atrasadas.</li>
+        <li>Engrenagem: abre Configurações.</li>
+        <li>Interruptor: tema claro/escuro.</li>
+        <li>Calculadora e tela cheia: ferramentas rápidas.</li>
+      </ul>
     </div>`;
 }
 
@@ -1018,13 +1267,16 @@ function bindTableEvents(pageKey, result, reloadFn) {
 function bindEntitySave(id, apiKey, rerender, transform) {
   document.querySelector('.modal-close-btn').onclick = closeModal;
   document.getElementById('entity-save').onclick = async () => {
-    const fd = new FormData(document.getElementById('entity-form'));
+    const form = document.getElementById('entity-form');
+    if (form && !form.reportValidity()) return;
+    const fd = new FormData(form);
     const body = Object.fromEntries(fd);
     if (transform) transform(body);
     if (body.preco !== undefined) body.preco = parseFloat(body.preco);
     if (body.estoque !== undefined) body.estoque = parseInt(body.estoque);
     if (body.estoque_minimo !== undefined) body.estoque_minimo = parseInt(body.estoque_minimo);
     if (body.fornecedor_id !== undefined) body.fornecedor_id = body.fornecedor_id || null;
+    if (body.cliente_id !== undefined) body.cliente_id = body.cliente_id || null;
     try {
       if (id) await API[apiKey].update(id, body);
       else await API[apiKey].create(body);
