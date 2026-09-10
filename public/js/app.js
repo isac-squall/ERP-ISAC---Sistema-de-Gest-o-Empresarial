@@ -81,7 +81,10 @@ function bindGlobalEvents() {
     if (!panel.classList.contains('hidden')) await refreshNotificacoes(true);
   };
   document.getElementById('notif-panel').onclick = (e) => e.stopPropagation();
-  document.addEventListener('click', () => document.getElementById('notif-panel')?.classList.add('hidden'));
+  document.addEventListener('click', () => {
+    document.getElementById('notif-panel')?.classList.add('hidden');
+    closeProdutoMenus();
+  });
 
   document.getElementById('fullscreen-btn').onclick = () => {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen();
@@ -442,28 +445,94 @@ async function renderProdutos() {
   const result = await API.produtos.list({ search: st.search, page: st.page, limit: st.limit });
   document.getElementById('content').innerHTML = `
     ${pageHeader('Produtos', 'Dashboard / Produtos')}
-    ${renderTableToolbar(st.search, `Total de produtos: ${result.total}`, 'Novo Produto')}
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Pesquisar..." value="${escapeHtml(st.search || '')}" id="table-search">
+      </div>
+      <span class="toolbar-info">Total de produtos: ${result.total}</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn-icon-square" id="produtos-settings" title="Opções"><i class="fas fa-cog"></i></button>
+      <button class="btn btn-success" id="produtos-promocoes"><i class="fas fa-percent"></i> Promocoes</button>
+      <button class="btn btn-primary" id="table-new">Adicionar</button>
+    </div>
     <div class="table-wrapper">
-      <table class="data-table">
-        <thead><tr><th>#</th><th>Nome</th><th>Código</th><th>Preço</th><th>Estoque</th><th>Categoria</th><th>Fornecedor</th><th>Acoes</th></tr></thead>
+      <table class="data-table produtos-table">
+        <thead><tr>
+          <th>#</th>
+          <th>Foto</th>
+          <th>Nome</th>
+          <th>Codigo barras</th>
+          <th>Preço Venda</th>
+          <th>Preço Custo</th>
+          <th>qtd <i class="fas fa-check-circle th-ok"></i></th>
+          <th>qtd <i class="fas fa-exclamation-triangle th-warn"></i></th>
+          <th>Ações</th>
+        </tr></thead>
         <tbody id="table-body">${renderProdutosRows(result.data)}</tbody>
       </table>
       <div id="table-pagination"></div>
     </div>`;
   bindTableEvents('produtos', result, loadProdutos);
   document.getElementById('table-new').onclick = () => showProdutoForm();
+  document.getElementById('produtos-promocoes').onclick = () => showPromocoesLista();
+  document.getElementById('produtos-settings').onclick = () => showProdutosOpcoes();
+}
+
+function produtoFotoHtml(p) {
+  if (p.foto) return `<img class="produto-foto" src="${escapeHtml(p.foto)}" alt="">`;
+  return `<div class="produto-foto produto-foto-placeholder"><i class="fas fa-cube"></i></div>`;
 }
 
 function renderProdutosRows(data) {
-  if (!data.length) return '<tr class="empty-row"><td colspan="8">Nenhum registro encontrado</td></tr>';
-  return data.map(p => `<tr>
-    <td>${p.id}</td><td>${escapeHtml(p.nome)}</td><td>${escapeHtml(p.codigo || '-')}</td><td>${formatCurrency(p.preco)}</td>
-    <td>${p.estoque}${p.estoque <= p.estoque_minimo ? ' <span class="stock-alert">baixo</span>' : ''}</td><td>${escapeHtml(p.categoria || '-')}</td>
-    <td>${escapeHtml(p.fornecedor_nome || '-')}</td>
+  if (!data.length) return '<tr class="empty-row"><td colspan="9">Nenhum registro encontrado</td></tr>';
+  return data.map((p, i) => `<tr>
+    <td>${i + 1}</td>
+    <td>${produtoFotoHtml(p)}</td>
+    <td>${escapeHtml(p.nome)}${p.promocao_ativa ? ' <span class="promo-tag">promo</span>' : ''}</td>
+    <td>${escapeHtml(p.codigo || '-')}</td>
+    <td>${formatCurrency(p.preco)}</td>
+    <td>${formatCurrency(p.preco_custo)}</td>
+    <td>${p.estoque}</td>
+    <td>${p.estoque_minimo || 0}</td>
     <td class="actions-cell">
-      <button class="btn-icon edit" onclick="showProdutoForm(${p.id})"><i class="fas fa-edit"></i></button>
-      <button class="btn-icon delete" onclick="deleteProduto(${p.id})"><i class="fas fa-trash"></i></button>
+      <div class="action-menu-wrap">
+        <button class="btn-icon-square btn-menu" onclick="toggleProdutoMenu(event, ${p.id})" title="Ações">
+          <i class="fas fa-ellipsis-v"></i>
+        </button>
+        <div class="action-dropdown" id="produto-menu-${p.id}">
+          <button type="button" onclick="showProdutoForm(${p.id})"><i class="fas fa-edit menu-edit"></i> Editar produto</button>
+          <button type="button" onclick="imprimirPrecoProduto(${p.id})"><i class="fas fa-print menu-print"></i> Imprimir preço</button>
+          <button type="button" onclick="imprimirCodigoBarras(${p.id})"><i class="fas fa-barcode menu-barcode"></i> Código de barras</button>
+          <button type="button" onclick="showProdutoPromocao(${p.id})"><i class="fas fa-percent menu-promo"></i> Promoção do produto</button>
+          <div class="action-sep"></div>
+          <button type="button" onclick="showEstoqueMovimento(${p.id}, 'entrada')"><i class="fas fa-cart-plus menu-in"></i> Compra/entrada</button>
+          <button type="button" onclick="showEstoqueMovimento(${p.id}, 'ajuste')"><i class="fas fa-sync-alt menu-ajuste"></i> Ajustar estoque</button>
+          <button type="button" onclick="showEstoqueMovimento(${p.id}, 'inventario')"><i class="fas fa-clipboard-check menu-inv"></i> Inventário</button>
+          <div class="action-sep"></div>
+          <button type="button" class="danger" onclick="deleteProduto(${p.id})"><i class="fas fa-trash"></i> Excluir produto</button>
+        </div>
+      </div>
     </td></tr>`).join('');
+}
+
+function closeProdutoMenus() {
+  document.querySelectorAll('.action-dropdown.open').forEach(el => el.classList.remove('open'));
+}
+
+function toggleProdutoMenu(e, id) {
+  e.preventDefault();
+  e.stopPropagation();
+  const menu = document.getElementById('produto-menu-' + id);
+  if (!menu) return;
+  const wasOpen = menu.classList.contains('open');
+  closeProdutoMenus();
+  if (wasOpen) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  menu.classList.add('open');
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.right = Math.max(8, window.innerWidth - rect.right) + 'px';
+  menu.style.left = 'auto';
 }
 
 async function loadProdutos() {
@@ -476,38 +545,217 @@ async function loadProdutos() {
   document.querySelector('.toolbar-info').textContent = `Total de produtos: ${result.total}`;
 }
 
+function bindProdutoFoto() {
+  const file = document.getElementById('produto-foto-file');
+  if (!file) return;
+  file.onchange = () => {
+    const f = file.files && file.files[0];
+    if (!f) return;
+    if (f.size > 2 * 1024 * 1024) { showToast('Imagem deve ter no máximo 2MB', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      document.getElementById('produto-foto-value').value = reader.result;
+      const preview = document.getElementById('produto-foto-preview');
+      preview.src = reader.result;
+      preview.classList.remove('hidden');
+      document.getElementById('produto-foto-placeholder')?.classList.add('hidden');
+    };
+    reader.readAsDataURL(f);
+  };
+}
+
 async function showProdutoForm(id) {
+  closeProdutoMenus();
   let data = {};
   if (id) data = await API.produtos.get(id);
   const fornecedores = await API.fornecedores.all();
-  openModal(id ? 'Editar Produto' : 'Novo Produto', `
+  const foto = data.foto || '';
+  openModal(id ? 'Editar produto' : 'Adicionar produto', `
     <form id="entity-form">
+      <div class="form-group">
+        <label>Foto</label>
+        <div class="foto-upload">
+          <img id="produto-foto-preview" class="produto-foto-lg ${foto ? '' : 'hidden'}" src="${escapeHtml(foto)}" alt="">
+          <div id="produto-foto-placeholder" class="produto-foto-lg produto-foto-placeholder ${foto ? 'hidden' : ''}"><i class="fas fa-cube"></i></div>
+          <input type="file" id="produto-foto-file" accept="image/*">
+          <input type="hidden" name="foto" id="produto-foto-value" value="${escapeHtml(foto)}">
+        </div>
+      </div>
       <div class="form-group"><label>Nome *</label><input name="nome" value="${escapeHtml(data.nome || '')}" required></div>
       <div class="form-row">
-        <div class="form-group"><label>Código</label><input name="codigo" value="${escapeHtml(data.codigo || '')}"></div>
+        <div class="form-group"><label>Código de barras</label><input name="codigo" value="${escapeHtml(data.codigo || '')}"></div>
         <div class="form-group"><label>Categoria</label><input name="categoria" value="${escapeHtml(data.categoria || '')}"></div>
       </div>
       <div class="form-group"><label>Descrição</label><textarea name="descricao" rows="2">${escapeHtml(data.descricao || '')}</textarea></div>
-      <div class="form-row-3">
-        <div class="form-group"><label>Preço</label><input name="preco" type="number" step="0.01" value="${data.preco || 0}"></div>
-        <div class="form-group"><label>Estoque</label><input name="estoque" type="number" value="${data.estoque || 0}"></div>
+      <div class="form-row">
+        <div class="form-group"><label>Preço venda</label><input name="preco" type="number" step="0.01" value="${data.preco || 0}"></div>
+        <div class="form-group"><label>Preço custo</label><input name="preco_custo" type="number" step="0.01" value="${data.preco_custo || 0}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Estoque (qtd)</label><input name="estoque" type="number" value="${data.estoque || 0}"></div>
         <div class="form-group"><label>Estoque mínimo</label><input name="estoque_minimo" type="number" value="${data.estoque_minimo || 0}"></div>
       </div>
       <div class="form-group"><label>Fornecedor</label>
         <select name="fornecedor_id"><option value="">Nenhum</option>
-          ${fornecedores.map(f => `<option value="${f.id}" ${data.fornecedor_id == f.id ? 'selected' : ''}>${f.nome}</option>`).join('')}
+          ${fornecedores.map(f => `<option value="${f.id}" ${data.fornecedor_id == f.id ? 'selected' : ''}>${escapeHtml(f.nome)}</option>`).join('')}
         </select></div>
     </form>`,
     `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
   bindEntitySave(id, 'produtos', renderProdutos);
+  bindProdutoFoto();
 }
 
 async function deleteProduto(id) {
+  closeProdutoMenus();
   if (!confirm('Deseja excluir este produto?')) return;
   try {
     await API.produtos.delete(id);
     showToast('Produto excluído', 'success'); renderProdutos();
   } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function imprimirPrecoProduto(id) {
+  closeProdutoMenus();
+  const p = await API.produtos.get(id);
+  const area = document.getElementById('print-area');
+  area.innerHTML = `
+    <div class="etiqueta-preco">
+      <div class="etiqueta-nome">${escapeHtml(p.nome)}</div>
+      ${p.codigo ? `<div class="etiqueta-codigo">${escapeHtml(p.codigo)}</div>` : ''}
+      <div class="etiqueta-valor">${formatCurrency(p.preco)}</div>
+    </div>`;
+  area.classList.remove('hidden');
+  window.print();
+  area.classList.add('hidden');
+}
+
+function drawBarcode(svgId, code) {
+  if (window.JsBarcode) {
+    try { JsBarcode('#' + svgId, code, { format: 'CODE128', width: 2, height: 60, fontSize: 14, margin: 8 }); return; }
+    catch {}
+  }
+  const el = document.getElementById(svgId);
+  if (el) el.outerHTML = `<div class="barcode-fallback">${escapeHtml(code)}</div>`;
+}
+
+async function imprimirCodigoBarras(id) {
+  closeProdutoMenus();
+  const p = await API.produtos.get(id);
+  const codigo = p.codigo || String(p.id).padStart(8, '0');
+  const area = document.getElementById('print-area');
+  area.innerHTML = `
+    <div class="etiqueta-barcode">
+      <div class="etiqueta-nome">${escapeHtml(p.nome)}</div>
+      <svg id="barcode-svg"></svg>
+      <div class="etiqueta-valor">${formatCurrency(p.preco)}</div>
+    </div>`;
+  area.classList.remove('hidden');
+  drawBarcode('barcode-svg', codigo);
+  window.print();
+  area.classList.add('hidden');
+}
+
+async function showProdutoPromocao(id) {
+  closeProdutoMenus();
+  const [p, lista] = await Promise.all([API.produtos.get(id), API.produtos.promocoes(id)]);
+  openModal('Promoção do produto', `
+    <p class="muted" style="margin-bottom:12px">${escapeHtml(p.nome)} · Preço atual ${formatCurrency(p.preco)}</p>
+    <form id="promo-form">
+      <div class="form-group"><label>Descrição</label><input name="descricao" placeholder="Ex: Oferta da semana"></div>
+      <div class="form-row">
+        <div class="form-group"><label>Tipo</label>
+          <select name="tipo">
+            <option value="percentual">Percentual (%)</option>
+            <option value="valor">Valor fixo (R$)</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Valor</label><input name="valor" type="number" step="0.01" value="0"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Início</label><input name="data_inicio" type="date"></div>
+        <div class="form-group"><label>Fim</label><input name="data_fim" type="date"></div>
+      </div>
+    </form>
+    <h4 style="margin:16px 0 8px">Promoções</h4>
+    <table class="data-table"><thead><tr><th>Descrição</th><th>Tipo</th><th>Valor</th><th>Período</th><th>Status</th></tr></thead>
+    <tbody>${lista.length ? lista.map(pr => `<tr>
+      <td>${escapeHtml(pr.descricao || '-')}</td>
+      <td>${pr.tipo === 'valor' ? 'Valor' : '%'}</td>
+      <td>${pr.tipo === 'valor' ? formatCurrency(pr.valor) : (pr.valor || 0) + '%'}</td>
+      <td>${formatDate(pr.data_inicio)} a ${formatDate(pr.data_fim)}</td>
+      <td><span class="status-badge ${pr.ativo ? 'ativo' : 'inativo'}">${pr.ativo ? 'Ativa' : 'Inativa'}</span></td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Nenhuma promoção</td></tr>'}</tbody></table>`,
+    `<button class="btn btn-outline modal-close-btn">Fechar</button><button class="btn btn-success" id="promo-save">Salvar promoção</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('promo-save').onclick = async () => {
+    const fd = new FormData(document.getElementById('promo-form'));
+    const body = Object.fromEntries(fd);
+    body.valor = parseFloat(body.valor) || 0;
+    try {
+      await API.produtos.addPromocao(id, body);
+      closeModal(); showToast('Promoção salva', 'success'); renderProdutos();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function showPromocoesLista() {
+  const lista = await API.promocoes.list();
+  openModal('Promoções', `
+    <table class="data-table"><thead><tr><th>Produto</th><th>Descrição</th><th>Tipo</th><th>Valor</th><th>Período</th><th>Status</th></tr></thead>
+    <tbody>${lista.length ? lista.map(pr => `<tr>
+      <td>${escapeHtml(pr.produto_nome)}</td>
+      <td>${escapeHtml(pr.descricao || '-')}</td>
+      <td>${pr.tipo === 'valor' ? 'Valor' : '%'}</td>
+      <td>${pr.tipo === 'valor' ? formatCurrency(pr.valor) : (pr.valor || 0) + '%'}</td>
+      <td>${formatDate(pr.data_inicio)} a ${formatDate(pr.data_fim)}</td>
+      <td><span class="status-badge ${pr.ativo ? 'ativo' : 'inativo'}">${pr.ativo ? 'Ativa' : 'Inativa'}</span></td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="6">Nenhuma promoção cadastrada</td></tr>'}</tbody></table>`,
+    `<button class="btn btn-outline modal-close-btn">Fechar</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+}
+
+function showProdutosOpcoes() {
+  openModal('Opções de produtos', `
+    <p class="muted">Use o menu de ações de cada produto para editar, imprimir preço, gerar código de barras, criar promoção, registrar compra/entrada, ajustar estoque ou fazer inventário.</p>`,
+    `<button class="btn btn-primary modal-close-btn">Ok</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+}
+
+async function showEstoqueMovimento(id, tipo) {
+  closeProdutoMenus();
+  const p = await API.produtos.get(id);
+  const titulos = { entrada: 'Compra/entrada', ajuste: 'Ajustar estoque', inventario: 'Inventário' };
+  const hints = {
+    entrada: 'Informe a quantidade comprada. O estoque será somado.',
+    ajuste: 'Informe um valor positivo para entrada ou negativo para saída.',
+    inventario: 'Informe a quantidade real contada. O estoque será substituído.'
+  };
+  openModal(titulos[tipo] || 'Estoque', `
+    <p style="margin-bottom:8px"><strong>${escapeHtml(p.nome)}</strong></p>
+    <p class="muted" style="margin-bottom:14px">Estoque atual: <strong>${p.estoque}</strong> · Mínimo: ${p.estoque_minimo || 0}</p>
+    <p class="muted" style="margin-bottom:14px">${hints[tipo]}</p>
+    <form id="estoque-form">
+      <div class="form-group"><label>${tipo === 'inventario' ? 'Quantidade contada' : 'Quantidade'}</label>
+        <input name="quantidade" type="number" ${tipo === 'entrada' ? 'min="1"' : ''} value="${tipo === 'inventario' ? p.estoque : 1}" required>
+      </div>
+      <div class="form-group"><label>Observação</label><input name="observacao" placeholder="Opcional"></div>
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="estoque-save">Confirmar</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('estoque-save').onclick = async () => {
+    const form = document.getElementById('estoque-form');
+    if (!form.reportValidity()) return;
+    const fd = new FormData(form);
+    try {
+      await API.produtos.estoque(id, {
+        tipo,
+        quantidade: parseInt(fd.get('quantidade'), 10),
+        observacao: fd.get('observacao'),
+        usuario_id: currentUser && currentUser.id
+      });
+      closeModal(); showToast('Estoque atualizado', 'success'); renderProdutos();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
 }
 
 // ===================== FORNECEDORES =====================
@@ -1273,6 +1521,7 @@ function bindEntitySave(id, apiKey, rerender, transform) {
     const body = Object.fromEntries(fd);
     if (transform) transform(body);
     if (body.preco !== undefined) body.preco = parseFloat(body.preco);
+    if (body.preco_custo !== undefined) body.preco_custo = parseFloat(body.preco_custo);
     if (body.estoque !== undefined) body.estoque = parseInt(body.estoque);
     if (body.estoque_minimo !== undefined) body.estoque_minimo = parseInt(body.estoque_minimo);
     if (body.fornecedor_id !== undefined) body.fornecedor_id = body.fornecedor_id || null;

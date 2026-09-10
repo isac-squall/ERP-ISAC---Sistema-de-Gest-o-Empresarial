@@ -47,6 +47,8 @@ db.exec(`
     codigo TEXT,
     descricao TEXT,
     preco REAL DEFAULT 0,
+    preco_custo REAL DEFAULT 0,
+    foto TEXT,
     estoque INTEGER DEFAULT 0,
     estoque_minimo INTEGER DEFAULT 0,
     categoria TEXT,
@@ -54,6 +56,32 @@ db.exec(`
     ativo INTEGER DEFAULT 1,
     criado_em TEXT DEFAULT (datetime('now','localtime')),
     FOREIGN KEY (fornecedor_id) REFERENCES fornecedores(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS promocoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    produto_id INTEGER NOT NULL,
+    descricao TEXT,
+    tipo TEXT DEFAULT 'percentual',
+    valor REAL DEFAULT 0,
+    data_inicio TEXT,
+    data_fim TEXT,
+    ativo INTEGER DEFAULT 1,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS estoque_movimentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    produto_id INTEGER NOT NULL,
+    tipo TEXT NOT NULL,
+    quantidade INTEGER NOT NULL,
+    estoque_anterior INTEGER,
+    estoque_novo INTEGER,
+    observacao TEXT,
+    usuario_id INTEGER,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
   );
 
   CREATE TABLE IF NOT EXISTS ordens_servico (
@@ -148,6 +176,8 @@ ensureColumn('vendas', 'valor_recebido', 'REAL DEFAULT 0');
 ensureColumn('vendas', 'troco', 'REAL DEFAULT 0');
 ensureColumn('vendas', 'parcelas', 'INTEGER DEFAULT 1');
 ensureColumn('vendas', 'taxa_cartao', 'REAL DEFAULT 0');
+ensureColumn('produtos', 'preco_custo', 'REAL DEFAULT 0');
+ensureColumn('produtos', 'foto', 'TEXT');
 
 const defaults = {
   cupom_titulo: 'Scrundai Software',
@@ -176,8 +206,8 @@ if (!caixaStatus) {
 
 const produtoExemplo = db.prepare('SELECT id FROM produtos LIMIT 1').get();
 if (!produtoExemplo) {
-  db.prepare(`INSERT INTO produtos (nome, codigo, descricao, preco, estoque, estoque_minimo, categoria)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`).run('COCA-COLA', '7894900011517', 'Refrigerante 2L', 8, 50, 5, 'Bebidas');
+  db.prepare(`INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run('COCA-COLA', '7894900011517', 'Refrigerante 2L', 8, 5, 98, 5, 'Bebidas');
 }
 
 module.exports = db;

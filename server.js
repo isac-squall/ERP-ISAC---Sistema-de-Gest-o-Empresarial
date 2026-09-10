@@ -7,8 +7,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: false,
+  lastModified: false,
+  setHeaders: (res) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  }
+}));
 
 function paginate(query, params, page = 1, limit = 15, search = '') {
   const offset = (page - 1) * limit;
@@ -232,7 +238,11 @@ app.delete('/api/fornecedores/:id', (req, res) => {
 // ============ PRODUTOS ============
 app.get('/api/produtos', (req, res) => {
   const { search = '', page = 1, limit = 15 } = req.query;
-  let query = `SELECT p.*, f.nome as fornecedor_nome FROM produtos p LEFT JOIN fornecedores f ON p.fornecedor_id = f.id WHERE p.ativo = 1`;
+  let query = `SELECT p.*, f.nome as fornecedor_nome,
+    (SELECT COUNT(*) FROM promocoes pr WHERE pr.produto_id = p.id AND pr.ativo = 1
+      AND (pr.data_inicio IS NULL OR date(pr.data_inicio) <= date('now','localtime'))
+      AND (pr.data_fim IS NULL OR date(pr.data_fim) >= date('now','localtime'))) as promocao_ativa
+    FROM produtos p LEFT JOIN fornecedores f ON p.fornecedor_id = f.id WHERE p.ativo = 1`;
   const params = [];
   if (search) {
     query += ' AND (p.nome LIKE ? OR p.codigo LIKE ? OR p.categoria LIKE ?)';
@@ -240,8 +250,9 @@ app.get('/api/produtos', (req, res) => {
     params.push(s, s, s);
   }
   query += ' ORDER BY p.nome ASC';
-  const countQ = query.replace(/SELECT p\.\*, f\.nome as fornecedor_nome/, 'SELECT COUNT(*) as total');
-  const total = db.prepare(countQ).get(...params)?.total || 0;
+  let countQuery = 'SELECT COUNT(*) as total FROM produtos p WHERE p.ativo = 1';
+  if (search) countQuery += ' AND (p.nome LIKE ? OR p.codigo LIKE ? OR p.categoria LIKE ?)';
+  const total = db.prepare(countQuery).get(...params)?.total || 0;
   const offset = (page - 1) * limit;
   const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset);
   res.json({ data, total, page: +page, limit: +limit, totalPages: Math.ceil(total / limit) || 1 });
@@ -264,21 +275,84 @@ app.get('/api/produtos/:id', (req, res) => {
 });
 
 app.post('/api/produtos', (req, res) => {
-  const { nome, codigo, descricao, preco, estoque, estoque_minimo, categoria, fornecedor_id } = req.body;
+  const { nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id } = req.body;
   if (!nome) return res.status(400).json({ error: 'Nome é obrigatório' });
-  const result = db.prepare('INSERT INTO produtos (nome, codigo, descricao, preco, estoque, estoque_minimo, categoria, fornecedor_id) VALUES (?,?,?,?,?,?,?,?)').run(nome, codigo, descricao, preco, estoque, estoque_minimo, categoria, fornecedor_id || null);
+  const result = db.prepare('INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id) VALUES (?,?,?,?,?,?,?,?,?,?)').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null);
   res.json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/produtos/:id', (req, res) => {
-  const { nome, codigo, descricao, preco, estoque, estoque_minimo, categoria, fornecedor_id } = req.body;
-  db.prepare('UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, estoque=?, estoque_minimo=?, categoria=?, fornecedor_id=? WHERE id=?').run(nome, codigo, descricao, preco, estoque, estoque_minimo, categoria, fornecedor_id || null, req.params.id);
+  const { nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id } = req.body;
+  db.prepare('UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, foto=?, estoque=?, estoque_minimo=?, categoria=?, fornecedor_id=? WHERE id=?').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null, req.params.id);
   res.json({ message: 'Produto atualizado' });
 });
 
 app.delete('/api/produtos/:id', (req, res) => {
   db.prepare('UPDATE produtos SET ativo = 0 WHERE id = ?').run(req.params.id);
   res.json({ message: 'Produto removido' });
+});
+
+app.post('/api/produtos/:id/estoque', (req, res) => {
+  const produto = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
+  if (!produto) return res.status(404).json({ error: 'Produto não encontrado' });
+  const { tipo, quantidade, observacao, usuario_id } = req.body;
+  const qtd = parseInt(quantidade, 10);
+  if (!tipo || !['entrada', 'ajuste', 'inventario'].includes(tipo)) {
+    return res.status(400).json({ error: 'Tipo inválido' });
+  }
+  if (isNaN(qtd) || (tipo === 'entrada' && qtd <= 0) || (tipo === 'ajuste' && qtd === 0) || (tipo === 'inventario' && qtd < 0)) {
+    return res.status(400).json({ error: 'Quantidade inválida' });
+  }
+  const anterior = produto.estoque || 0;
+  let novo = anterior;
+  if (tipo === 'entrada') novo = anterior + qtd;
+  else if (tipo === 'ajuste') novo = Math.max(0, anterior + qtd);
+  else novo = Math.max(0, qtd);
+  db.prepare('UPDATE produtos SET estoque = ? WHERE id = ?').run(novo, produto.id);
+  db.prepare('INSERT INTO estoque_movimentos (produto_id, tipo, quantidade, estoque_anterior, estoque_novo, observacao, usuario_id) VALUES (?,?,?,?,?,?,?)')
+    .run(produto.id, tipo, qtd, anterior, novo, observacao || null, usuario_id || null);
+  res.json({ estoque: novo, anterior });
+});
+
+app.get('/api/produtos/:id/estoque', (req, res) => {
+  const rows = db.prepare('SELECT * FROM estoque_movimentos WHERE produto_id = ? ORDER BY criado_em DESC LIMIT 50').all(req.params.id);
+  res.json(rows);
+});
+
+app.get('/api/promocoes', (req, res) => {
+  const rows = db.prepare(`
+    SELECT pr.*, p.nome as produto_nome, p.preco as preco_venda
+    FROM promocoes pr JOIN produtos p ON pr.produto_id = p.id
+    WHERE p.ativo = 1
+    ORDER BY pr.ativo DESC, pr.criado_em DESC
+  `).all();
+  res.json(rows);
+});
+
+app.get('/api/produtos/:id/promocoes', (req, res) => {
+  const rows = db.prepare('SELECT * FROM promocoes WHERE produto_id = ? ORDER BY ativo DESC, criado_em DESC').all(req.params.id);
+  res.json(rows);
+});
+
+app.post('/api/produtos/:id/promocoes', (req, res) => {
+  const produto = db.prepare('SELECT id FROM produtos WHERE id = ?').get(req.params.id);
+  if (!produto) return res.status(404).json({ error: 'Produto não encontrado' });
+  const { descricao, tipo, valor, data_inicio, data_fim } = req.body;
+  const result = db.prepare('INSERT INTO promocoes (produto_id, descricao, tipo, valor, data_inicio, data_fim, ativo) VALUES (?,?,?,?,?,?,1)')
+    .run(produto.id, descricao || '', tipo || 'percentual', valor || 0, data_inicio || null, data_fim || null);
+  res.json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/promocoes/:id', (req, res) => {
+  const { descricao, tipo, valor, data_inicio, data_fim, ativo } = req.body;
+  db.prepare('UPDATE promocoes SET descricao=?, tipo=?, valor=?, data_inicio=?, data_fim=?, ativo=? WHERE id=?')
+    .run(descricao, tipo, valor, data_inicio || null, data_fim || null, ativo ? 1 : 0, req.params.id);
+  res.json({ message: 'Promoção atualizada' });
+});
+
+app.delete('/api/promocoes/:id', (req, res) => {
+  db.prepare('UPDATE promocoes SET ativo = 0 WHERE id = ?').run(req.params.id);
+  res.json({ message: 'Promoção desativada' });
 });
 
 // ============ ORDENS DE SERVIÇO ============
