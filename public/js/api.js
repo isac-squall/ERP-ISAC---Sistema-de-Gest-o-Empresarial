@@ -52,7 +52,16 @@ const API = {
     byCodigo: (codigo) => API.request(`/produtos/codigo/${encodeURIComponent(codigo)}`),
     create: (d) => API.request('/produtos', { method: 'POST', body: d }),
     update: (id, d) => API.request(`/produtos/${id}`, { method: 'PUT', body: d }),
-    delete: (id) => API.request(`/produtos/${id}`, { method: 'DELETE' })
+    delete: (id) => API.request(`/produtos/${id}`, { method: 'DELETE' }),
+    estoque: (id, d) => API.request(`/produtos/${id}/estoque`, { method: 'POST', body: d }),
+    movimentos: (id) => API.request(`/produtos/${id}/estoque`),
+    promocoes: (id) => API.request(`/produtos/${id}/promocoes`),
+    addPromocao: (id, d) => API.request(`/produtos/${id}/promocoes`, { method: 'POST', body: d })
+  },
+  promocoes: {
+    list: () => API.request('/promocoes'),
+    update: (id, d) => API.request(`/promocoes/${id}`, { method: 'PUT', body: d }),
+    delete: (id) => API.request(`/promocoes/${id}`, { method: 'DELETE' })
   },
 
   ordensServico: {
