@@ -535,6 +535,25 @@ body {
 .caixa-status h3 { font-size: 20px; margin-bottom: 8px; }
 .caixa-saldo { font-size: 32px; font-weight: 300; color: var(--primary); margin: 16px 0; }
 
+.stat-card-icon { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.stat-card-icon .stat-info { min-width: 0; }
+.stat-card-icon > i { font-size: 30px; opacity: 0.6; }
+
+.caixa-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.caixa-head h3 { font-size: 17px; font-weight: 600; }
+.caixa-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.caixa-badge {
+  display: inline-block; padding: 4px 12px; border-radius: 4px;
+  font-size: 12px; font-weight: 600; background: var(--primary); color: #fff;
+  white-space: nowrap;
+}
+.caixa-badge.entrada { background: var(--success); }
+.caixa-badge.saida { background: var(--danger); }
+
 .notif-badge {
   position: absolute; top: 4px; right: 4px;
   background: var(--danger); color: white;
