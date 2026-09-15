@@ -1133,93 +1133,273 @@ async function printCupom(id) {
 }
 
 // ===================== CAIXA =====================
+function caixaBadgeClass(tipo) {
+  const map = {
+    'Abertura': 'caixa-badge info', 'Venda realizada': 'caixa-badge info',
+    'Entrada': 'caixa-badge entrada', 'Saída': 'caixa-badge saida'
+  };
+  return map[tipo] || 'caixa-badge';
+}
+
+function caixaCliente(m) {
+  if (m.cliente_nome) return escapeHtml(m.cliente_nome);
+  return m.tipo === 'Abertura' ? 'Saldo inicial' : '-';
+}
+
+function caixaDesconto(m) {
+  if (m.tipo === 'Abertura') return '==';
+  if (m.tipo === 'Venda realizada') {
+    return `${Number(m.desconto_percent || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+  }
+  return '-';
+}
+
+function caixaPagamento(m) {
+  if (m.tipo === 'Abertura') return '======';
+  return escapeHtml(m.forma_pagamento || '-');
+}
+
+function renderCaixaRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="9">Nenhum movimento encontrado</td></tr>';
+  return data.map(m => {
+    const acoes = m.tipo === 'Abertura'
+      ? '<span class="muted">—</span>'
+      : `<button class="btn-icon view" onclick="viewCaixaMovimento(${m.id})" title="Visualizar"><i class="fas fa-eye"></i></button>
+         <button class="btn-icon print" onclick="editCaixaMovimento(${m.id})" title="Editar"><i class="fas fa-edit"></i></button>
+         <button class="btn-icon delete" onclick="deleteCaixaMovimento(${m.id})" title="Excluir"><i class="fas fa-trash"></i></button>`;
+    return `<tr>
+      <td>${m.id}</td>
+      <td><span class="${caixaBadgeClass(m.tipo)}">${escapeHtml(m.tipo)}</span></td>
+      <td>${caixaCliente(m)}</td>
+      <td>${escapeHtml(m.descricao || '-')}</td>
+      <td>${caixaDesconto(m)}</td>
+      <td>${caixaPagamento(m)}</td>
+      <td>${formatCurrency(m.valor)}</td>
+      <td>${formatDateTime(m.criado_em)}</td>
+      <td class="actions-cell">${acoes}</td>
+    </tr>`;
+  }).join('');
+}
+
 async function renderCaixa() {
+  const st = pageState.caixa;
   const [status, movimentos] = await Promise.all([
-    API.caixa.status(), API.caixa.movimentos({ page: 1, limit: 15 })
+    API.caixa.status(),
+    API.caixa.movimentos({ search: st.search, page: st.page, limit: st.limit })
   ]);
 
   document.getElementById('content').innerHTML = `
-    ${pageHeader('Gerenciar caixa', 'Dashboard / Gerenciar caixa')}
     <div class="stats-row stats-row-4">
-      <div class="stat-card ${status.aberto ? 'green' : 'red'}">
-        <h4>Status</h4><div class="stat-value">${status.aberto ? 'Aberto' : 'Fechado'}</div>
+      <div class="stat-card green stat-card-icon">
+        <div class="stat-info"><h4>Total do caixa</h4><div class="stat-value">${formatCurrency(status.total_caixa)}</div></div>
+        <i class="fas fa-money-bill-wave"></i>
       </div>
-      <div class="stat-card blue"><h4>Saldo atual</h4><div class="stat-value">${formatCurrency(status.saldo)}</div></div>
-      <div class="stat-card teal"><h4>Entradas hoje</h4><div class="stat-value">${formatCurrency(status.entradas)}</div></div>
-      <div class="stat-card orange"><h4>Saídas hoje</h4><div class="stat-value">${formatCurrency(status.saidas)}</div></div>
+      <div class="stat-card blue stat-card-icon">
+        <div class="stat-info"><h4>Total de vendas</h4><div class="stat-value">${formatCurrency(status.total_vendas)}</div></div>
+        <i class="fas fa-receipt"></i>
+      </div>
+      <div class="stat-card teal stat-card-icon">
+        <div class="stat-info"><h4>Cartão ou PIX</h4><div class="stat-value">${formatCurrency(status.cartao_pix)}</div></div>
+        <i class="fas fa-credit-card"></i>
+      </div>
+      <div class="stat-card purple stat-card-icon">
+        <div class="stat-info"><h4>Venda líquida</h4><div class="stat-value">${formatCurrency(status.venda_liquida)}</div></div>
+        <i class="fas fa-money-bill"></i>
+      </div>
     </div>
-    <div class="card" style="text-align:center;padding:24px">
-      ${status.aberto ? `
-        <button class="btn btn-danger" id="fechar-caixa"><i class="fas fa-lock"></i> Fechar Caixa</button>
-        <button class="btn btn-primary" id="nova-saida" style="margin-left:8px"><i class="fas fa-minus"></i> Registrar Saída</button>
-      ` : `
-        <button class="btn btn-success" id="abrir-caixa"><i class="fas fa-lock-open"></i> Abrir Caixa</button>
-      `}
+    <div class="caixa-head">
+      <h3>Movimento de caixa</h3>
+      <div class="caixa-head-actions">
+        ${status.aberto
+          ? '<button class="btn btn-primary" id="caixa-fechar"><i class="fas fa-lock"></i> Fechar caixa</button>'
+          : '<button class="btn btn-success" id="caixa-abrir"><i class="fas fa-lock-open"></i> Abrir caixa</button>'}
+        <button class="btn btn-primary" id="caixa-historico"><i class="fas fa-chart-line"></i> Histórico</button>
+        <button class="btn btn-success" id="caixa-entrada"><i class="fas fa-money-bill-wave"></i> Entrada</button>
+        <button class="btn btn-danger" id="caixa-saida"><i class="fas fa-money-bill-wave"></i> Saída</button>
+      </div>
     </div>
-    <div class="card">
-      <h3>Movimentações</h3>
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Pesquisar..." value="${escapeHtml(st.search || '')}" id="table-search">
+      </div>
+      <span class="toolbar-info">Movimentacoes do caixa: ${movimentos.total} registros</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn-icon-square" id="caixa-opcoes" title="Opções"><i class="fas fa-cog"></i></button>
+    </div>
+    <div class="table-wrapper">
       <table class="data-table">
-        <thead><tr><th>#</th><th>Tipo</th><th>Descrição</th><th>Valor</th><th>Pagamento</th><th>Usuário</th><th>Data</th></tr></thead>
-        <tbody>${movimentos.data.length ? movimentos.data.map(m => `
-          <tr><td>${m.id}</td><td><span class="status-badge ${m.tipo === 'Entrada' ? 'pago' : 'cancelada'}">${m.tipo}</span></td>
-          <td>${m.descricao || '-'}</td><td>${formatCurrency(m.valor)}</td><td>${m.forma_pagamento || '-'}</td>
-          <td>${m.usuario_nome || '-'}</td><td>${formatDateTime(m.criado_em)}</td></tr>
-        `).join('') : '<tr class="empty-row"><td colspan="7">Nenhum movimento</td></tr>'}
-        </tbody>
+        <thead><tr>
+          <th>#</th><th>Tipo</th><th>Cliente</th><th>Descrição</th><th>Desconto</th>
+          <th>Pagamento</th><th>Total</th><th>Data</th><th>Ações</th>
+        </tr></thead>
+        <tbody id="table-body">${renderCaixaRows(movimentos.data)}</tbody>
       </table>
+      <div id="table-pagination"></div>
     </div>`;
 
+  bindTableEvents('caixa', movimentos, loadCaixa);
+  document.getElementById('caixa-opcoes').onclick = showCaixaOpcoes;
+  document.getElementById('caixa-historico').onclick = showCaixaHistorico;
+  document.getElementById('caixa-entrada').onclick = () => showCaixaMovimentoForm('Entrada');
+  document.getElementById('caixa-saida').onclick = () => showCaixaMovimentoForm('Saída');
   if (status.aberto) {
-    document.getElementById('fechar-caixa').onclick = async () => {
-      if (!confirm('Deseja fechar o caixa?')) return;
-      try {
-        await API.caixa.fechar();
-        showToast('Caixa fechado', 'success'); renderCaixa();
-      } catch (err) { showToast(err.message, 'error'); }
-    };
-    document.getElementById('nova-saida').onclick = () => showMovimentoForm('Saída');
+    document.getElementById('caixa-fechar').onclick = fecharCaixa;
   } else {
-    document.getElementById('abrir-caixa').onclick = () => {
-      openModal('Abrir Caixa', `
-        <form id="entity-form">
-          <div class="form-group"><label>Valor inicial</label><input name="valor_inicial" type="number" step="0.01" value="0"></div>
-        </form>`,
-        `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-success" id="entity-save">Abrir</button>`);
-      document.querySelector('.modal-close-btn').onclick = closeModal;
-      document.getElementById('entity-save').onclick = async () => {
-        const val = parseFloat(document.querySelector('[name=valor_inicial]').value) || 0;
-        try {
-          await API.caixa.abrir({ valor_inicial: val, usuario_id: currentUser.id });
-          closeModal(); showToast('Caixa aberto!', 'success'); renderCaixa();
-        } catch (err) { showToast(err.message, 'error'); }
-      };
-    };
+    document.getElementById('caixa-abrir').onclick = showAbrirCaixaForm;
   }
 }
 
-function showMovimentoForm(tipo) {
+async function loadCaixa() {
+  const st = pageState.caixa;
+  const result = await API.caixa.movimentos({ search: st.search, page: st.page, limit: st.limit });
+  document.getElementById('table-body').innerHTML = renderCaixaRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadCaixa();
+  });
+  document.querySelector('.toolbar-info').textContent = `Movimentacoes do caixa: ${result.total} registros`;
+}
+
+async function fecharCaixa() {
+  if (!confirm('Deseja fechar o caixa?')) return;
+  try {
+    await API.caixa.fechar();
+    showToast('Caixa fechado', 'success'); renderCaixa();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+function showAbrirCaixaForm() {
+  openModal('Abrir Caixa', `
+    <form id="entity-form">
+      <div class="form-group"><label>Valor inicial</label><input name="valor_inicial" type="number" step="0.01" value="0"></div>
+    </form>`,
+    '<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-success" id="entity-save">Abrir</button>');
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('entity-save').onclick = async () => {
+    const val = parseFloat(document.querySelector('[name=valor_inicial]').value) || 0;
+    try {
+      await API.caixa.abrir({ valor_inicial: val, usuario_id: currentUser.id });
+      closeModal(); showToast('Caixa aberto!', 'success'); renderCaixa();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+function showCaixaMovimentoForm(tipo) {
+  const isEntrada = tipo === 'Entrada';
   openModal(`Registrar ${tipo}`, `
     <form id="entity-form">
-      <div class="form-group"><label>Descrição</label><input name="descricao" required></div>
+      <div class="form-group"><label>Descrição</label>
+        <input name="descricao" placeholder="${isEntrada ? 'Ex: Suprimento de caixa' : 'Ex: Retirada, sangria'}" required></div>
       <div class="form-row">
         <div class="form-group"><label>Valor</label><input name="valor" type="number" step="0.01" required></div>
         <div class="form-group"><label>Forma pagamento</label>
           <select name="forma_pagamento"><option>Dinheiro</option><option>PIX</option><option>Cartão</option></select></div>
       </div>
     </form>`,
-    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
+    '<button class="btn btn-outline modal-close-btn">Cancelar</button>' +
+    `<button class="btn ${isEntrada ? 'btn-success' : 'btn-danger'}" id="entity-save">Salvar</button>`);
   document.querySelector('.modal-close-btn').onclick = closeModal;
   document.getElementById('entity-save').onclick = async () => {
-    const fd = new FormData(document.getElementById('entity-form'));
-    const body = Object.fromEntries(fd);
+    const form = document.getElementById('entity-form');
+    if (!form.reportValidity()) return;
+    const body = Object.fromEntries(new FormData(form));
     body.tipo = tipo;
-    body.valor = parseFloat(body.valor);
+    body.valor = parseFloat(body.valor) || 0;
     body.usuario_id = currentUser.id;
     try {
-      await API.caixa.movimento(body);
+      await API.caixa.createMovimento(body);
       closeModal(); showToast('Movimento registrado', 'success'); renderCaixa();
     } catch (err) { showToast(err.message, 'error'); }
   };
+}
+
+async function editCaixaMovimento(id) {
+  const m = await API.caixa.movimento(id);
+  openModal('Editar movimento', `
+    <form id="entity-form">
+      <div class="form-group"><label>Descrição</label><input name="descricao" value="${escapeHtml(m.descricao || '')}"></div>
+      <div class="form-row">
+        <div class="form-group"><label>Valor</label><input name="valor" type="number" step="0.01" value="${m.valor || 0}"></div>
+        <div class="form-group"><label>Forma pagamento</label>
+          <select name="forma_pagamento">
+            ${['Dinheiro', 'PIX', 'Cartão', 'Cartão Crédito', 'Cartão Débito'].map(f =>
+              `<option ${m.forma_pagamento === f ? 'selected' : ''}>${f}</option>`).join('')}
+          </select></div>
+      </div>
+      <div class="form-group"><label>Cliente</label><input name="cliente_nome" value="${escapeHtml(m.cliente_nome || '')}"></div>
+    </form>`,
+    '<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>');
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('entity-save').onclick = async () => {
+    const body = Object.fromEntries(new FormData(document.getElementById('entity-form')));
+    body.valor = parseFloat(body.valor) || 0;
+    try {
+      await API.caixa.updateMovimento(id, body);
+      closeModal(); showToast('Movimento atualizado', 'success'); renderCaixa();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function viewCaixaMovimento(id) {
+  const m = await API.caixa.movimento(id);
+  let vendaHtml = '';
+  if (m.venda) {
+    vendaHtml = `
+      <h4 style="margin:16px 0 8px">Itens da venda</h4>
+      <table class="data-table"><thead><tr><th>Produto</th><th>Qtd</th><th>Unitário</th><th>Subtotal</th></tr></thead>
+        <tbody>${(m.venda.itens || []).map(it => `<tr>
+          <td>${escapeHtml(it.produto_nome || '-')}</td><td>${it.quantidade}</td>
+          <td>${formatCurrency(it.preco_unitario)}</td><td>${formatCurrency(it.subtotal)}</td>
+        </tr>`).join('') || '<tr class="empty-row"><td colspan="4">Sem itens</td></tr>'}</tbody></table>`;
+  }
+  openModal('Detalhes do movimento', `
+    <div class="contas-resumo">
+      <div><span>Tipo</span><strong>${escapeHtml(m.tipo)}</strong></div>
+      <div><span>Cliente</span><strong>${caixaCliente(m)}</strong></div>
+      <div><span>Descrição</span><strong>${escapeHtml(m.descricao || '-')}</strong></div>
+      <div><span>Desconto</span><strong>${caixaDesconto(m)}</strong></div>
+      <div><span>Pagamento</span><strong>${caixaPagamento(m)}</strong></div>
+      <div><span>Total</span><strong>${formatCurrency(m.valor)}</strong></div>
+      <div><span>Data</span><strong>${formatDateTime(m.criado_em)}</strong></div>
+      <div><span>Usuário</span><strong>${escapeHtml(m.usuario_nome || '-')}</strong></div>
+    </div>
+    ${vendaHtml}`,
+    '<button class="btn btn-outline modal-close-btn">Fechar</button>');
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+}
+
+async function deleteCaixaMovimento(id) {
+  if (!confirm('Deseja excluir este movimento? Se for uma venda, ela será cancelada e o estoque devolvido.')) return;
+  try {
+    await API.caixa.deleteMovimento(id);
+    showToast('Movimento removido', 'success'); renderCaixa();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function showCaixaHistorico() {
+  const { data } = await API.caixa.historico();
+  openModal('Histórico de caixa', data.length ? `
+    <table class="data-table"><thead><tr><th>Data</th><th>Abertura</th><th>Entradas</th><th>Vendas</th><th>Saídas</th><th>Saldo</th></tr></thead>
+      <tbody>${data.map(d => {
+        const saldo = (d.abertura || 0) + (d.entradas || 0) + (d.vendas || 0) - (d.saidas || 0);
+        return `<tr><td>${formatDate(d.dia)}</td><td>${formatCurrency(d.abertura)}</td><td>${formatCurrency(d.entradas)}</td>
+          <td>${formatCurrency(d.vendas)}</td><td>${formatCurrency(d.saidas)}</td><td>${formatCurrency(saldo)}</td></tr>`;
+      }).join('')}</tbody></table>`
+    : '<p class="muted">Nenhum histórico de caixa registrado.</p>',
+    '<button class="btn btn-outline modal-close-btn">Fechar</button>');
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+}
+
+function showCaixaOpcoes() {
+  openModal('Opções de caixa', `
+    <p class="muted">Use os botões acima da listagem para fechar/abrir o caixa, consultar o histórico e registrar entradas ou saídas.</p>
+    <ul class="manual-list" style="margin-top:12px">
+      <li><strong>Entrada</strong> — suprimento ou recebimento extra no caixa.</li>
+      <li><strong>Saída</strong> — sangria, retirada ou pagamento em dinheiro.</li>
+      <li>As vendas realizadas no PDV entram automaticamente como <strong>Venda realizada</strong>.</li>
+    </ul>`,
+    '<button class="btn btn-outline modal-close-btn">Fechar</button>');
+  document.querySelector('.modal-close-btn').onclick = closeModal;
 }
 
 // ===================== FINANCEIRO =====================

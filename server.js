@@ -457,27 +457,61 @@ app.delete('/api/usuarios/:id', (req, res) => {
 });
 
 // ============ CAIXA ============
+function caixaSessaoDesde() {
+  const status = db.prepare('SELECT aberto, aberto_em FROM caixa_status WHERE id = 1').get();
+  return status?.aberto === 1 && status.aberto_em ? status.aberto_em : null;
+}
+
 app.get('/api/caixa/status', (req, res) => {
   const status = db.prepare('SELECT * FROM caixa_status WHERE id = 1').get();
-  const movimentos = db.prepare(`
-    SELECT COALESCE(SUM(CASE WHEN tipo='Entrada' THEN valor ELSE 0 END),0) as entradas,
-           COALESCE(SUM(CASE WHEN tipo='Saída' THEN valor ELSE 0 END),0) as saidas
-    FROM caixa WHERE date(criado_em) = date('now','localtime')
-  `).get();
-  const saldo = (status?.valor_inicial || 0) + movimentos.entradas - movimentos.saidas;
+  const desde = caixaSessaoDesde();
+  const params = desde ? [desde] : [];
+  const filtro = desde ? 'AND criado_em >= ?' : '';
+
+  const mov = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN tipo='Abertura' THEN valor ELSE 0 END),0) AS abertura,
+      COALESCE(SUM(CASE WHEN tipo='Entrada' THEN valor ELSE 0 END),0) AS entradas,
+      COALESCE(SUM(CASE WHEN tipo='Saída' THEN valor ELSE 0 END),0) AS saidas,
+      COALESCE(SUM(CASE WHEN tipo IN ('Entrada','Venda realizada') AND (forma_pagamento IS NULL OR forma_pagamento='Dinheiro') THEN valor ELSE 0 END),0) AS dinheiro
+    FROM caixa WHERE 1=1 ${filtro}
+  `).get(...params);
+
+  const vendas = db.prepare(`
+    SELECT COALESCE(SUM(total),0) AS total,
+           COALESCE(SUM(CASE WHEN forma_pagamento IN ('PIX','Cartão','Cartão Crédito','Cartão Débito') THEN total ELSE 0 END),0) AS cartao_pix,
+           COALESCE(SUM(COALESCE(taxa_cartao,0)),0) AS taxas
+    FROM vendas WHERE status != 'Cancelada' ${desde ? 'AND criado_em >= ?' : ''}
+  `).get(...params);
+
+  const totalCaixa = mov.abertura + mov.dinheiro - mov.saidas;
   res.json({
     ...status,
     aberto: status?.aberto === 1,
-    entradas: movimentos.entradas,
-    saidas: movimentos.saidas,
-    saldo
+    total_caixa: totalCaixa,
+    total_vendas: vendas.total,
+    cartao_pix: vendas.cartao_pix,
+    venda_liquida: vendas.total - vendas.taxas,
+    entradas: mov.entradas,
+    saidas: mov.saidas,
+    saldo: totalCaixa
   });
 });
 
 app.post('/api/caixa/abrir', (req, res) => {
   const { valor_inicial, usuario_id } = req.body;
-  db.prepare("UPDATE caixa_status SET aberto=1, valor_inicial=?, aberto_em=datetime('now','localtime'), fechado_em=NULL, usuario_id=? WHERE id=1").run(valor_inicial || 0, usuario_id);
-  res.json({ message: 'Caixa aberto' });
+  const valor = Number(valor_inicial) || 0;
+  const txn = db.transaction(() => {
+    const n = db.prepare("SELECT COUNT(*) AS c FROM caixa WHERE tipo = 'Abertura'").get().c + 1;
+    const info = db.prepare(`INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, cliente_nome, usuario_id)
+      VALUES ('Abertura', ?, ?, NULL, 'Saldo inicial', ?)`)
+      .run(`Abertura de caixa ${String(n).padStart(2, '0')}`, valor, usuario_id || null);
+    db.prepare("UPDATE caixa_status SET aberto=1, valor_inicial=?, aberto_em=datetime('now','localtime'), fechado_em=NULL, usuario_id=? WHERE id=1")
+      .run(valor, usuario_id || null);
+    return info.lastInsertRowid;
+  });
+  const id = txn();
+  res.json({ id, message: 'Caixa aberto' });
 });
 
 app.post('/api/caixa/fechar', (req, res) => {
@@ -486,24 +520,102 @@ app.post('/api/caixa/fechar', (req, res) => {
 });
 
 app.get('/api/caixa/movimentos', (req, res) => {
-  const { page = 1, limit = 15 } = req.query;
-  const total = db.prepare('SELECT COUNT(*) as total FROM caixa').get().total;
+  const { search = '', page = 1, limit = 15 } = req.query;
+  let query = `SELECT c.*, u.nome AS usuario_nome FROM caixa c
+    LEFT JOIN usuarios u ON c.usuario_id = u.id WHERE 1=1`;
+  const params = [];
+  if (search) {
+    query += ' AND (c.descricao LIKE ? OR c.cliente_nome LIKE ? OR c.tipo LIKE ? OR c.forma_pagamento LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s, s);
+  }
+  query += ' ORDER BY c.criado_em DESC, c.id DESC';
+  const countQ = query.replace(/SELECT c\.\*, u\.nome AS usuario_nome/, 'SELECT COUNT(*) AS total');
+  const total = db.prepare(countQ).get(...params)?.total || 0;
   const offset = (page - 1) * limit;
-  const data = db.prepare(`
-    SELECT c.*, u.nome as usuario_nome FROM caixa c
-    LEFT JOIN usuarios u ON c.usuario_id = u.id
-    ORDER BY c.criado_em DESC LIMIT ? OFFSET ?
-  `).all(+limit, offset);
+  const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset);
   res.json({ data, total, page: +page, limit: +limit, totalPages: Math.ceil(total / limit) || 1 });
+});
+
+app.get('/api/caixa/movimentos/:id', (req, res) => {
+  const movimento = db.prepare(`
+    SELECT c.*, u.nome AS usuario_nome FROM caixa c
+    LEFT JOIN usuarios u ON c.usuario_id = u.id WHERE c.id = ?
+  `).get(req.params.id);
+  if (!movimento) return res.status(404).json({ error: 'Movimento não encontrado' });
+  let venda = null;
+  if (movimento.venda_id) {
+    venda = db.prepare(`
+      SELECT v.*, c.nome AS cliente_nome FROM vendas v
+      LEFT JOIN clientes c ON v.cliente_id = c.id WHERE v.id = ?
+    `).get(movimento.venda_id);
+    if (venda) {
+      venda.itens = db.prepare(`
+        SELECT vi.*, p.nome AS produto_nome FROM venda_itens vi
+        LEFT JOIN produtos p ON vi.produto_id = p.id WHERE vi.venda_id = ?
+      `).all(movimento.venda_id);
+    }
+  }
+  res.json({ ...movimento, venda });
 });
 
 app.post('/api/caixa/movimentos', (req, res) => {
   const { tipo, descricao, valor, forma_pagamento, usuario_id } = req.body;
+  if (!['Entrada', 'Saída'].includes(tipo)) return res.status(400).json({ error: 'Tipo inválido' });
   const status = db.prepare('SELECT aberto FROM caixa_status WHERE id = 1').get();
-  if (!status?.aberto) return res.status(400).json({ error: 'Caixa fechado' });
-  const result = db.prepare('INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, usuario_id) VALUES (?,?,?,?,?)').run(tipo, descricao, valor, forma_pagamento, usuario_id);
+  if (!status?.aberto) return res.status(400).json({ error: 'Caixa fechado. Abra o caixa para registrar movimentos.' });
+  const result = db.prepare('INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, usuario_id) VALUES (?,?,?,?,?)')
+    .run(tipo, descricao || tipo, Number(valor) || 0, forma_pagamento || null, usuario_id || null);
   res.json({ id: result.lastInsertRowid });
 });
+
+app.put('/api/caixa/movimentos/:id', (req, res) => {
+  const movimento = db.prepare('SELECT * FROM caixa WHERE id = ?').get(req.params.id);
+  if (!movimento) return res.status(404).json({ error: 'Movimento não encontrado' });
+  const { descricao, valor, forma_pagamento, cliente_nome } = req.body;
+  db.prepare('UPDATE caixa SET descricao=?, valor=?, forma_pagamento=?, cliente_nome=? WHERE id=?')
+    .run(
+      descricao ?? movimento.descricao,
+      valor != null ? Number(valor) : movimento.valor,
+      forma_pagamento ?? movimento.forma_pagamento,
+      cliente_nome ?? movimento.cliente_nome,
+      req.params.id
+    );
+  res.json({ message: 'Movimento atualizado' });
+});
+
+app.delete('/api/caixa/movimentos/:id', (req, res) => {
+  const movimento = db.prepare('SELECT * FROM caixa WHERE id = ?').get(req.params.id);
+  if (!movimento) return res.status(404).json({ error: 'Movimento não encontrado' });
+  const txn = db.transaction(() => {
+    if (movimento.venda_id) {
+      const venda = db.prepare('SELECT * FROM vendas WHERE id = ?').get(movimento.venda_id);
+      if (venda && venda.status !== 'Cancelada') {
+        const itens = db.prepare('SELECT * FROM venda_itens WHERE venda_id = ?').all(venda.id);
+        for (const item of itens) {
+          db.prepare('UPDATE produtos SET estoque = estoque + ? WHERE id = ?').run(item.quantidade, item.produto_id);
+        }
+        db.prepare("UPDATE vendas SET status='Cancelada' WHERE id=?").run(venda.id);
+      }
+    }
+    db.prepare('DELETE FROM caixa WHERE id = ?').run(req.params.id);
+  });
+  txn();
+  res.json({ message: 'Movimento removido' });
+});
+
+app.get('/api/caixa/historico', (req, res) => {
+  const data = db.prepare(`
+    SELECT date(criado_em) AS dia,
+      COALESCE(SUM(CASE WHEN tipo='Abertura' THEN valor ELSE 0 END),0) AS abertura,
+      COALESCE(SUM(CASE WHEN tipo='Entrada' THEN valor ELSE 0 END),0) AS entradas,
+      COALESCE(SUM(CASE WHEN tipo='Venda realizada' THEN valor ELSE 0 END),0) AS vendas,
+      COALESCE(SUM(CASE WHEN tipo='Saída' THEN valor ELSE 0 END),0) AS saidas
+    FROM caixa GROUP BY dia ORDER BY dia DESC LIMIT 60
+  `).all();
+  res.json({ data });
+});
+
 
 // ============ VENDAS ============
 app.post('/api/vendas', (req, res) => {
@@ -513,11 +625,15 @@ app.post('/api/vendas', (req, res) => {
   if (!itens?.length) return res.status(400).json({ error: 'Adicione itens à venda' });
 
   const cfg = Object.fromEntries(db.prepare('SELECT chave, valor FROM config').all().map(r => [r.chave, r.valor]));
+  const clienteNome = cliente_id
+    ? (db.prepare('SELECT nome FROM clientes WHERE id = ?').get(cliente_id)?.nome || 'Visitante')
+    : 'Visitante';
   const insertVenda = db.prepare(`INSERT INTO vendas (cliente_id, total, desconto, forma_pagamento, usuario_id, valor_recebido, troco, parcelas, taxa_cartao)
     VALUES (?,?,?,?,?,?,?,?,?)`);
   const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, quantidade, preco_unitario, subtotal) VALUES (?,?,?,?,?)');
   const updateEstoque = db.prepare('UPDATE produtos SET estoque = estoque - ? WHERE id = ? AND estoque >= ?');
-  const insertCaixa = db.prepare('INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, usuario_id) VALUES (?,?,?,?,?)');
+  const insertCaixa = db.prepare(`INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, cliente_nome, desconto, desconto_percent, venda_id, usuario_id)
+    VALUES (?,?,?,?,?,?,?,?,?)`);
 
   const txn = db.transaction(() => {
     let subtotal = 0;
@@ -539,7 +655,8 @@ app.post('/api/vendas', (req, res) => {
       if (ok.changes === 0) throw new Error('Estoque insuficiente');
       insertItem.run(venda.lastInsertRowid, item.produto_id, item.quantidade, item.preco_unitario, item.quantidade * item.preco_unitario);
     }
-    insertCaixa.run('Entrada', `Venda #${venda.lastInsertRowid}`, total, forma_pagamento, usuario_id);
+    insertCaixa.run('Venda realizada', 'Venda', total, forma_pagamento, clienteNome, desc,
+      subtotal > 0 ? (desc / subtotal) * 100 : 0, venda.lastInsertRowid, usuario_id);
     return venda.lastInsertRowid;
   });
 

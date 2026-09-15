@@ -85,8 +85,12 @@ const API = {
     status: () => API.request('/caixa/status'),
     abrir: (d) => API.request('/caixa/abrir', { method: 'POST', body: d }),
     fechar: () => API.request('/caixa/fechar', { method: 'POST' }),
-    movimentos: (p) => API.request(`/caixa/movimentos?${new URLSearchParams(p)}`),
-    movimento: (d) => API.request('/caixa/movimentos', { method: 'POST', body: d })
+    historico: () => API.request('/caixa/historico'),
+    movimentos: (p) => API.request(`/caixa/movimentos?${new URLSearchParams(p || {})}`),
+    movimento: (id) => API.request(`/caixa/movimentos/${id}`),
+    createMovimento: (d) => API.request('/caixa/movimentos', { method: 'POST', body: d }),
+    updateMovimento: (id, d) => API.request(`/caixa/movimentos/${id}`, { method: 'PUT', body: d }),
+    deleteMovimento: (id) => API.request(`/caixa/movimentos/${id}`, { method: 'DELETE' })
   },
 
   vendas: {

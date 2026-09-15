@@ -178,6 +178,10 @@ ensureColumn('vendas', 'parcelas', 'INTEGER DEFAULT 1');
 ensureColumn('vendas', 'taxa_cartao', 'REAL DEFAULT 0');
 ensureColumn('produtos', 'preco_custo', 'REAL DEFAULT 0');
 ensureColumn('produtos', 'foto', 'TEXT');
+ensureColumn('caixa', 'cliente_nome', 'TEXT');
+ensureColumn('caixa', 'desconto', 'REAL DEFAULT 0');
+ensureColumn('caixa', 'desconto_percent', 'REAL DEFAULT 0');
+ensureColumn('caixa', 'venda_id', 'INTEGER');
 
 const defaults = {
   cupom_titulo: 'Scrundai Software',
@@ -202,6 +206,34 @@ if (!adminExists) {
 const caixaStatus = db.prepare('SELECT id FROM caixa_status WHERE id = 1').get();
 if (!caixaStatus) {
   db.prepare('INSERT INTO caixa_status (id, aberto) VALUES (1, 0)').run();
+}
+
+const legadoVendas = db.prepare("SELECT id, descricao FROM caixa WHERE tipo = 'Entrada' AND descricao LIKE 'Venda #%'").all();
+if (legadoVendas.length) {
+  const updateLegado = db.prepare(`UPDATE caixa SET tipo = 'Venda realizada', descricao = 'Venda',
+    venda_id = ?, cliente_nome = ?, desconto = ?, desconto_percent = ? WHERE id = ?`);
+  for (const row of legadoVendas) {
+    const vendaId = parseInt((String(row.descricao).match(/Venda #(\d+)/) || [])[1], 10) || null;
+    const venda = vendaId
+      ? db.prepare(`SELECT v.desconto, c.nome AS cliente_nome FROM vendas v
+          LEFT JOIN clientes c ON v.cliente_id = c.id WHERE v.id = ?`).get(vendaId)
+      : null;
+    const desconto = venda?.desconto || 0;
+    const base = db.prepare('SELECT COALESCE(SUM(subtotal),0) AS subtotal FROM venda_itens WHERE venda_id = ?').get(vendaId)?.subtotal || 0;
+    const percent = base > 0 ? (desconto / base) * 100 : 0;
+    updateLegado.run(vendaId, venda?.cliente_nome || 'Visitante', desconto, percent, row.id);
+  }
+}
+
+const statusAberto = db.prepare('SELECT * FROM caixa_status WHERE id = 1').get();
+if (statusAberto?.aberto === 1 && statusAberto.aberto_em) {
+  const abertura = db.prepare("SELECT id FROM caixa WHERE tipo = 'Abertura' AND criado_em >= ?").get(statusAberto.aberto_em);
+  if (!abertura) {
+    const n = db.prepare("SELECT COUNT(*) AS c FROM caixa WHERE tipo = 'Abertura'").get().c + 1;
+    db.prepare(`INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, cliente_nome, usuario_id)
+      VALUES ('Abertura', ?, ?, NULL, 'Saldo inicial', ?)`)
+      .run(`Abertura de caixa ${String(n).padStart(2, '0')}`, statusAberto.valor_inicial || 0, statusAberto.usuario_id || null);
+  }
 }
 
 const produtoExemplo = db.prepare('SELECT id FROM produtos LIMIT 1').get();
