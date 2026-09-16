@@ -28,6 +28,16 @@ function paginate(query, params, page = 1, limit = 15, search = '') {
   return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) || 1 };
 }
 
+function safeParseJson(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 // ============ AUTH ============
 app.post('/api/auth/login', (req, res) => {
   const { email, senha } = req.body;
@@ -259,11 +269,11 @@ app.get('/api/produtos', (req, res) => {
 });
 
 app.get('/api/produtos/all', (req, res) => {
-  res.json(db.prepare('SELECT id, nome, preco, estoque, codigo FROM produtos WHERE ativo = 1 ORDER BY nome').all());
+  res.json(db.prepare('SELECT id, nome, preco, preco_custo, estoque, codigo, categoria FROM produtos WHERE ativo = 1 ORDER BY nome').all());
 });
 
 app.get('/api/produtos/codigo/:codigo', (req, res) => {
-  const row = db.prepare('SELECT id, nome, preco, estoque, estoque_minimo, codigo FROM produtos WHERE ativo = 1 AND codigo = ?').get(req.params.codigo);
+  const row = db.prepare('SELECT id, nome, preco, estoque, estoque_minimo, codigo, categoria FROM produtos WHERE ativo = 1 AND codigo = ?').get(req.params.codigo);
   if (!row) return res.status(404).json({ error: 'Produto não encontrado' });
   res.json(row);
 });
@@ -630,7 +640,7 @@ app.post('/api/vendas', (req, res) => {
     : 'Visitante';
   const insertVenda = db.prepare(`INSERT INTO vendas (cliente_id, total, desconto, forma_pagamento, usuario_id, valor_recebido, troco, parcelas, taxa_cartao)
     VALUES (?,?,?,?,?,?,?,?,?)`);
-  const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, quantidade, preco_unitario, subtotal) VALUES (?,?,?,?,?)');
+  const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, descricao, quantidade, preco_unitario, subtotal) VALUES (?,?,?,?,?,?)');
   const updateEstoque = db.prepare('UPDATE produtos SET estoque = estoque - ? WHERE id = ? AND estoque >= ?');
   const insertCaixa = db.prepare(`INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, cliente_nome, desconto, desconto_percent, venda_id, usuario_id)
     VALUES (?,?,?,?,?,?,?,?,?)`);
@@ -651,9 +661,14 @@ app.post('/api/vendas', (req, res) => {
     const qtdParcelas = parcelas || 1;
     const venda = insertVenda.run(cliente_id || null, total, desc, forma_pagamento, usuario_id, recebido, troco, qtdParcelas, taxa);
     for (const item of itens) {
-      const ok = updateEstoque.run(item.quantidade, item.produto_id, item.quantidade);
-      if (ok.changes === 0) throw new Error('Estoque insuficiente');
-      insertItem.run(venda.lastInsertRowid, item.produto_id, item.quantidade, item.preco_unitario, item.quantidade * item.preco_unitario);
+      const quantidade = Number(item.quantidade) || 1;
+      const preco = Number(item.preco_unitario) || 0;
+      if (item.produto_id) {
+        const ok = updateEstoque.run(quantidade, item.produto_id, quantidade);
+        if (ok.changes === 0) throw new Error('Estoque insuficiente');
+      }
+      insertItem.run(venda.lastInsertRowid, item.produto_id || null, item.descricao || null,
+        quantidade, preco, quantidade * preco);
     }
     insertCaixa.run('Venda realizada', 'Venda', total, forma_pagamento, clienteNome, desc,
       subtotal > 0 ? (desc / subtotal) * 100 : 0, venda.lastInsertRowid, usuario_id);
@@ -669,17 +684,19 @@ app.post('/api/vendas', (req, res) => {
 });
 
 app.get('/api/vendas', (req, res) => {
-  const { search = '', page = 1, limit = 15 } = req.query;
+  const { search = '', page = 1, limit = 15, cliente_id, status } = req.query;
   let query = `SELECT v.*, c.nome as cliente_nome, u.nome as usuario_nome FROM vendas v
     LEFT JOIN clientes c ON v.cliente_id = c.id
     LEFT JOIN usuarios u ON v.usuario_id = u.id WHERE 1=1`;
   const params = [];
+  if (cliente_id) { query += ' AND v.cliente_id = ?'; params.push(cliente_id); }
+  if (status) { query += ' AND v.status = ?'; params.push(status); }
   if (search) {
     query += ' AND (c.nome LIKE ? OR CAST(v.id AS TEXT) LIKE ? OR v.forma_pagamento LIKE ?)';
     const s = `%${search}%`;
     params.push(s, s, s);
   }
-  query += ' ORDER BY v.criado_em DESC';
+  query += ' ORDER BY v.criado_em DESC, v.id DESC';
   const countQ = query.replace(/SELECT v\.\*, c\.nome as cliente_nome, u\.nome as usuario_nome/, 'SELECT COUNT(*) as total');
   const total = db.prepare(countQ).get(...params)?.total || 0;
   const offset = (page - 1) * limit;
@@ -696,7 +713,8 @@ app.get('/api/vendas/:id', (req, res) => {
   `).get(req.params.id);
   if (!venda) return res.status(404).json({ error: 'Venda não encontrada' });
   const itens = db.prepare(`
-    SELECT vi.*, p.nome as produto_nome, p.codigo as codigo FROM venda_itens vi
+    SELECT vi.*, COALESCE(p.nome, vi.descricao) as produto_nome, p.codigo as codigo
+    FROM venda_itens vi
     LEFT JOIN produtos p ON vi.produto_id = p.id WHERE vi.venda_id = ?
   `).all(req.params.id);
   const cfg = Object.fromEntries(db.prepare('SELECT chave, valor FROM config').all().map(r => [r.chave, r.valor]));
@@ -710,7 +728,7 @@ app.post('/api/vendas/:id/cancelar', (req, res) => {
   const itens = db.prepare('SELECT * FROM venda_itens WHERE venda_id = ?').all(req.params.id);
   const txn = db.transaction(() => {
     for (const item of itens) {
-      db.prepare('UPDATE produtos SET estoque = estoque + ? WHERE id = ?').run(item.quantidade, item.produto_id);
+      if (item.produto_id) db.prepare('UPDATE produtos SET estoque = estoque + ? WHERE id = ?').run(item.quantidade, item.produto_id);
     }
     db.prepare("UPDATE vendas SET status='Cancelada' WHERE id=?").run(req.params.id);
     db.prepare('INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, usuario_id) VALUES (?,?,?,?,?)')
@@ -718,6 +736,48 @@ app.post('/api/vendas/:id/cancelar', (req, res) => {
   });
   txn();
   res.json({ message: 'Venda cancelada' });
+});
+
+// ============ ORÇAMENTOS ============
+app.get('/api/orcamentos', (req, res) => {
+  const { search = '', page = 1, limit = 15 } = req.query;
+  let query = `SELECT o.* FROM orcamentos o WHERE 1=1`;
+  const params = [];
+  if (search) {
+    query += ' AND (o.cliente_nome LIKE ? OR CAST(o.id AS TEXT) LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s);
+  }
+  query += ' ORDER BY o.criado_em DESC, o.id DESC';
+  const countQ = query.replace('SELECT o.*', 'SELECT COUNT(*) as total');
+  const total = db.prepare(countQ).get(...params)?.total || 0;
+  const offset = (page - 1) * limit;
+  const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset)
+    .map(o => ({ ...o, itens: safeParseJson(o.itens) }));
+  res.json({ data, total, page: +page, limit: +limit, totalPages: Math.ceil(total / limit) || 1 });
+});
+
+app.get('/api/orcamentos/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM orcamentos WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Orçamento não encontrado' });
+  const cfg = Object.fromEntries(db.prepare('SELECT chave, valor FROM config').all().map(r => [r.chave, r.valor]));
+  res.json({ ...row, itens: safeParseJson(row.itens), cupom: cfg });
+});
+
+app.post('/api/orcamentos', (req, res) => {
+  const { cliente_id, cliente_nome, itens, subtotal, desconto, total, observacao, usuario_id } = req.body;
+  if (!itens?.length) return res.status(400).json({ error: 'Adicione itens ao orçamento' });
+  const result = db.prepare(`INSERT INTO orcamentos (cliente_id, cliente_nome, itens, subtotal, desconto, total, observacao, usuario_id)
+    VALUES (?,?,?,?,?,?,?,?)`).run(
+    cliente_id || null, cliente_nome || 'Visitante', JSON.stringify(itens),
+    subtotal || 0, desconto || 0, total || 0, observacao || null, usuario_id || null
+  );
+  res.json({ id: result.lastInsertRowid, message: 'Orçamento salvo' });
+});
+
+app.delete('/api/orcamentos/:id', (req, res) => {
+  db.prepare('DELETE FROM orcamentos WHERE id = ?').run(req.params.id);
+  res.json({ message: 'Orçamento removido' });
 });
 
 // ============ FINANCEIRO ============

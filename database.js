@@ -136,11 +136,27 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     venda_id INTEGER NOT NULL,
     produto_id INTEGER,
+    descricao TEXT,
     quantidade INTEGER DEFAULT 1,
     preco_unitario REAL DEFAULT 0,
     subtotal REAL DEFAULT 0,
     FOREIGN KEY (venda_id) REFERENCES vendas(id) ON DELETE CASCADE,
     FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS orcamentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_id INTEGER,
+    cliente_nome TEXT,
+    itens TEXT,
+    subtotal REAL DEFAULT 0,
+    desconto REAL DEFAULT 0,
+    total REAL DEFAULT 0,
+    status TEXT DEFAULT 'Aberto',
+    observacao TEXT,
+    usuario_id INTEGER,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id)
   );
 
   CREATE TABLE IF NOT EXISTS financeiro (
@@ -182,6 +198,7 @@ ensureColumn('caixa', 'cliente_nome', 'TEXT');
 ensureColumn('caixa', 'desconto', 'REAL DEFAULT 0');
 ensureColumn('caixa', 'desconto_percent', 'REAL DEFAULT 0');
 ensureColumn('caixa', 'venda_id', 'INTEGER');
+ensureColumn('venda_itens', 'descricao', 'TEXT');
 
 const defaults = {
   cupom_titulo: 'Scrundai Software',

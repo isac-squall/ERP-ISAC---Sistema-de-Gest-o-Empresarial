@@ -100,6 +100,13 @@ const API = {
     cancelar: (id) => API.request(`/vendas/${id}/cancelar`, { method: 'POST' })
   },
 
+  orcamentos: {
+    list: (p) => API.request(`/orcamentos?${new URLSearchParams(p || {})}`),
+    get: (id) => API.request(`/orcamentos/${id}`),
+    create: (d) => API.request('/orcamentos', { method: 'POST', body: d }),
+    delete: (id) => API.request(`/orcamentos/${id}`, { method: 'DELETE' })
+  },
+
   financeiro: {
     list: (p) => API.request(`/financeiro?${new URLSearchParams(p)}`),
     get: (id) => API.request(`/financeiro/${id}`),

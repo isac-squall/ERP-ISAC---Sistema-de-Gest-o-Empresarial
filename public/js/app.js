@@ -84,6 +84,7 @@ function bindGlobalEvents() {
   document.addEventListener('click', () => {
     document.getElementById('notif-panel')?.classList.add('hidden');
     closeProdutoMenus();
+    esconderPosResultados();
   });
 
   document.getElementById('fullscreen-btn').onclick = () => {
@@ -108,6 +109,18 @@ function bindGlobalEvents() {
         calcDisplay.value = calcDisplay.value === '0' ? v : calcDisplay.value + v;
       }
     };
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (currentPage !== 'vendas') return;
+    if (e.key === 'F7') { e.preventDefault(); posFinalizarVenda(); return; }
+    if (e.key === 'F8') { e.preventDefault(); posProdutoServico(); return; }
+    if (e.key === 'F6') { e.preventDefault(); posHistoricoPedido(); return; }
+    if (e.key === 'F3') { e.preventDefault(); posCancelarVenda(); return; }
+    if (e.ctrlKey && (e.key === 't' || e.key === 'T')) { e.preventDefault(); posNovaAba(); return; }
+    if (e.ctrlKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); posFecharAba(); return; }
+    if (e.ctrlKey && e.key === 'ArrowRight') { e.preventDefault(); posIrAba(1); return; }
+    if (e.ctrlKey && e.key === 'ArrowLeft') { e.preventDefault(); posIrAba(-1); return; }
   });
 }
 
@@ -894,13 +907,74 @@ async function deleteUsuario(id) {
 }
 
 // ===================== VENDAS (POS) =====================
-let cart = [];
 let posProdutos = [];
 let erpConfig = {};
+let posTabs = [];
+let posTabIndex = 0;
+let posSearchField = 'nome';
+
+const POS_CAMPOS = [
+  { value: 'nome', label: 'Nome' },
+  { value: 'codigo', label: 'Código de barras' },
+  { value: 'sku', label: 'SKU / categoria' },
+  { value: 'id', label: 'ID' }
+];
+
+function posTabAtual() { return posTabs[posTabIndex]; }
+
+function posSubtotal(tab = posTabAtual()) {
+  return (tab?.itens || []).reduce((s, i) => s + i.quantidade * i.preco_unitario, 0);
+}
+
+function posDesconto(tab = posTabAtual()) { return Number(tab?.desconto) || 0; }
+
+function posTotalComTaxa(tab, forma) {
+  const subtotal = posSubtotal(tab);
+  let total = Math.max(0, subtotal - posDesconto(tab));
+  let taxa = 0;
+  if (forma === 'Cartão Crédito') taxa = total * (parseFloat(erpConfig.taxa_credito || 0) / 100);
+  if (forma === 'Cartão Débito') taxa = total * (parseFloat(erpConfig.taxa_debito || 0) / 100);
+  return { subtotal, desconto: posDesconto(tab), taxa, total: total + taxa };
+}
+
+function salvarPosTabs() {
+  try { sessionStorage.setItem('erp_pos_tabs', JSON.stringify({ tabs: posTabs, index: posTabIndex })); } catch {}
+}
+
+function novaPosTab(cliente) {
+  posTabs.push({
+    id: Date.now() + Math.random(),
+    cliente_id: cliente?.id || null,
+    cliente_nome: cliente?.nome || 'Visitante',
+    itens: [],
+    desconto: 0
+  });
+  posTabIndex = posTabs.length - 1;
+  salvarPosTabs();
+  return posTabAtual();
+}
+
+function posNovaAba() { novaPosTab(); updatePosUI(); }
+
+function posIrAba(dir) {
+  if (posTabs.length < 2) return;
+  posTabIndex = (posTabIndex + dir + posTabs.length) % posTabs.length;
+  salvarPosTabs();
+  updatePosUI();
+}
+
+function posFecharAba() {
+  if (posTabs.length <= 1) { showToast('Não é possível fechar a única aba', 'error'); return; }
+  posTabs.splice(posTabIndex, 1);
+  if (posTabIndex >= posTabs.length) posTabIndex = posTabs.length - 1;
+  salvarPosTabs();
+  updatePosUI();
+  showToast('Aba fechada', 'success');
+}
 
 async function renderVendas() {
-  const [produtos, clientes, caixaStatus, cfg] = await Promise.all([
-    API.produtos.all(), API.clientes.all(), API.caixa.status(), API.config.get()
+  const [produtos, caixaStatus, cfg] = await Promise.all([
+    API.produtos.all(), API.caixa.status(), API.config.get()
   ]);
   posProdutos = produtos;
   erpConfig = cfg || {};
@@ -917,196 +991,586 @@ async function renderVendas() {
     return;
   }
 
+  const salvo = (() => {
+    try { return JSON.parse(sessionStorage.getItem('erp_pos_tabs') || 'null'); } catch { return null; }
+  })();
+  if (salvo?.tabs?.length && Array.isArray(salvo.tabs)) {
+    posTabs = salvo.tabs;
+    posTabIndex = Math.min(Math.max(0, salvo.index || 0), posTabs.length - 1);
+  } else {
+    posTabs = [];
+    posTabIndex = 0;
+    novaPosTab();
+  }
+
   document.getElementById('content').innerHTML = `
-    ${pageHeader('Realizar vendas', 'Dashboard / Realizar vendas')}
-    <div class="pos-layout">
-      <div class="pos-products">
-        <div class="search-box" style="margin-bottom:12px;max-width:100%">
-          <i class="fas fa-barcode"></i>
-          <input type="text" id="pos-search" placeholder="Buscar produto ou código de barras..." autofocus>
-        </div>
-        <div class="product-grid" id="product-grid">${renderPosGrid(produtos)}</div>
+    <div class="pos-topbar">
+      <div class="pos-topbar-left">
+        <button class="pos-round" id="pos-aba-prev" title="Aba anterior"><i class="fas fa-chevron-left"></i></button>
+        <button class="pos-client" id="pos-cliente-btn">
+          <i class="fas fa-shopping-cart"></i>
+          <span id="pos-cliente-nome">Visitante</span>
+        </button>
       </div>
-      <div class="cart-panel">
-        <div class="cart-header"><h3><i class="fas fa-shopping-cart"></i> Carrinho</h3></div>
-        <div class="cart-items" id="cart-items"></div>
-        <div class="cart-footer">
-          <div class="form-group"><label>Cliente</label>
-            <select id="venda-cliente"><option value="">Avulso</option>
-              ${clientes.map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('')}
-            </select></div>
-          <div class="form-row">
-            <div class="form-group"><label>Desconto</label><input id="venda-desconto" type="number" step="0.01" min="0" value="0"></div>
-            <div class="form-group"><label>Pagamento</label>
-              <select id="venda-pagamento">
-                <option>Dinheiro</option><option>Cartão Débito</option><option>Cartão Crédito</option><option>PIX</option>
-              </select></div>
-          </div>
-          <div class="form-row" id="pos-extra-fields">
-            <div class="form-group"><label>Valor recebido</label><input id="venda-recebido" type="number" step="0.01" min="0" value="0"></div>
-            <div class="form-group"><label>Parcelas</label><input id="venda-parcelas" type="number" min="1" value="1"></div>
-          </div>
-          <div class="cart-total"><span>Total:</span><span id="cart-total">${formatCurrency(0)}</span></div>
-          <div class="cart-troco muted" id="cart-troco"></div>
-          <button class="btn btn-success btn-block" id="finalizar-venda"><i class="fas fa-check"></i> Finalizar Venda</button>
+      <div class="pos-topbar-right">
+        <button class="pos-round" id="pos-aba-next" title="Próxima aba"><i class="fas fa-chevron-right"></i></button>
+        <button class="pos-round pos-round-add" id="pos-aba-nova" title="Nova aba (Ctrl+T)"><i class="fas fa-plus"></i></button>
+        <span class="pos-tab-indicator" id="pos-tab-indicator">1/1</span>
+      </div>
+    </div>
+    <div class="pos-search-row">
+      <div class="pos-search">
+        <i class="fas fa-search pos-search-icon"></i>
+        <select id="pos-search-field" title="Campo de busca">
+          ${POS_CAMPOS.map(c => `<option value="${c.value}">${c.label}</option>`).join('')}
+        </select>
+        <i class="fas fa-chevron-down pos-search-arrow"></i>
+        <input type="text" id="pos-search" placeholder="Pesquisar por nome, código de barras, SKU ou ID" autocomplete="off">
+        <div class="pos-results hidden" id="pos-results"></div>
+      </div>
+      <div class="pos-search-actions">
+        <button class="btn btn-primary" id="pos-pdf"><i class="fas fa-download"></i> PDF</button>
+        <button class="btn btn-teal" id="pos-orcamento"><i class="fas fa-shopping-cart"></i> Orçamento</button>
+      </div>
+    </div>
+    <div class="pos-layout">
+      <div class="pos-main">
+        <table class="data-table pos-table">
+          <thead><tr>
+            <th>#</th><th>Produto</th><th>Código de barras</th><th>Itens</th><th>Preço</th><th>Total</th>
+          </tr></thead>
+          <tbody id="pos-tbody"></tbody>
+        </table>
+      </div>
+      <div class="pos-side">
+        <div class="pos-side-head">
+          <div class="pos-side-stat"><span>Itens</span><strong id="pos-itens">0</strong></div>
+          <div class="pos-side-stat pos-side-total"><span>Total</span><strong id="pos-total">${formatCurrency(0)}</strong></div>
+        </div>
+        <div class="pos-side-btns">
+          <button class="pos-action pos-f7" id="pos-f7"><span>F7 - Finalizar venda</span></button>
+          <button class="pos-action pos-f8" id="pos-f8"><span>F8 - Produto / serviço</span></button>
+          <button class="pos-action pos-f6" id="pos-f6"><span>F6 - Histórico pedido</span></button>
+          <button class="pos-action pos-f3" id="pos-f3"><span>F3 - Cancelar venda</span></button>
+        </div>
+        <div class="pos-shortcuts">
+          <h4>ATALHOS</h4>
+          <p>F7 = Finalizar venda</p>
+          <p>F8 = Produto / serviço</p>
+          <p>F3 = Cancelar venda</p>
+          <p>Ctrl+T = Adicionar nova aba</p>
+          <p>Ctrl+W = Exclusão de aba</p>
+          <p>&larr; &rarr; = Alternar abas</p>
         </div>
       </div>
     </div>`;
 
-  cart = [];
-  updateCart();
+  updatePosUI();
+
   const searchEl = document.getElementById('pos-search');
-  searchEl.oninput = debounce((e) => filterPosProducts(e.target.value), 200);
+  searchEl.oninput = (e) => mostrarPosResultados(e.target.value);
   searchEl.onkeydown = async (e) => {
+    if (e.key === 'Escape') { esconderPosResultados(); return; }
     if (e.key !== 'Enter') return;
     e.preventDefault();
     const q = e.target.value.trim();
     if (!q) return;
-    try {
-      const p = await API.produtos.byCodigo(q);
-      await addToCart(p.id, p.nome, p.preco, p.estoque);
-      e.target.value = '';
-      filterPosProducts('');
-    } catch {
-      filterPosProducts(q);
+    const achados = posFiltrarProdutos(q);
+    if (posSearchField === 'codigo') {
+      try {
+        const p = await API.produtos.byCodigo(q);
+        posAdicionarItem(p);
+        searchEl.value = '';
+        esconderPosResultados();
+        return;
+      } catch {}
+    }
+    if (achados.length) {
+      posAdicionarItem(achados[0]);
+      searchEl.value = '';
+      esconderPosResultados();
+    } else {
+      showToast('Produto não encontrado', 'error');
     }
   };
-  document.getElementById('venda-desconto').oninput = updateCart;
-  document.getElementById('venda-recebido').oninput = updateCart;
-  document.getElementById('venda-pagamento').onchange = updateCart;
-  document.getElementById('finalizar-venda').onclick = finalizarVenda;
+  document.getElementById('pos-search-field').onchange = (e) => {
+    posSearchField = e.target.value;
+    mostrarPosResultados(document.getElementById('pos-search').value);
+  };
+
+  document.getElementById('pos-aba-prev').onclick = () => posIrAba(-1);
+  document.getElementById('pos-aba-next').onclick = () => posIrAba(1);
+  document.getElementById('pos-aba-nova').onclick = posNovaAba;
+  document.getElementById('pos-cliente-btn').onclick = posSelecionarCliente;
+  document.getElementById('pos-pdf').onclick = () => posImprimirPedido('Pedido');
+  document.getElementById('pos-orcamento').onclick = posGerarOrcamento;
+  document.getElementById('pos-f7').onclick = posFinalizarVenda;
+  document.getElementById('pos-f8').onclick = posProdutoServico;
+  document.getElementById('pos-f6').onclick = posHistoricoPedido;
+  document.getElementById('pos-f3').onclick = posCancelarVenda;
 }
 
-function renderPosGrid(produtos) {
-  if (!produtos.length) return '<p class="muted">Nenhum produto cadastrado</p>';
-  return produtos.map(p => `
-    <div class="product-card" data-id="${p.id}" data-nome="${escapeHtml(p.nome)}" data-codigo="${escapeHtml(p.codigo || '')}">
-      <h4>${escapeHtml(p.nome)}</h4>
-      <div class="price">${formatCurrency(p.preco)}</div>
-      <div class="stock">Estoque: ${p.estoque}</div>
+function posFiltrarProdutos(term) {
+  const t = (term || '').trim().toLowerCase();
+  if (!t) return [];
+  return (posProdutos || []).filter(p => {
+    if (posSearchField === 'id') return String(p.id) === t;
+    if (posSearchField === 'codigo') return String(p.codigo || '').toLowerCase().includes(t);
+    if (posSearchField === 'sku') return String(p.categoria || '').toLowerCase().includes(t);
+    return String(p.nome || '').toLowerCase().includes(t);
+  }).slice(0, 12);
+}
+
+function mostrarPosResultados(term) {
+  const box = document.getElementById('pos-results');
+  if (!box) return;
+  const achados = posFiltrarProdutos(term);
+  if (!achados.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  box.innerHTML = achados.map(p => `
+    <div class="pos-result" data-id="${p.id}">
+      <div><strong>${escapeHtml(p.nome)}</strong><br><small>${escapeHtml(p.codigo || 'sem código')}</small></div>
+      <div class="pos-result-right">${formatCurrency(p.preco)}<br><small>Est. ${p.estoque}</small></div>
     </div>`).join('');
-}
-
-function filterPosProducts(q) {
-  const term = (q || '').toLowerCase();
-  document.querySelectorAll('.product-card').forEach(card => {
-    const nome = (card.dataset.nome || '').toLowerCase();
-    const codigo = (card.dataset.codigo || '').toLowerCase();
-    card.style.display = (!term || nome.includes(term) || codigo.includes(term)) ? '' : 'none';
+  box.classList.remove('hidden');
+  box.querySelectorAll('.pos-result').forEach(el => {
+    el.onclick = () => {
+      const p = posProdutos.find(x => x.id === +el.dataset.id);
+      if (p) posAdicionarItem(p);
+      document.getElementById('pos-search').value = '';
+      esconderPosResultados();
+    };
   });
 }
 
-document.addEventListener('click', (e) => {
-  const card = e.target.closest('.product-card');
-  if (!card || !card.closest('#product-grid')) return;
-  const id = +card.dataset.id;
-  const p = posProdutos.find(x => x.id === id);
-  if (p) addToCart(p.id, p.nome, p.preco, p.estoque);
-});
-
-async function addToCart(id, nome, preco, estoque) {
-  if (estoque <= 0) { showToast('Produto sem estoque', 'error'); return; }
-  const existing = cart.find(i => i.produto_id === id);
-  let qtd = 1;
-  if (erpConfig.perguntar_quantidade === '1' && !existing) {
-    const asked = prompt('Quantidade:', '1');
-    if (asked === null) return;
-    qtd = parseInt(asked, 10) || 1;
-  }
-  if (existing) {
-    if (existing.quantidade + qtd > estoque) { showToast('Estoque insuficiente', 'error'); return; }
-    existing.quantidade += qtd;
-  } else {
-    if (qtd > estoque) { showToast('Estoque insuficiente', 'error'); return; }
-    cart.push({ produto_id: id, nome, preco_unitario: preco, quantidade: qtd, estoque });
-  }
-  updateCart();
+function esconderPosResultados() {
+  const box = document.getElementById('pos-results');
+  if (box) { box.classList.add('hidden'); box.innerHTML = ''; }
 }
 
-function getCartTotal() {
-  const desconto = parseFloat(document.getElementById('venda-desconto')?.value) || 0;
-  const subtotal = cart.reduce((s, i) => s + i.quantidade * i.preco_unitario, 0);
-  const forma = document.getElementById('venda-pagamento')?.value || '';
-  let taxa = 0;
-  let total = Math.max(0, subtotal - desconto);
-  if (forma === 'Cartão Crédito') taxa = total * (parseFloat(erpConfig.taxa_credito || 0) / 100);
-  if (forma === 'Cartão Débito') taxa = total * (parseFloat(erpConfig.taxa_debito || 0) / 100);
-  return { subtotal, desconto, taxa, total: total + taxa };
-}
-
-function updateCart() {
-  const container = document.getElementById('cart-items');
-  if (!container) return;
-  if (!cart.length) {
-    container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--text-muted)">Carrinho vazio</p>';
+function posAdicionarItem(produto, quantidade) {
+  if (!produto) return;
+  if (produto.estoque <= 0) { showToast('Produto sem estoque', 'error'); return; }
+  const tab = posTabAtual();
+  const qtd = Math.max(1, parseInt(quantidade, 10) || 1);
+  const existente = tab.itens.find(i => i.produto_id === produto.id);
+  if (existente) {
+    if (existente.quantidade + qtd > produto.estoque) { showToast('Estoque insuficiente', 'error'); return; }
+    existente.quantidade += qtd;
   } else {
-    container.innerHTML = cart.map((item, idx) => `
-      <div class="cart-item">
-        <div class="cart-item-info"><strong>${escapeHtml(item.nome)}</strong><br>${formatCurrency(item.preco_unitario)}</div>
-        <div class="cart-item-qty">
-          <button type="button" data-qty="${idx}" data-delta="-1">-</button>
-          <span>${item.quantidade}</span>
-          <button type="button" data-qty="${idx}" data-delta="1">+</button>
-        </div>
-        <div>${formatCurrency(item.quantidade * item.preco_unitario)}</div>
-        <button class="btn-icon delete" type="button" data-remove="${idx}"><i class="fas fa-times"></i></button>
-      </div>`).join('');
-    container.querySelectorAll('[data-qty]').forEach(btn => {
-      btn.onclick = () => changeQty(+btn.dataset.qty, +btn.dataset.delta);
-    });
-    container.querySelectorAll('[data-remove]').forEach(btn => {
-      btn.onclick = () => removeFromCart(+btn.dataset.remove);
+    if (qtd > produto.estoque) { showToast('Estoque insuficiente', 'error'); return; }
+    tab.itens.push({
+      produto_id: produto.id, nome: produto.nome, codigo: produto.codigo || '',
+      preco_unitario: Number(produto.preco) || 0, quantidade: qtd, estoque: produto.estoque
     });
   }
-  const { total } = getCartTotal();
-  const totalEl = document.getElementById('cart-total');
-  if (totalEl) totalEl.textContent = formatCurrency(total);
-  const recebido = parseFloat(document.getElementById('venda-recebido')?.value) || 0;
-  const trocoEl = document.getElementById('cart-troco');
-  if (trocoEl) {
-    const forma = document.getElementById('venda-pagamento')?.value;
-    if (forma === 'Dinheiro' && recebido > 0) {
-      trocoEl.textContent = 'Troco: ' + formatCurrency(Math.max(0, recebido - total));
-    } else if (forma && forma.startsWith('Cartão')) {
-      trocoEl.textContent = 'Taxa cartão inclusa no total';
-    } else {
-      trocoEl.textContent = '';
-    }
+  salvarPosTabs();
+  updatePosUI();
+}
+
+function posAdicionarServico(descricao, valor, quantidade) {
+  const tab = posTabAtual();
+  tab.itens.push({
+    produto_id: null, servico: true, nome: descricao, codigo: '',
+    preco_unitario: Number(valor) || 0, quantidade: Math.max(1, parseInt(quantidade, 10) || 1), estoque: null
+  });
+  salvarPosTabs();
+  updatePosUI();
+}
+
+function renderPosRows() {
+  const tab = posTabAtual();
+  if (!tab || !tab.itens.length) {
+    return '<tr class="pos-empty-row"><td colspan="6"><div class="pos-livre">Caixa livre</div></td></tr>';
+  }
+  return tab.itens.map((item, idx) => `<tr>
+    <td>${idx + 1}</td>
+    <td>${escapeHtml(item.nome)}${item.servico ? ' <span class="promo-tag">serviço</span>' : ''}</td>
+    <td>${escapeHtml(item.codigo || '-')}</td>
+    <td>
+      <div class="pos-qty">
+        <button type="button" data-qty="${idx}" data-delta="-1">-</button>
+        <span>${item.quantidade}</span>
+        <button type="button" data-qty="${idx}" data-delta="1">+</button>
+        <button type="button" class="pos-row-del" data-remove="${idx}" title="Remover"><i class="fas fa-times"></i></button>
+      </div>
+    </td>
+    <td>${formatCurrency(item.preco_unitario)}</td>
+    <td>${formatCurrency(item.quantidade * item.preco_unitario)}</td>
+  </tr>`).join('');
+}
+
+function updatePosUI() {
+  const tab = posTabAtual();
+  if (!tab) return;
+  const tbody = document.getElementById('pos-tbody');
+  if (tbody) tbody.innerHTML = renderPosRows();
+  const itensEl = document.getElementById('pos-itens');
+  if (itensEl) itensEl.textContent = tab.itens.reduce((s, i) => s + i.quantidade, 0);
+  const totalEl = document.getElementById('pos-total');
+  if (totalEl) totalEl.textContent = formatCurrency(Math.max(0, posSubtotal(tab) - posDesconto(tab)));
+  const clienteEl = document.getElementById('pos-cliente-nome');
+  if (clienteEl) clienteEl.textContent = tab.cliente_nome || 'Visitante';
+  const tabEl = document.getElementById('pos-tab-indicator');
+  if (tabEl) tabEl.textContent = `${posTabIndex + 1}/${posTabs.length}`;
+  if (tbody) {
+    tbody.querySelectorAll('[data-qty]').forEach(btn => {
+      btn.onclick = () => posAlterarQtd(+btn.dataset.qty, +btn.dataset.delta);
+    });
+    tbody.querySelectorAll('[data-remove]').forEach(btn => {
+      btn.onclick = () => posRemoverItem(+btn.dataset.remove);
+    });
   }
 }
 
-function changeQty(idx, delta) {
-  cart[idx].quantidade += delta;
-  if (cart[idx].quantidade <= 0) cart.splice(idx, 1);
-  else if (cart[idx].quantidade > cart[idx].estoque) { cart[idx].quantidade = cart[idx].estoque; showToast('Estoque insuficiente', 'error'); }
-  updateCart();
-}
-
-function removeFromCart(idx) { cart.splice(idx, 1); updateCart(); }
-
-async function finalizarVenda() {
-  if (!cart.length) { showToast('Adicione produtos ao carrinho', 'error'); return; }
-  const { total } = getCartTotal();
-  const forma = document.getElementById('venda-pagamento').value;
-  const recebido = parseFloat(document.getElementById('venda-recebido').value);
-  if (forma === 'Dinheiro' && recebido > 0 && recebido < total) {
-    showToast('Valor recebido menor que o total', 'error');
+function posAlterarQtd(idx, delta) {
+  const item = posTabAtual().itens[idx];
+  if (!item) return;
+  const nova = item.quantidade + delta;
+  if (nova <= 0) { posRemoverItem(idx); return; }
+  if (item.servico) {
+    item.quantidade = nova;
+  } else if (nova > item.estoque) {
+    showToast('Estoque insuficiente', 'error');
     return;
+  } else {
+    item.quantidade = nova;
   }
-  try {
-    const venda = await API.vendas.create({
-      cliente_id: document.getElementById('venda-cliente').value || null,
-      itens: cart.map(i => ({ produto_id: i.produto_id, quantidade: i.quantidade, preco_unitario: i.preco_unitario })),
-      desconto: parseFloat(document.getElementById('venda-desconto').value) || 0,
-      forma_pagamento: forma,
-      usuario_id: currentUser.id,
-      valor_recebido: recebido || total,
-      parcelas: parseInt(document.getElementById('venda-parcelas').value, 10) || 1
+  salvarPosTabs();
+  updatePosUI();
+}
+
+function posRemoverItem(idx) {
+  posTabAtual().itens.splice(idx, 1);
+  salvarPosTabs();
+  updatePosUI();
+}
+
+async function posSelecionarCliente() {
+  const clientes = await API.clientes.all();
+  const render = (lista) => lista.map(c => `
+    <div class="pos-result pos-cliente-item" data-id="${c.id}" data-nome="${escapeHtml(c.nome)}">
+      <div><strong>${escapeHtml(c.nome)}</strong><br><small>${escapeHtml(c.telefone || c.email || '')}</small></div>
+      <i class="fas fa-chevron-right"></i>
+    </div>`).join('');
+  openModal('Selecionar cliente', `
+    <div class="search-box" style="max-width:100%;margin-bottom:12px">
+      <i class="fas fa-search"></i>
+      <input id="pos-cliente-search" placeholder="Pesquisar cliente..." autocomplete="off">
+    </div>
+    <div class="pos-result-list" id="pos-cliente-list">
+      <div class="pos-result pos-cliente-item" data-id="" data-nome="Visitante">
+        <div><strong>Visitante</strong><br><small>Sem cadastro</small></div>
+        <i class="fas fa-chevron-right"></i>
+      </div>
+      ${render(clientes)}
+    </div>`,
+    '<button class="btn btn-outline modal-close-btn">Cancelar</button>');
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  const bind = () => {
+    document.querySelectorAll('#pos-cliente-list .pos-cliente-item').forEach(el => {
+      el.onclick = () => {
+        const tab = posTabAtual();
+        tab.cliente_id = el.dataset.id ? +el.dataset.id : null;
+        tab.cliente_nome = el.dataset.nome || 'Visitante';
+        salvarPosTabs();
+        updatePosUI();
+        closeModal();
+      };
     });
-    showToast('Venda realizada com sucesso!', 'success');
-    if (confirm('Deseja imprimir o cupom?')) await printCupom(venda.id);
-    renderVendas();
-  } catch (err) { showToast(err.message, 'error'); }
+  };
+  bind();
+  document.getElementById('pos-cliente-search').oninput = (e) => {
+    const term = e.target.value.trim().toLowerCase();
+    const filtrados = clientes.filter(c => String(c.nome).toLowerCase().includes(term));
+    document.getElementById('pos-cliente-list').innerHTML = `
+      <div class="pos-result pos-cliente-item" data-id="" data-nome="Visitante">
+        <div><strong>Visitante</strong><br><small>Sem cadastro</small></div>
+        <i class="fas fa-chevron-right"></i>
+      </div>
+      ${render(filtrados)}`;
+    bind();
+  };
+}
+
+function posProdutoServico() {
+  openModal('Produto / serviço', `
+    <div class="pos-modal-tabs">
+      <button type="button" class="active" id="pm-tab-prod"><i class="fas fa-box"></i> Produto</button>
+      <button type="button" id="pm-tab-serv"><i class="fas fa-wrench"></i> Serviço</button>
+    </div>
+    <div id="pm-prod">
+      <div class="search-box" style="max-width:100%;margin-bottom:12px">
+        <i class="fas fa-search"></i>
+        <input id="pm-search" placeholder="Pesquisar produto..." autocomplete="off">
+      </div>
+      <div class="pos-result-list" id="pm-list"></div>
+    </div>
+    <div id="pm-serv" class="hidden">
+      <div class="form-group"><label>Descrição do serviço</label><input id="pm-serv-desc" placeholder="Ex: Formatação, instalação"></div>
+      <div class="form-row">
+        <div class="form-group"><label>Valor</label><input id="pm-serv-valor" type="number" step="0.01" min="0" value="0"></div>
+        <div class="form-group"><label>Quantidade</label><input id="pm-serv-qtd" type="number" min="1" value="1"></div>
+      </div>
+    </div>`,
+    `<button class="btn btn-outline modal-close-btn">Fechar</button>
+     <button class="btn btn-success hidden" id="pm-serv-add">Adicionar serviço</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+
+  const renderLista = (term) => {
+    const lista = term ? posFiltrarProdutos(term) : (posProdutos || []).slice(0, 50);
+    const box = document.getElementById('pm-list');
+    box.innerHTML = lista.length ? lista.map(p => `
+      <div class="pos-result" data-id="${p.id}">
+        <div><strong>${escapeHtml(p.nome)}</strong><br><small>${escapeHtml(p.codigo || 'sem código')}</small></div>
+        <div class="pos-result-right">${formatCurrency(p.preco)}<br><small>Est. ${p.estoque}</small></div>
+      </div>`).join('') : '<p class="muted" style="padding:12px">Nenhum produto encontrado</p>';
+    box.querySelectorAll('.pos-result').forEach(el => {
+      el.onclick = () => {
+        const p = posProdutos.find(x => x.id === +el.dataset.id);
+        if (p) { posAdicionarItem(p); closeModal(); }
+      };
+    });
+  };
+  renderLista('');
+  document.getElementById('pm-search').oninput = (e) => renderLista(e.target.value.trim());
+  document.getElementById('pm-tab-prod').onclick = () => {
+    document.getElementById('pm-tab-prod').classList.add('active');
+    document.getElementById('pm-tab-serv').classList.remove('active');
+    document.getElementById('pm-prod').classList.remove('hidden');
+    document.getElementById('pm-serv').classList.add('hidden');
+    document.getElementById('pm-serv-add').classList.add('hidden');
+  };
+  document.getElementById('pm-tab-serv').onclick = () => {
+    document.getElementById('pm-tab-serv').classList.add('active');
+    document.getElementById('pm-tab-prod').classList.remove('active');
+    document.getElementById('pm-serv').classList.remove('hidden');
+    document.getElementById('pm-prod').classList.add('hidden');
+    document.getElementById('pm-serv-add').classList.remove('hidden');
+  };
+  document.getElementById('pm-serv-add').onclick = () => {
+    const desc = document.getElementById('pm-serv-desc').value.trim();
+    if (!desc) { showToast('Informe a descrição do serviço', 'error'); return; }
+    posAdicionarServico(desc, document.getElementById('pm-serv-valor').value, document.getElementById('pm-serv-qtd').value);
+    closeModal();
+  };
+}
+
+async function posHistoricoPedido() {
+  const tab = posTabAtual();
+  const params = { page: 1, limit: 15 };
+  if (tab.cliente_id) params.cliente_id = tab.cliente_id;
+  const result = await API.vendas.list(params);
+  openModal('Histórico de pedidos', result.data.length ? `
+    <p class="muted" style="margin-bottom:12px">
+      ${tab.cliente_id ? `Pedidos de ${escapeHtml(tab.cliente_nome)}` : 'Últimos pedidos'}
+    </p>
+    <table class="data-table"><thead><tr><th>#</th><th>Cliente</th><th>Total</th><th>Pagamento</th><th>Data</th><th></th></tr></thead>
+      <tbody>${result.data.map(v => `<tr>
+        <td>${v.id}</td>
+        <td>${escapeHtml(v.cliente_nome || 'Visitante')}</td>
+        <td>${formatCurrency(v.total)}</td>
+        <td>${escapeHtml(v.forma_pagamento || '-')}</td>
+        <td>${formatDateTime(v.criado_em)}</td>
+        <td><button class="btn btn-sm btn-primary" data-repetir="${v.id}"><i class="fas fa-redo"></i> Repetir</button></td>
+      </tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nenhum pedido encontrado.</p>',
+    '<button class="btn btn-outline modal-close-btn">Fechar</button>');
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.querySelectorAll('[data-repetir]').forEach(btn => {
+    btn.onclick = async () => {
+      try {
+        const venda = await API.vendas.get(+btn.dataset.repetir);
+        const tabAtual = posTabAtual();
+        for (const item of venda.itens || []) {
+          if (item.produto_id) {
+            const p = posProdutos.find(x => x.id === item.produto_id);
+            if (p && p.estoque > 0) posAdicionarItem(p, item.quantidade);
+          } else {
+            posAdicionarServico(item.produto_nome || item.descricao || 'Serviço', item.preco_unitario, item.quantidade);
+          }
+        }
+        tabAtual.desconto = venda.desconto || 0;
+        salvarPosTabs();
+        updatePosUI();
+        closeModal();
+        showToast('Pedido carregado na aba', 'success');
+      } catch (err) { showToast(err.message, 'error'); }
+    };
+  });
+}
+
+function posCancelarVenda() {
+  const tab = posTabAtual();
+  if (!tab.itens.length) { showToast('Nenhum item para cancelar', 'error'); return; }
+  if (!confirm('Cancelar a venda atual e limpar todos os itens?')) return;
+  tab.itens = [];
+  tab.desconto = 0;
+  salvarPosTabs();
+  updatePosUI();
+  showToast('Venda cancelada', 'success');
+}
+
+function posFinalizarVenda() {
+  const tab = posTabAtual();
+  if (!tab.itens.length) { showToast('Adicione produtos ao carrinho', 'error'); return; }
+  const subtotal = posSubtotal(tab);
+  openModal('Finalizar venda', `
+    <form id="pos-venda-form">
+      <div class="form-group"><label>Cliente</label>
+        <input value="${escapeHtml(tab.cliente_nome || 'Visitante')}" disabled></div>
+      <div class="form-row">
+        <div class="form-group"><label>Desconto (R$)</label>
+          <input id="pos-form-desconto" name="desconto" type="number" step="0.01" min="0" value="${posDesconto(tab)}"></div>
+        <div class="form-group"><label>Pagamento</label>
+          <select id="pos-form-pagamento" name="forma_pagamento">
+            <option>Dinheiro</option><option>Cartão Débito</option><option>Cartão Crédito</option><option>PIX</option>
+          </select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Valor recebido</label>
+          <input id="pos-form-recebido" name="valor_recebido" type="number" step="0.01" min="0" value="${subtotal}"></div>
+        <div class="form-group"><label>Parcelas</label>
+          <input id="pos-form-parcelas" name="parcelas" type="number" min="1" value="1"></div>
+      </div>
+      <div class="contas-resumo">
+        <div><span>Subtotal</span><strong>${formatCurrency(subtotal)}</strong></div>
+        <div><span>Desconto</span><strong id="pos-form-desc-view">${formatCurrency(posDesconto(tab))}</strong></div>
+        <div><span>Taxa cartão</span><strong id="pos-form-taxa">${formatCurrency(0)}</strong></div>
+        <div><span>Total</span><strong id="pos-form-total">${formatCurrency(Math.max(0, subtotal - posDesconto(tab)))}</strong></div>
+        <div><span>Troco</span><strong id="pos-form-troco">${formatCurrency(0)}</strong></div>
+      </div>
+    </form>`,
+    '<button class="btn btn-outline modal-close-btn">Cancelar</button>' +
+    '<button class="btn btn-success" id="pos-form-confirmar"><i class="fas fa-check"></i> Finalizar venda</button>');
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+
+  const recalcular = () => {
+    const desc = parseFloat(document.getElementById('pos-form-desconto').value) || 0;
+    const forma = document.getElementById('pos-form-pagamento').value;
+    const recebido = parseFloat(document.getElementById('pos-form-recebido').value) || 0;
+    let total = Math.max(0, subtotal - desc);
+    let taxa = 0;
+    if (forma === 'Cartão Crédito') taxa = total * (parseFloat(erpConfig.taxa_credito || 0) / 100);
+    if (forma === 'Cartão Débito') taxa = total * (parseFloat(erpConfig.taxa_debito || 0) / 100);
+    total += taxa;
+    document.getElementById('pos-form-desc-view').textContent = formatCurrency(desc);
+    document.getElementById('pos-form-taxa').textContent = formatCurrency(taxa);
+    document.getElementById('pos-form-total').textContent = formatCurrency(total);
+    document.getElementById('pos-form-troco').textContent = formatCurrency(Math.max(0, recebido - total));
+  };
+  document.getElementById('pos-form-desconto').oninput = recalcular;
+  document.getElementById('pos-form-pagamento').onchange = recalcular;
+  document.getElementById('pos-form-recebido').oninput = recalcular;
+
+  document.getElementById('pos-form-confirmar').onclick = async () => {
+    const desc = parseFloat(document.getElementById('pos-form-desconto').value) || 0;
+    const forma = document.getElementById('pos-form-pagamento').value;
+    const recebido = parseFloat(document.getElementById('pos-form-recebido').value) || 0;
+    const total = posTotalComTaxa(tab, forma).total;
+    if (forma === 'Dinheiro' && recebido > 0 && recebido < total) {
+      showToast('Valor recebido menor que o total', 'error');
+      return;
+    }
+    try {
+      const venda = await API.vendas.create({
+        cliente_id: tab.cliente_id || null,
+        itens: tab.itens.map(i => ({
+          produto_id: i.produto_id, descricao: i.servico ? i.nome : null,
+          quantidade: i.quantidade, preco_unitario: i.preco_unitario
+        })),
+        desconto: desc,
+        forma_pagamento: forma,
+        usuario_id: currentUser.id,
+        valor_recebido: recebido || total,
+        parcelas: parseInt(document.getElementById('pos-form-parcelas').value, 10) || 1
+      });
+      tab.itens = [];
+      tab.desconto = 0;
+      salvarPosTabs();
+      closeModal();
+      showToast('Venda realizada com sucesso!', 'success');
+      if (confirm('Deseja imprimir o cupom?')) await printCupom(venda.id);
+      updatePosUI();
+      refreshNotificacoes();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+function printPosDocumento(titulo, tab) {
+  const area = document.getElementById('print-area');
+  const subtotal = posSubtotal(tab);
+  const desconto = posDesconto(tab);
+  const total = Math.max(0, subtotal - desconto);
+  area.innerHTML = `
+    <div class="cupom">
+      <h3>${escapeHtml(erpConfig.cupom_titulo || 'ERP ISAC')}</h3>
+      <pre>${escapeHtml(erpConfig.cupom_cabecalho || '')}</pre>
+      <h4>${escapeHtml(titulo)}</h4>
+      <p>${formatDateTime(new Date())}</p>
+      <p>Cliente: ${escapeHtml(tab.cliente_nome || 'Visitante')}</p>
+      <table>
+        ${tab.itens.map(i => `<tr><td>${escapeHtml(i.nome)} x${i.quantidade}</td><td>${formatCurrency(i.quantidade * i.preco_unitario)}</td></tr>`).join('')}
+      </table>
+      <p>Subtotal: ${formatCurrency(subtotal)}</p>
+      <p>Desconto: ${formatCurrency(desconto)}</p>
+      <p><strong>Total: ${formatCurrency(total)}</strong></p>
+      <pre>${escapeHtml(erpConfig.cupom_rodape || '')}</pre>
+    </div>`;
+  area.classList.remove('hidden');
+  window.print();
+  area.classList.add('hidden');
+}
+
+function posImprimirPedido(titulo) {
+  const tab = posTabAtual();
+  if (!tab.itens.length) { showToast('Adicione itens para gerar o PDF', 'error'); return; }
+  printPosDocumento(titulo, tab);
+}
+
+function posGerarOrcamento() {
+  const tab = posTabAtual();
+  if (!tab.itens.length) { showToast('Adicione itens ao orçamento', 'error'); return; }
+  const subtotal = posSubtotal(tab);
+  openModal('Gerar orçamento', `
+    <form id="pos-orc-form">
+      <div class="form-group"><label>Cliente</label>
+        <input value="${escapeHtml(tab.cliente_nome || 'Visitante')}" disabled></div>
+      <div class="form-row">
+        <div class="form-group"><label>Desconto (R$)</label>
+          <input name="desconto" type="number" step="0.01" min="0" value="${posDesconto(tab)}"></div>
+        <div class="form-group"><label>Total</label>
+          <input id="pos-orc-total" value="${formatCurrency(subtotal)}" disabled></div>
+      </div>
+      <div class="form-group"><label>Observação</label>
+        <textarea name="observacao" rows="2" placeholder="Validade, condições..."></textarea></div>
+    </form>`,
+    '<button class="btn btn-outline modal-close-btn">Cancelar</button>' +
+    '<button class="btn btn-teal" id="pos-orc-salvar"><i class="fas fa-save"></i> Salvar e imprimir</button>');
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  const atualiza = (e) => {
+    const desc = parseFloat(e.target.value) || 0;
+    document.getElementById('pos-orc-total').value = formatCurrency(Math.max(0, subtotal - desc));
+  };
+  document.querySelector('#pos-orc-form [name=desconto]').oninput = atualiza;
+  document.getElementById('pos-orc-salvar').onclick = async () => {
+    const form = document.getElementById('pos-orc-form');
+    const desc = parseFloat(form.querySelector('[name=desconto]').value) || 0;
+    try {
+      await API.orcamentos.create({
+        cliente_id: tab.cliente_id || null,
+        cliente_nome: tab.cliente_nome || 'Visitante',
+        itens: tab.itens.map(i => ({ produto_id: i.produto_id, descricao: i.nome, quantidade: i.quantidade, preco_unitario: i.preco_unitario, subtotal: i.quantidade * i.preco_unitario })),
+        subtotal,
+        desconto: desc,
+        total: Math.max(0, subtotal - desc),
+        observacao: form.querySelector('[name=observacao]').value,
+        usuario_id: currentUser.id
+      });
+      closeModal();
+      showToast('Orçamento salvo!', 'success');
+      printPosDocumento('Orçamento', { ...tab, desconto: desc });
+    } catch (err) { showToast(err.message, 'error'); }
+  };
 }
 
 async function printCupom(id) {
