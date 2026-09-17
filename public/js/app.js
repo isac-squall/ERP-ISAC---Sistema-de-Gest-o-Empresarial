@@ -163,7 +163,7 @@ async function renderPage() {
     dashboard: renderDashboard,
     vendas: renderVendas,
     caixa: renderCaixa,
-    financeiro: renderFinanceiro,
+    financeiro: () => { pageState.financeiro.tab = pageState.financeiro.tab || 'pagar'; return renderFinanceiro(); },
     clientes: renderClientes,
     produtos: renderProdutos,
     'ordens-servico': renderOrdensServico,
@@ -1867,78 +1867,199 @@ function showCaixaOpcoes() {
 }
 
 // ===================== FINANCEIRO =====================
+function finTabTipo() {
+  return (pageState.financeiro.tab || 'pagar') === 'receber' ? 'Receita' : 'Despesa';
+}
+
+function finPrevisaoCard(titulo, dados) {
+  return `
+    <div class="fin-forecast-card">
+      <div class="fin-forecast-head">
+        <h4>${titulo}</h4>
+        <i class="fas fa-chart-line"></i>
+      </div>
+      <div class="fin-forecast-grid">
+        <div><span>Entradas</span><strong class="text-success">${formatCurrency(dados.entradas)}</strong></div>
+        <div><span>Saidas</span><strong class="text-danger">${formatCurrency(dados.saidas)}</strong></div>
+        <div><span>Saldo</span><strong class="text-primary">${formatCurrency(dados.saldo)}</strong></div>
+      </div>
+    </div>`;
+}
+
 async function renderFinanceiro() {
   const st = pageState.financeiro;
+  st.tab = st.tab || 'pagar';
+  const tipo = finTabTipo();
   const [stats, result] = await Promise.all([
     API.financeiro.stats(),
-    API.financeiro.list({ search: st.search, page: st.page, limit: st.limit })
+    API.financeiro.list({ search: st.search, page: st.page, limit: st.limit, tipo })
   ]);
 
+  const isPagar = st.tab === 'pagar';
   document.getElementById('content').innerHTML = `
-    <div class="stats-row stats-row-4">
-      <div class="stat-card green"><h4>Receitas</h4><div class="stat-value">${formatCurrency(stats.receitas)}</div></div>
-      <div class="stat-card red"><h4>Despesas</h4><div class="stat-value">${formatCurrency(stats.despesas)}</div></div>
-      <div class="stat-card orange"><h4>Pendentes</h4><div class="stat-value">${formatCurrency(stats.pendentes)}</div></div>
-      <div class="stat-card blue"><h4>Saldo</h4><div class="stat-value">${formatCurrency(stats.saldo)}</div></div>
+    ${pageHeader('Financeiro', 'Dashboard / <a href="#" onclick="navigate(\'financeiro\');return false">Financeiro</a>')}
+    <div class="stats-row stats-row-5">
+      <div class="stat-card green stat-card-icon">
+        <div class="stat-info"><h4>A receber</h4><div class="stat-value">${formatCurrency(stats.a_receber)}</div></div>
+        <i class="fas fa-hand-holding-usd"></i>
+      </div>
+      <div class="stat-card red stat-card-icon">
+        <div class="stat-info"><h4>Receber vencido</h4><div class="stat-value">${formatCurrency(stats.receber_vencido)}</div></div>
+        <i class="fas fa-exclamation-triangle"></i>
+      </div>
+      <div class="stat-card blue stat-card-icon">
+        <div class="stat-info"><h4>A pagar</h4><div class="stat-value">${formatCurrency(stats.a_pagar)}</div></div>
+        <i class="fas fa-file-invoice-dollar"></i>
+      </div>
+      <div class="stat-card orange stat-card-icon">
+        <div class="stat-info"><h4>Pagar vencido</h4><div class="stat-value">${formatCurrency(stats.pagar_vencido)}</div></div>
+        <i class="fas fa-sack-dollar"></i>
+      </div>
+      <div class="stat-card teal stat-card-icon">
+        <div class="stat-info"><h4>Saldo previsto</h4><div class="stat-value">${formatCurrency(stats.saldo_previsto)}</div></div>
+        <i class="fas fa-chart-line"></i>
+      </div>
     </div>
-    ${pageHeader('Financeiro', 'Dashboard / Financeiro')}
-    ${renderTableToolbar(st.search, `Total de lançamentos: ${result.total}`, 'Novo Lançamento')}
+    <div class="fin-forecast-row">
+      ${finPrevisaoCard('Previsao 7 dias', stats.previsao7 || { entradas: 0, saidas: 0, saldo: 0 })}
+      ${finPrevisaoCard('Previsao 15 dias', stats.previsao15 || { entradas: 0, saidas: 0, saldo: 0 })}
+      ${finPrevisaoCard('Previsao 30 dias', stats.previsao30 || { entradas: 0, saidas: 0, saldo: 0 })}
+    </div>
+    <div class="fin-tabs">
+      <button class="fin-tab ${isPagar ? 'active' : ''}" id="fin-tab-pagar">
+        <i class="fas fa-file-invoice-dollar"></i> Contas a pagar
+        <span class="fin-tab-count">${stats.qtd_pagar || 0}</span>
+      </button>
+      <button class="fin-tab ${!isPagar ? 'active' : ''}" id="fin-tab-receber">
+        <i class="fas fa-hand-holding-usd"></i> Contas a receber
+        <span class="fin-tab-count">${stats.qtd_receber || 0}</span>
+      </button>
+    </div>
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Pesquisar..." value="${escapeHtml(st.search || '')}" id="table-search">
+      </div>
+      <span class="toolbar-info">${isPagar ? 'Contas a pagar' : 'Contas a receber'}: ${result.total}</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-primary" id="table-new">
+        <i class="fas fa-plus"></i> ${isPagar ? 'Nova conta a pagar' : 'Nova conta a receber'}
+      </button>
+    </div>
     <div class="table-wrapper">
       <table class="data-table">
-        <thead><tr><th>#</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Acoes</th></tr></thead>
-        <tbody id="table-body">${renderFinanceiroRows(result.data)}</tbody>
+        <thead><tr>
+          <th>#</th><th>Descricao</th>
+          <th>${isPagar ? 'Fornecedor' : 'Cliente'}</th>
+          <th>Categoria</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Acoes</th>
+        </tr></thead>
+        <tbody id="table-body">${renderFinanceiroRows(result.data, isPagar)}</tbody>
       </table>
       <div id="table-pagination"></div>
     </div>`;
   bindTableEvents('financeiro', result, loadFinanceiro);
   document.getElementById('table-new').onclick = () => showFinanceiroForm();
+  document.getElementById('fin-tab-pagar').onclick = () => {
+    st.tab = 'pagar'; st.page = 1; st.search = ''; renderFinanceiro();
+  };
+  document.getElementById('fin-tab-receber').onclick = () => {
+    st.tab = 'receber'; st.page = 1; st.search = ''; renderFinanceiro();
+  };
 }
 
-function renderFinanceiroRows(data) {
+function renderFinanceiroRows(data, isPagar) {
+  const pagar = isPagar ?? ((pageState.financeiro.tab || 'pagar') === 'pagar');
   if (!data.length) return '<tr class="empty-row"><td colspan="8">Nenhum registro encontrado</td></tr>';
-  return data.map(f => `<tr>
-    <td>${f.id}</td><td><span class="status-badge ${f.tipo === 'Receita' ? 'pago' : 'cancelada'}">${f.tipo}</span></td>
-    <td>${escapeHtml(f.categoria || '-')}</td><td>${escapeHtml(f.descricao || '-')}</td><td>${formatCurrency(f.valor)}</td>
-    <td>${formatDate(f.data_vencimento)}</td><td><span class="status-badge ${statusClass(f.status)}">${f.status}</span></td>
-    <td class="actions-cell">
-      <button class="btn-icon edit" onclick="showFinanceiroForm(${f.id})"><i class="fas fa-edit"></i></button>
-      <button class="btn-icon delete" onclick="deleteFinanceiro(${f.id})"><i class="fas fa-trash"></i></button>
-    </td></tr>`).join('');
+  return data.map(f => {
+    const pessoa = pagar ? (f.fornecedor_nome || '-') : (f.cliente_nome || '-');
+    const vencido = f.status === 'Pendente' && f.data_vencimento && String(f.data_vencimento).slice(0, 10) < new Date().toISOString().slice(0, 10);
+    return `<tr>
+      <td>${f.id}</td>
+      <td>${escapeHtml(f.descricao || '-')}</td>
+      <td>${escapeHtml(pessoa)}</td>
+      <td>${escapeHtml(f.categoria || '-')}</td>
+      <td>${formatCurrency(f.valor)}</td>
+      <td>${formatDate(f.data_vencimento)}</td>
+      <td><span class="status-badge ${vencido ? 'cancelada' : statusClass(f.status)}">${vencido ? 'Vencido' : f.status}</span></td>
+      <td class="actions-cell">
+        ${f.status !== 'Pago' ? `<button class="btn-icon view" onclick="pagarFinanceiro(${f.id})" title="Marcar como pago"><i class="fas fa-check"></i></button>` : ''}
+        <button class="btn-icon edit" onclick="showFinanceiroForm(${f.id})"><i class="fas fa-edit"></i></button>
+        <button class="btn-icon delete" onclick="deleteFinanceiro(${f.id})"><i class="fas fa-trash"></i></button>
+      </td></tr>`;
+  }).join('');
 }
 
 async function loadFinanceiro() {
   const st = pageState.financeiro;
-  const result = await API.financeiro.list({ search: st.search, page: st.page, limit: st.limit });
-  document.getElementById('table-body').innerHTML = renderFinanceiroRows(result.data);
+  const isPagar = (st.tab || 'pagar') === 'pagar';
+  const result = await API.financeiro.list({ search: st.search, page: st.page, limit: st.limit, tipo: finTabTipo() });
+  document.getElementById('table-body').innerHTML = renderFinanceiroRows(result.data, isPagar);
   renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
     st.page = p; st.limit = l; loadFinanceiro();
   });
-  document.querySelector('.toolbar-info').textContent = `Total de lançamentos: ${result.total}`;
+  document.querySelector('.toolbar-info').textContent = `${isPagar ? 'Contas a pagar' : 'Contas a receber'}: ${result.total}`;
 }
 
 async function showFinanceiroForm(id) {
+  const isPagar = (pageState.financeiro.tab || 'pagar') === 'pagar';
   let data = {};
   if (id) data = await API.financeiro.get(id);
-  openModal(id ? 'Editar Lançamento' : 'Novo Lançamento', `
+  const tipoFixo = data.tipo || (isPagar ? 'Despesa' : 'Receita');
+  const [clientes, fornecedores] = await Promise.all([API.clientes.all(), API.fornecedores.all()]);
+  const pessoas = tipoFixo === 'Despesa' ? fornecedores : clientes;
+  const pessoaField = tipoFixo === 'Despesa' ? 'fornecedor_id' : 'cliente_id';
+  const pessoaLabel = tipoFixo === 'Despesa' ? 'Fornecedor' : 'Cliente';
+  const pessoaValue = data[pessoaField] || '';
+  openModal(id ? 'Editar lançamento' : (tipoFixo === 'Despesa' ? 'Nova conta a pagar' : 'Nova conta a receber'), `
     <form id="entity-form">
+      <input type="hidden" name="tipo" value="${tipoFixo}">
+      <div class="form-group"><label>Descrição *</label>
+        <input name="descricao" value="${escapeHtml(data.descricao || '')}" required></div>
       <div class="form-row">
-        <div class="form-group"><label>Tipo</label>
-          <select name="tipo"><option ${data.tipo === 'Receita' ? 'selected' : ''}>Receita</option><option ${data.tipo === 'Despesa' ? 'selected' : ''}>Despesa</option></select></div>
+        <div class="form-group"><label>${pessoaLabel}</label>
+          <select name="${pessoaField}"><option value="">Nenhum</option>
+            ${pessoas.map(p => `<option value="${p.id}" ${pessoaValue == p.id ? 'selected' : ''}>${escapeHtml(p.nome)}</option>`).join('')}
+          </select></div>
+        <div class="form-group"><label>Categoria</label>
+          <input name="categoria" value="${escapeHtml(data.categoria || '')}" placeholder="${tipoFixo === 'Despesa' ? 'Ex: Aluguel, energia' : 'Ex: Venda, serviço'}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Valor *</label>
+          <input name="valor" type="number" step="0.01" min="0" value="${data.valor || 0}" required></div>
         <div class="form-group"><label>Status</label>
-          <select name="status"><option ${data.status === 'Pendente' ? 'selected' : ''}>Pendente</option><option ${data.status === 'Pago' ? 'selected' : ''}>Pago</option></select></div>
+          <select name="status">
+            <option ${data.status === 'Pendente' || !data.status ? 'selected' : ''}>Pendente</option>
+            <option ${data.status === 'Pago' ? 'selected' : ''}>Pago</option>
+          </select></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Categoria</label><input name="categoria" value="${escapeHtml(data.categoria || '')}"></div>
-        <div class="form-group"><label>Valor</label><input name="valor" type="number" step="0.01" value="${data.valor || 0}" required></div>
-      </div>
-      <div class="form-group"><label>Descrição</label><input name="descricao" value="${escapeHtml(data.descricao || '')}"></div>
-      <div class="form-row">
-        <div class="form-group"><label>Vencimento</label><input name="data_vencimento" type="date" value="${toInputDate(data.data_vencimento)}"></div>
-        <div class="form-group"><label>Pagamento</label><input name="data_pagamento" type="date" value="${toInputDate(data.data_pagamento)}"></div>
+        <div class="form-group"><label>Vencimento</label>
+          <input name="data_vencimento" type="date" value="${toInputDate(data.data_vencimento)}"></div>
+        <div class="form-group"><label>Pagamento</label>
+          <input name="data_pagamento" type="date" value="${toInputDate(data.data_pagamento)}"></div>
       </div>
     </form>`,
-    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
-  bindEntitySave(id, 'financeiro', renderFinanceiro, (body) => { body.valor = parseFloat(body.valor); });
+    '<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>');
+  bindEntitySave(id, 'financeiro', renderFinanceiro, (body) => {
+    body.valor = parseFloat(body.valor) || 0;
+    body.cliente_id = body.cliente_id || null;
+    body.fornecedor_id = body.fornecedor_id || null;
+    if (body.status === 'Pago' && !body.data_pagamento) {
+      body.data_pagamento = new Date().toISOString().slice(0, 10);
+    }
+  });
+}
+
+async function pagarFinanceiro(id) {
+  if (!confirm('Marcar este lançamento como pago?')) return;
+  try {
+    const data = await API.financeiro.get(id);
+    data.status = 'Pago';
+    data.data_pagamento = data.data_pagamento || new Date().toISOString().slice(0, 10);
+    await API.financeiro.update(id, data);
+    showToast('Lançamento marcado como pago', 'success');
+    renderFinanceiro();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 async function deleteFinanceiro(id) {
