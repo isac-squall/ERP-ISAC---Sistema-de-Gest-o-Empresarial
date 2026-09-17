@@ -789,11 +789,11 @@ app.get('/api/financeiro', (req, res) => {
   const params = [];
   if (tipo) { query += ' AND f.tipo = ?'; params.push(tipo); }
   if (search) {
-    query += ' AND (f.descricao LIKE ? OR f.categoria LIKE ? OR c.nome LIKE ?)';
+    query += ' AND (f.descricao LIKE ? OR f.categoria LIKE ? OR c.nome LIKE ? OR fo.nome LIKE ?)';
     const s = `%${search}%`;
-    params.push(s, s, s);
+    params.push(s, s, s, s);
   }
-  query += ' ORDER BY f.data_vencimento DESC';
+  query += ' ORDER BY f.data_vencimento DESC, f.id DESC';
   const countQ = query.replace(/SELECT f\.\*, c\.nome as cliente_nome, fo\.nome as fornecedor_nome/, 'SELECT COUNT(*) as total');
   const total = db.prepare(countQ).get(...params)?.total || 0;
   const offset = (page - 1) * limit;
@@ -802,10 +802,46 @@ app.get('/api/financeiro', (req, res) => {
 });
 
 app.get('/api/financeiro/stats', (req, res) => {
-  const receitas = db.prepare("SELECT COALESCE(SUM(valor),0) as total FROM financeiro WHERE tipo='Receita'").get();
-  const despesas = db.prepare("SELECT COALESCE(SUM(valor),0) as total FROM financeiro WHERE tipo='Despesa'").get();
-  const pendentes = db.prepare("SELECT COALESCE(SUM(valor),0) as total FROM financeiro WHERE status='Pendente'").get();
-  res.json({ receitas: receitas.total, despesas: despesas.total, pendentes: pendentes.total, saldo: receitas.total - despesas.total });
+  const sum = (sql, ...params) => db.prepare(sql).get(...params)?.total || 0;
+  const hoje = "date('now','localtime')";
+  const aReceber = sum(`SELECT COALESCE(SUM(valor),0) as total FROM financeiro
+    WHERE tipo='Receita' AND status='Pendente' AND (data_vencimento IS NULL OR date(data_vencimento) >= ${hoje})`);
+  const receberVencido = sum(`SELECT COALESCE(SUM(valor),0) as total FROM financeiro
+    WHERE tipo='Receita' AND status='Pendente' AND date(data_vencimento) < ${hoje}`);
+  const aPagar = sum(`SELECT COALESCE(SUM(valor),0) as total FROM financeiro
+    WHERE tipo='Despesa' AND status='Pendente' AND (data_vencimento IS NULL OR date(data_vencimento) >= ${hoje})`);
+  const pagarVencido = sum(`SELECT COALESCE(SUM(valor),0) as total FROM financeiro
+    WHERE tipo='Despesa' AND status='Pendente' AND date(data_vencimento) < ${hoje}`);
+  const previsao = (dias) => {
+    const row = db.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN tipo='Receita' THEN valor ELSE 0 END),0) as entradas,
+        COALESCE(SUM(CASE WHEN tipo='Despesa' THEN valor ELSE 0 END),0) as saidas
+      FROM financeiro
+      WHERE status='Pendente'
+        AND date(data_vencimento) >= ${hoje}
+        AND date(data_vencimento) <= date('now','localtime','+${dias} days')
+    `).get();
+    return { entradas: row.entradas, saidas: row.saidas, saldo: row.entradas - row.saidas };
+  };
+  const qtdPagar = db.prepare("SELECT COUNT(*) as total FROM financeiro WHERE tipo='Despesa'").get().total;
+  const qtdReceber = db.prepare("SELECT COUNT(*) as total FROM financeiro WHERE tipo='Receita'").get().total;
+  res.json({
+    a_receber: aReceber,
+    receber_vencido: receberVencido,
+    a_pagar: aPagar,
+    pagar_vencido: pagarVencido,
+    saldo_previsto: (aReceber + receberVencido) - (aPagar + pagarVencido),
+    previsao7: previsao(7),
+    previsao15: previsao(15),
+    previsao30: previsao(30),
+    qtd_pagar: qtdPagar,
+    qtd_receber: qtdReceber,
+    receitas: aReceber + receberVencido,
+    despesas: aPagar + pagarVencido,
+    pendentes: aReceber + receberVencido + aPagar + pagarVencido,
+    saldo: (aReceber + receberVencido) - (aPagar + pagarVencido)
+  });
 });
 
 app.get('/api/financeiro/:id', (req, res) => {
