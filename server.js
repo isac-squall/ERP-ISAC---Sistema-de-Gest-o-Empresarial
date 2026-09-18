@@ -39,10 +39,29 @@ function safeParseJson(value) {
 }
 
 // ============ AUTH ============
+function permissoesDoCargo(cargo) {
+  const perfil = db.prepare('SELECT permissoes FROM perfis WHERE nome = ?').get(cargo || '');
+  if (perfil?.permissoes) {
+    try {
+      const parsed = JSON.parse(perfil.permissoes);
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    } catch {}
+  }
+  if (cargo === 'Administrador') {
+    return [
+      'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
+      'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
+      'relatorio', 'configuracoes', 'manual'
+    ];
+  }
+  return ['dashboard', 'manual'];
+}
+
 app.post('/api/auth/login', (req, res) => {
   const { email, senha } = req.body;
   const user = db.prepare('SELECT id, nome, email, cargo FROM usuarios WHERE email = ? AND senha = ? AND ativo = 1').get(email, senha);
   if (!user) return res.status(401).json({ error: 'Credenciais inválidas' });
+  user.permissoes = permissoesDoCargo(user.cargo);
   res.json(user);
 });
 
@@ -419,7 +438,7 @@ app.delete('/api/ordens-servico/:id', (req, res) => {
 // ============ USUÁRIOS ============
 app.get('/api/usuarios', (req, res) => {
   const { search = '', page = 1, limit = 15 } = req.query;
-  let query = 'SELECT id, nome, email, cargo, ativo, criado_em FROM usuarios WHERE 1=1';
+  let query = 'SELECT id, nome, email, cargo, celular, cpf, tipo_pessoa, ativo, criado_em FROM usuarios WHERE 1=1';
   const params = [];
   if (search) {
     query += ' AND (nome LIKE ? OR email LIKE ? OR cargo LIKE ?)';
@@ -427,7 +446,7 @@ app.get('/api/usuarios', (req, res) => {
     params.push(s, s, s);
   }
   query += ' ORDER BY nome ASC';
-  const countQ = query.replace(/SELECT id, nome, email, cargo, ativo, criado_em/, 'SELECT COUNT(*) as total');
+  const countQ = query.replace(/SELECT id, nome, email, cargo, celular, cpf, tipo_pessoa, ativo, criado_em/, 'SELECT COUNT(*) as total');
   const total = db.prepare(countQ).get(...params)?.total || 0;
   const offset = (page - 1) * limit;
   const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset);
@@ -435,16 +454,17 @@ app.get('/api/usuarios', (req, res) => {
 });
 
 app.get('/api/usuarios/:id', (req, res) => {
-  const row = db.prepare('SELECT id, nome, email, cargo, ativo, criado_em FROM usuarios WHERE id = ?').get(req.params.id);
+  const row = db.prepare('SELECT id, nome, email, cargo, celular, data_nascimento, cpf, tipo_pessoa, ativo, criado_em FROM usuarios WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Usuário não encontrado' });
   res.json(row);
 });
 
 app.post('/api/usuarios', (req, res) => {
-  const { nome, email, senha, cargo } = req.body;
+  const { nome, email, senha, cargo, celular, data_nascimento, cpf, tipo_pessoa } = req.body;
   if (!nome || !email || !senha) return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
   try {
-    const result = db.prepare('INSERT INTO usuarios (nome, email, senha, cargo) VALUES (?,?,?,?)').run(nome, email, senha, cargo || 'Operador');
+    const result = db.prepare('INSERT INTO usuarios (nome, email, senha, cargo, celular, data_nascimento, cpf, tipo_pessoa) VALUES (?,?,?,?,?,?,?,?)')
+      .run(nome, email, senha, cargo || 'Vendedor', celular || null, data_nascimento || null, cpf || null, tipo_pessoa || 'PF');
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
     res.status(400).json({ error: 'Email já cadastrado' });
@@ -452,11 +472,13 @@ app.post('/api/usuarios', (req, res) => {
 });
 
 app.put('/api/usuarios/:id', (req, res) => {
-  const { nome, email, senha, cargo, ativo } = req.body;
+  const { nome, email, senha, cargo, ativo, celular, data_nascimento, cpf, tipo_pessoa } = req.body;
   if (senha) {
-    db.prepare('UPDATE usuarios SET nome=?, email=?, senha=?, cargo=?, ativo=? WHERE id=?').run(nome, email, senha, cargo, ativo ?? 1, req.params.id);
+    db.prepare('UPDATE usuarios SET nome=?, email=?, senha=?, cargo=?, ativo=?, celular=?, data_nascimento=?, cpf=?, tipo_pessoa=? WHERE id=?')
+      .run(nome, email, senha, cargo, ativo ?? 1, celular || null, data_nascimento || null, cpf || null, tipo_pessoa || 'PF', req.params.id);
   } else {
-    db.prepare('UPDATE usuarios SET nome=?, email=?, cargo=?, ativo=? WHERE id=?').run(nome, email, cargo, ativo ?? 1, req.params.id);
+    db.prepare('UPDATE usuarios SET nome=?, email=?, cargo=?, ativo=?, celular=?, data_nascimento=?, cpf=?, tipo_pessoa=? WHERE id=?')
+      .run(nome, email, cargo, ativo ?? 1, celular || null, data_nascimento || null, cpf || null, tipo_pessoa || 'PF', req.params.id);
   }
   res.json({ message: 'Usuário atualizado' });
 });
@@ -464,6 +486,50 @@ app.put('/api/usuarios/:id', (req, res) => {
 app.delete('/api/usuarios/:id', (req, res) => {
   db.prepare('UPDATE usuarios SET ativo = 0 WHERE id = ?').run(req.params.id);
   res.json({ message: 'Usuário desativado' });
+});
+
+const PERMISSOES_DISPONIVEIS = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'vendas', label: 'Realizar vendas' },
+  { key: 'caixa', label: 'Gerenciar caixa' },
+  { key: 'financeiro', label: 'Financeiro' },
+  { key: 'clientes', label: 'Clientes' },
+  { key: 'produtos', label: 'Produtos' },
+  { key: 'ordens-servico', label: 'Ordens de servico' },
+  { key: 'usuarios', label: 'Usuarios' },
+  { key: 'fornecedores', label: 'Fornecedores' },
+  { key: 'historico-vendas', label: 'Historico de vendas' },
+  { key: 'relatorio', label: 'Relatorio geral' },
+  { key: 'configuracoes', label: 'Configuracoes' },
+  { key: 'manual', label: 'Manual' }
+];
+
+app.get('/api/perfis', (req, res) => {
+  const rows = db.prepare('SELECT * FROM perfis ORDER BY nome').all().map(p => ({
+    ...p,
+    permissoes: safeParseJson(p.permissoes)
+  }));
+  res.json({ data: rows, opcoes: PERMISSOES_DISPONIVEIS });
+});
+
+app.get('/api/perfis/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM perfis WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Perfil não encontrado' });
+  row.permissoes = safeParseJson(row.permissoes);
+  res.json(row);
+});
+
+app.put('/api/perfis/:id', (req, res) => {
+  const { nome, descricao, permissoes } = req.body;
+  const atual = db.prepare('SELECT nome FROM perfis WHERE id = ?').get(req.params.id);
+  if (!atual) return res.status(404).json({ error: 'Perfil não encontrado' });
+  const lista = Array.isArray(permissoes) ? permissoes : [];
+  db.prepare('UPDATE perfis SET nome=?, descricao=?, permissoes=? WHERE id=?')
+    .run(nome || atual.nome, descricao || '', JSON.stringify(lista), req.params.id);
+  if (nome && nome !== atual.nome) {
+    db.prepare('UPDATE usuarios SET cargo=? WHERE cargo=?').run(nome, atual.nome);
+  }
+  res.json({ message: 'Perfil atualizado' });
 });
 
 // ============ CAIXA ============
@@ -873,26 +939,169 @@ app.delete('/api/financeiro/:id', (req, res) => {
 });
 
 // ============ RELATÓRIO ============
+function parseRelatorioPeriodo(query) {
+  const periodo = query.periodo || 'mes';
+  let from = query.de;
+  let to = query.ate;
+  if (!from || !to) {
+    to = db.prepare("SELECT date('now','localtime') as d").get().d;
+    if (periodo === 'hoje') from = to;
+    else if (periodo === '7dias') from = db.prepare("SELECT date('now','localtime','-6 days') as d").get().d;
+    else if (periodo === '30dias') from = db.prepare("SELECT date('now','localtime','-29 days') as d").get().d;
+    else if (periodo === 'ano') from = db.prepare("SELECT date('now','localtime','start of year') as d").get().d;
+    else from = db.prepare("SELECT date('now','localtime','start of month') as d").get().d;
+  }
+  return { from, to, periodo };
+}
+
+function eachDate(from, to) {
+  const days = [];
+  let d = from;
+  let guard = 0;
+  while (d <= to && guard < 400) {
+    days.push(d);
+    d = db.prepare('SELECT date(?, \'+1 day\') as d').get(d).d;
+    guard += 1;
+  }
+  return days;
+}
+
 app.get('/api/relatorio', (req, res) => {
-  const vendasPorMes = db.prepare(`
-    SELECT strftime('%Y-%m', criado_em) as mes, COUNT(*) as qtd, SUM(total) as total
-    FROM vendas GROUP BY mes ORDER BY mes DESC LIMIT 12
-  `).all();
+  const { from, to, periodo } = parseRelatorioPeriodo(req.query);
+  const vendaFiltro = "date(v.criado_em) >= date(?) AND date(v.criado_em) <= date(?) AND IFNULL(v.status,'') != 'Cancelada'";
+  const params = [from, to];
+
+  const vendasAgg = db.prepare(`
+    SELECT COUNT(*) as qtd, COALESCE(SUM(total),0) as receita, COALESCE(SUM(desconto),0) as desconto
+    FROM vendas v WHERE ${vendaFiltro}
+  `).get(...params);
+
+  const itensAgg = db.prepare(`
+    SELECT COALESCE(SUM(vi.quantidade),0) as itens,
+           COALESCE(SUM(vi.quantidade * COALESCE(p.preco_custo,0)),0) as custo
+    FROM venda_itens vi
+    JOIN vendas v ON vi.venda_id = v.id
+    LEFT JOIN produtos p ON vi.produto_id = p.id
+    WHERE ${vendaFiltro}
+  `).get(...params);
+
+  const lucro = (vendasAgg.receita || 0) - (itensAgg.custo || 0);
+  const ticketMedio = vendasAgg.qtd ? vendasAgg.receita / vendasAgg.qtd : 0;
+
+  const crediarioAberto = db.prepare(`
+    SELECT COALESCE(SUM(valor),0) as total FROM financeiro
+    WHERE tipo='Receita' AND status='Pendente'
+  `).get().total;
+  const crediarioVencido = db.prepare(`
+    SELECT COALESCE(SUM(valor),0) as total FROM financeiro
+    WHERE tipo='Receita' AND status='Pendente' AND date(data_vencimento) < date('now','localtime')
+  `).get().total;
+
+  const estoque = db.prepare(`
+    SELECT COALESCE(SUM(estoque * COALESCE(preco,0)),0) as valor,
+           SUM(CASE WHEN estoque <= estoque_minimo THEN 1 ELSE 0 END) as alertas
+    FROM produtos WHERE ativo = 1
+  `).get();
+
+  const caixaMov = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN tipo='Entrada' THEN valor ELSE 0 END),0) as suprimentos,
+      COALESCE(SUM(CASE WHEN tipo='Saída' THEN valor ELSE 0 END),0) as sangrias
+    FROM caixa
+    WHERE date(criado_em) >= date(?) AND date(criado_em) <= date(?)
+  `).get(from, to);
+
+  const osAbertas = db.prepare("SELECT COUNT(*) as total FROM ordens_servico WHERE status IN ('Aberta','Em andamento')").get().total;
+  const osFinalizadas = db.prepare(`
+    SELECT COUNT(*) as total FROM ordens_servico
+    WHERE status IN ('Entregue','Pronta para entrega')
+      AND date(COALESCE(data_final, data_entrega, criado_em)) >= date(?)
+      AND date(COALESCE(data_final, data_entrega, criado_em)) <= date(?)
+  `).get(from, to).total;
+
+  const porDiaRows = db.prepare(`
+    SELECT date(v.criado_em) as dia,
+           COALESCE(SUM(v.total),0) as receita,
+           COALESCE(SUM((
+             SELECT COALESCE(SUM(vi.quantidade * COALESCE(p.preco_custo,0)),0)
+             FROM venda_itens vi
+             LEFT JOIN produtos p ON vi.produto_id = p.id
+             WHERE vi.venda_id = v.id
+           )),0) as custo
+    FROM vendas v
+    WHERE ${vendaFiltro}
+    GROUP BY dia
+    ORDER BY dia
+  `).all(...params);
+  const porDiaMap = Object.fromEntries(porDiaRows.map(r => [r.dia, r]));
+  const porDia = eachDate(from, to).map(dia => {
+    const row = porDiaMap[dia] || { receita: 0, custo: 0 };
+    return { dia, receita: row.receita || 0, lucro: (row.receita || 0) - (row.custo || 0) };
+  });
+
+  const formasPagamento = db.prepare(`
+    SELECT COALESCE(NULLIF(forma_pagamento,''), 'Outros') as forma,
+           COALESCE(SUM(total),0) as total,
+           COUNT(*) as qtd
+    FROM vendas v
+    WHERE ${vendaFiltro}
+    GROUP BY forma
+    ORDER BY total DESC
+  `).all(...params);
+
   const produtosMaisVendidos = db.prepare(`
-    SELECT p.nome, SUM(vi.quantidade) as qtd, SUM(vi.subtotal) as total
-    FROM venda_itens vi JOIN produtos p ON vi.produto_id = p.id
-    GROUP BY p.id ORDER BY qtd DESC LIMIT 10
-  `).all();
+    SELECT COALESCE(p.nome, vi.descricao, 'Item') as nome,
+           SUM(vi.quantidade) as qtd,
+           SUM(vi.subtotal) as total
+    FROM venda_itens vi
+    JOIN vendas v ON vi.venda_id = v.id
+    LEFT JOIN produtos p ON vi.produto_id = p.id
+    WHERE ${vendaFiltro}
+    GROUP BY nome ORDER BY qtd DESC LIMIT 8
+  `).all(...params);
+
   const clientesTop = db.prepare(`
-    SELECT c.nome, COUNT(v.id) as qtd, SUM(v.total) as total
-    FROM vendas v JOIN clientes c ON v.cliente_id = c.id
-    GROUP BY c.id ORDER BY total DESC LIMIT 10
-  `).all();
+    SELECT COALESCE(c.nome, 'Visitante') as nome, COUNT(v.id) as qtd, SUM(v.total) as total
+    FROM vendas v
+    LEFT JOIN clientes c ON v.cliente_id = c.id
+    WHERE ${vendaFiltro}
+    GROUP BY nome ORDER BY total DESC LIMIT 8
+  `).all(...params);
+
   const financeiroResumo = db.prepare(`
     SELECT tipo, status, SUM(valor) as total FROM financeiro GROUP BY tipo, status
   `).all();
-  const totalVendas = db.prepare('SELECT COUNT(*) as qtd, COALESCE(SUM(total),0) as total FROM vendas').get();
-  res.json({ vendasPorMes, produtosMaisVendidos, clientesTop, financeiroResumo, totalVendas });
+  const totalVendas = { qtd: vendasAgg.qtd, total: vendasAgg.receita };
+  const vendasPorMes = db.prepare(`
+    SELECT strftime('%Y-%m', criado_em) as mes, COUNT(*) as qtd, SUM(total) as total
+    FROM vendas WHERE IFNULL(status,'') != 'Cancelada'
+    GROUP BY mes ORDER BY mes DESC LIMIT 12
+  `).all();
+
+  res.json({
+    periodo, de: from, ate: to,
+    receita: vendasAgg.receita || 0,
+    vendas_ativas: vendasAgg.qtd || 0,
+    lucro,
+    ticket_medio: ticketMedio,
+    itens_vendidos: itensAgg.itens || 0,
+    crediario_aberto: crediarioAberto || 0,
+    crediario_vencido: crediarioVencido || 0,
+    estoque_valor: estoque.valor || 0,
+    estoque_alertas: estoque.alertas || 0,
+    suprimentos: caixaMov.suprimentos || 0,
+    sangrias: caixaMov.sangrias || 0,
+    ordens_abertas: osAbertas || 0,
+    ordens_finalizadas: osFinalizadas || 0,
+    alertas: estoque.alertas || 0,
+    porDia,
+    formasPagamento,
+    produtosMaisVendidos,
+    clientesTop,
+    financeiroResumo,
+    totalVendas,
+    vendasPorMes
+  });
 });
 
 app.get('*', (req, res) => {

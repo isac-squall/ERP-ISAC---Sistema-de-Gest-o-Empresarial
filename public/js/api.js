@@ -80,6 +80,11 @@ const API = {
     update: (id, d) => API.request(`/usuarios/${id}`, { method: 'PUT', body: d }),
     delete: (id) => API.request(`/usuarios/${id}`, { method: 'DELETE' })
   },
+  perfis: {
+    list: () => API.request('/perfis'),
+    get: (id) => API.request(`/perfis/${id}`),
+    update: (id, d) => API.request(`/perfis/${id}`, { method: 'PUT', body: d })
+  },
 
   caixa: {
     status: () => API.request('/caixa/status'),
@@ -116,7 +121,7 @@ const API = {
     delete: (id) => API.request(`/financeiro/${id}`, { method: 'DELETE' })
   },
 
-  relatorio: () => API.request('/relatorio')
+  relatorio: (p) => API.request(`/relatorio?${new URLSearchParams(p || {})}`)
 };
 
 function formatCurrency(v) {

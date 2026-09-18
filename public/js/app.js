@@ -124,12 +124,35 @@ function bindGlobalEvents() {
   });
 }
 
+function userPermissoes() {
+  const list = currentUser?.permissoes;
+  if (Array.isArray(list) && list.length) return list;
+  return currentUser?.cargo === 'Administrador'
+    ? ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', 'configuracoes', 'manual']
+    : ['dashboard', 'manual'];
+}
+
+function canAccess(page) {
+  return userPermissoes().includes(page);
+}
+
+function applyMenuPermissions() {
+  const allowed = userPermissoes();
+  document.querySelectorAll('.nav-item').forEach(el => {
+    const page = el.dataset.page;
+    el.classList.toggle('hidden', page && !allowed.includes(page));
+  });
+  document.getElementById('settings-btn')?.classList.toggle('hidden', !allowed.includes('configuracoes'));
+}
+
 function showApp() {
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('user-name').textContent = currentUser.nome;
+  applyMenuPermissions();
   refreshNotificacoes();
-  navigate('dashboard');
+  const start = canAccess('dashboard') ? 'dashboard' : (userPermissoes()[0] || 'manual');
+  navigate(start);
 }
 
 async function refreshNotificacoes(fillPanel) {
@@ -149,6 +172,10 @@ async function refreshNotificacoes(fillPanel) {
 }
 
 function navigate(page) {
+  if (!canAccess(page)) {
+    showToast('Sem permissão para esta página', 'error');
+    return;
+  }
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page));
@@ -170,7 +197,11 @@ async function renderPage() {
     usuarios: renderUsuarios,
     fornecedores: renderFornecedores,
     'historico-vendas': renderHistoricoVendas,
-    relatorio: renderRelatorio,
+    relatorio: () => {
+      const st = pageState.relatorio;
+      st.periodo = st.periodo || 'mes';
+      return renderRelatorio();
+    },
     configuracoes: renderConfiguracoes,
     manual: renderManual
   };
@@ -855,7 +886,8 @@ async function renderUsuarios() {
 function renderUsuariosRows(data) {
   if (!data.length) return '<tr class="empty-row"><td colspan="7">Nenhum registro encontrado</td></tr>';
   return data.map(u => `<tr>
-    <td>${u.id}</td><td>${escapeHtml(u.nome)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.cargo)}</td>
+    <td>${u.id}</td><td>${escapeHtml(u.nome)}</td><td>${escapeHtml(u.email)}</td>
+    <td><span class="status-badge aberta">${escapeHtml(u.cargo || '-')}</span></td>
     <td><span class="status-badge ${u.ativo ? 'ativo' : 'inativo'}">${u.ativo ? 'Ativo' : 'Inativo'}</span></td>
     <td>${formatDateTime(u.criado_em)}</td>
     <td class="actions-cell">
@@ -877,25 +909,122 @@ async function loadUsuarios() {
 async function showUsuarioForm(id) {
   let data = {};
   if (id) data = await API.usuarios.get(id);
-  openModal(id ? 'Editar Usuário' : 'Novo Usuário', `
+  const perfis = await API.perfis.list();
+  const niveis = (perfis.data || []).map(p => p.nome);
+  if (!niveis.length) niveis.push('Administrador', 'Gerente', 'Vendedor', 'Caixa');
+  const cargoAtual = data.cargo || 'Vendedor';
+  openModal(id ? 'Editar usuario' : 'Novo usuario', `
     <form id="entity-form">
-      <div class="form-group"><label>Nome *</label><input name="nome" value="${escapeHtml(data.nome || '')}" required></div>
       <div class="form-row">
-        <div class="form-group"><label>Email *</label><input name="email" type="email" value="${escapeHtml(data.email || '')}" required></div>
-        <div class="form-group"><label>Senha ${id ? '(deixe vazio p/ manter)' : '*'}</label><input name="senha" type="password" ${id ? '' : 'required'}></div>
+        <div class="form-group"><label>Usuario *</label>
+          <input name="nome" value="${escapeHtml(data.nome || '')}" required></div>
+        <div class="form-group"><label>Celular</label>
+          <input name="celular" value="${escapeHtml(data.celular || '')}" placeholder="Inserir o celular"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Cargo</label>
-          <select name="cargo">
-            ${['Administrador','Gerente','Operador','Vendedor'].map(c =>
-              `<option ${data.cargo === c ? 'selected' : ''}>${c}</option>`).join('')}
+        <div class="form-group"><label>Data de nascimento</label>
+          <input name="data_nascimento" type="date" value="${toInputDate(data.data_nascimento)}"></div>
+        <div class="form-group"><label>E-mail *</label>
+          <input name="email" type="email" value="${escapeHtml(data.email || '')}" required></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Nivel de acesso *</label>
+          <select name="cargo" id="usuario-cargo">
+            ${niveis.map(c => `<option ${cargoAtual === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
           </select></div>
+        <div class="form-group"><label>CPF do usuario</label>
+          <input name="cpf" value="${escapeHtml(data.cpf || '')}" placeholder="Informe o CPF"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Tipo pessoa</label>
+          <div class="tipo-toggle">
+            <label class="${(data.tipo_pessoa || 'PF') === 'PF' ? 'active' : ''}">
+              <input type="radio" name="tipo_pessoa" value="PF" ${(data.tipo_pessoa || 'PF') === 'PF' ? 'checked' : ''}> PF
+            </label>
+            <label class="${data.tipo_pessoa === 'PJ' ? 'active' : ''}">
+              <input type="radio" name="tipo_pessoa" value="PJ" ${data.tipo_pessoa === 'PJ' ? 'checked' : ''}> PJ
+            </label>
+          </div>
+        </div>
         ${id ? `<div class="form-group"><label>Status</label>
-          <select name="ativo"><option value="1" ${data.ativo ? 'selected' : ''}>Ativo</option><option value="0" ${!data.ativo ? 'selected' : ''}>Inativo</option></select></div>` : ''}
+          <select name="ativo"><option value="1" ${data.ativo ? 'selected' : ''}>Ativo</option><option value="0" ${!data.ativo ? 'selected' : ''}>Inativo</option></select></div>` : '<div></div>'}
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>${id ? 'Inserir senha' : 'Senha *'}</label>
+          <input name="senha" type="password" placeholder="Inserir senha" ${id ? '' : 'required'}></div>
+        <div class="form-group"><label>Repetir senha</label>
+          <input id="usuario-senha2" type="password" placeholder="Repita a senha" ${id ? '' : 'required'}></div>
+      </div>
+      ${id ? '<label class="check-label"><input type="checkbox" id="usuario-reset"> Resetar senha?</label>' : ''}
+    </form>`,
+    `${id ? '<button class="btn btn-purple" id="usuario-perfil">Perfil de acesso</button>' : ''}
+     <button class="btn btn-outline modal-close-btn">Cancelar</button>
+     <button class="btn btn-primary" id="entity-save">${id ? 'Salvar alteracoes' : 'Salvar'}</button>`);
+  document.querySelectorAll('.tipo-toggle input').forEach(inp => {
+    inp.onchange = () => {
+      document.querySelectorAll('.tipo-toggle label').forEach(l => l.classList.toggle('active', l.querySelector('input').checked));
+    };
+  });
+  bindEntitySave(id, 'usuarios', renderUsuarios, (body) => {
+    if (body.ativo !== undefined) body.ativo = +body.ativo;
+    const senha2 = document.getElementById('usuario-senha2')?.value || '';
+    if (body.senha && body.senha !== senha2) throw new Error('As senhas nao conferem');
+    if (id && !document.getElementById('usuario-reset')?.checked) delete body.senha;
+    if (id && document.getElementById('usuario-reset')?.checked && !body.senha) {
+      throw new Error('Informe a nova senha para resetar');
+    }
+  });
+  const perfilBtn = document.getElementById('usuario-perfil');
+  if (perfilBtn) {
+    perfilBtn.onclick = () => showPerfilAcesso(document.getElementById('usuario-cargo').value);
+  }
+}
+
+async function showPerfilAcesso(nomeCargo) {
+  const lista = await API.perfis.list();
+  const perfil = (lista.data || []).find(p => p.nome === nomeCargo);
+  if (!perfil) { showToast('Perfil nao encontrado', 'error'); return; }
+  const opcoes = lista.opcoes || [];
+  const marcadas = new Set(perfil.permissoes || []);
+  openModal('Editar perfil de acesso', `
+    <form id="perfil-form">
+      <div class="form-group"><label>Nome do perfil</label>
+        <input name="nome" value="${escapeHtml(perfil.nome)}" required></div>
+      <div class="form-group"><label>Descricao</label>
+        <input name="descricao" value="${escapeHtml(perfil.descricao || '')}"></div>
+      <div class="perm-box">
+        <h4>Permissoes do perfil</h4>
+        ${opcoes.map(o => `
+          <label class="check-label">
+            <input type="checkbox" name="perm" value="${o.key}" ${marcadas.has(o.key) ? 'checked' : ''}>
+            ${escapeHtml(o.label)} (${o.key})
+          </label>`).join('')}
       </div>
     </form>`,
-    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
-  bindEntitySave(id, 'usuarios', renderUsuarios, (body) => { if (body.ativo !== undefined) body.ativo = +body.ativo; });
+    '<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="perfil-save">Salvar perfil</button>');
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('perfil-save').onclick = async () => {
+    const form = document.getElementById('perfil-form');
+    if (!form.reportValidity()) return;
+    const fd = new FormData(form);
+    const body = {
+      nome: fd.get('nome'),
+      descricao: fd.get('descricao') || '',
+      permissoes: [...form.querySelectorAll('input[name="perm"]:checked')].map(i => i.value)
+    };
+    try {
+      await API.perfis.update(perfil.id, body);
+      if (currentUser?.cargo === perfil.nome || currentUser?.cargo === body.nome) {
+        currentUser.cargo = body.nome;
+        currentUser.permissoes = body.permissoes;
+        localStorage.setItem('erp_user', JSON.stringify(currentUser));
+        applyMenuPermissions();
+      }
+      closeModal();
+      showToast('Perfil atualizado', 'success');
+      renderUsuarios();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
 }
 
 async function deleteUsuario(id) {
@@ -2142,28 +2271,144 @@ async function cancelarVenda(id) {
 }
 
 // ===================== RELATÓRIO =====================
+function relatorioDefaultRange(periodo) {
+  const to = new Date();
+  const from = new Date();
+  if (periodo === 'hoje') { /* same day */ }
+  else if (periodo === '7dias') from.setDate(from.getDate() - 6);
+  else if (periodo === '30dias') from.setDate(from.getDate() - 29);
+  else if (periodo === 'ano') from.setMonth(0, 1);
+  else from.setDate(1);
+  const iso = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  return { de: iso(from), ate: iso(to) };
+}
+
+function relatorioKpi(titulo, valor, sub, icon, color) {
+  return `
+    <div class="rep-kpi">
+      <div class="rep-kpi-body">
+        <h4>${titulo}</h4>
+        <div class="rep-kpi-value">${valor}</div>
+        <span>${sub}</span>
+      </div>
+      <div class="rep-kpi-icon ${color}"><i class="fas ${icon}"></i></div>
+    </div>`;
+}
+
+function relatorioLineChart(dados) {
+  const w = 640, h = 260, padL = 48, padR = 16, padT = 16, padB = 36;
+  const innerW = w - padL - padR;
+  const innerH = h - padT - padB;
+  const max = Math.max(...dados.map(d => Math.max(d.receita || 0, d.lucro || 0)), 1);
+  const step = innerW / Math.max(dados.length - 1, 1);
+  const y = (v) => padT + innerH - (v / max) * innerH;
+  const x = (i) => padL + i * step;
+  const path = (key) => dados.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(d[key] || 0).toFixed(1)}`).join(' ');
+  const ticks = 5;
+  const grid = Array.from({ length: ticks + 1 }, (_, i) => {
+    const val = max * (1 - i / ticks);
+    const gy = padT + (innerH / ticks) * i;
+    return `<line x1="${padL}" y1="${gy}" x2="${w - padR}" y2="${gy}" stroke="#E0E6EA" stroke-dasharray="4 4"/>
+      <text x="${padL - 8}" y="${gy + 4}" text-anchor="end" fill="#90A4AE" font-size="11">${val.toFixed(2).replace('.', ',')}</text>`;
+  }).join('');
+  const labels = dados.map((d, i) => {
+    if (dados.length > 16 && i % Math.ceil(dados.length / 8) !== 0 && i !== dados.length - 1) return '';
+    const lab = String(d.dia || '').slice(8, 10) + '/' + String(d.dia || '').slice(5, 7);
+    return `<text x="${x(i)}" y="${h - 10}" text-anchor="middle" fill="#90A4AE" font-size="10">${lab}</text>`;
+  }).join('');
+  if (!dados.length) return '<div class="rep-empty">Sem dados no período</div>';
+  return `<svg class="rep-line-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${grid}
+    <path d="${path('receita')}" fill="none" stroke="#43A047" stroke-width="2.5"/>
+    <path d="${path('lucro')}" fill="none" stroke="#1E88E5" stroke-width="2.5"/>
+    ${dados.map((d, i) => `<circle cx="${x(i)}" cy="${y(d.receita || 0)}" r="3" fill="#43A047"/>`).join('')}
+    ${labels}
+  </svg>
+  <div class="rep-legend"><span class="leg-green"></span> Receita <span class="leg-blue"></span> Lucro</div>`;
+}
+
+function relatorioDonut(formas) {
+  const total = formas.reduce((s, f) => s + (f.total || 0), 0);
+  if (!total) return '<div class="rep-empty">Sem vendas no período</div>';
+  const colors = ['#43A047', '#1E88E5', '#FB8C00', '#8E24AA', '#E53935', '#00838F'];
+  let acc = 0;
+  const r = 70, c = 2 * Math.PI * r;
+  const rings = formas.map((f, i) => {
+    const pct = f.total / total;
+    const dash = pct * c;
+    const gap = c - dash;
+    const offset = c * 0.25 - acc * c;
+    acc += pct;
+    return `<circle cx="90" cy="90" r="${r}" fill="none" stroke="${colors[i % colors.length]}"
+      stroke-width="28" stroke-dasharray="${dash} ${gap}" stroke-dashoffset="${offset}"></circle>`;
+  }).join('');
+  const legend = formas.map((f, i) => `
+    <div><span class="dot" style="background:${colors[i % colors.length]}"></span>
+      ${escapeHtml(f.forma)} · ${formatCurrency(f.total)}</div>`).join('');
+  return `<div class="rep-donut-wrap">
+    <svg viewBox="0 0 180 180" class="rep-donut">${rings}</svg>
+    <div class="rep-donut-legend">${legend}</div>
+  </div>`;
+}
+
 async function renderRelatorio() {
-  const r = await API.relatorio();
-  const vendasMes = [...(r.vendasPorMes || [])].reverse();
-  const maxVenda = Math.max(...vendasMes.map(v => v.total || 0), 1);
+  const st = pageState.relatorio;
+  st.periodo = st.periodo || 'mes';
+  if (!st.de || !st.ate) {
+    const range = relatorioDefaultRange(st.periodo);
+    st.de = range.de;
+    st.ate = range.ate;
+  }
+  const r = await API.relatorio({ periodo: st.periodo, de: st.de, ate: st.ate });
+  const presets = [
+    ['hoje', 'Hoje'], ['7dias', '7 dias'], ['30dias', '30 dias'], ['mes', 'Mes'], ['ano', 'Ano']
+  ];
 
   document.getElementById('content').innerHTML = `
-    ${pageHeader('Relatório geral', 'Dashboard / Relatório geral')}
-    <div class="stats-row">
-      <div class="stat-card blue"><h4>Total de vendas</h4><div class="stat-value">${r.totalVendas.qtd}</div></div>
-      <div class="stat-card green"><h4>Faturamento total</h4><div class="stat-value">${formatCurrency(r.totalVendas.total)}</div></div>
-      <div class="stat-card teal"><h4>Meses com dados</h4><div class="stat-value">${r.vendasPorMes.length}</div></div>
-    </div>
-    <div class="dashboard-grid">
-      <div class="card report-section">
-        <h3>Vendas por mês</h3>
-        <div class="chart-placeholder">
-          ${vendasMes.map(v => `
-            <div class="chart-bar" style="height:${((v.total || 0) / maxVenda * 160)}px" title="${formatCurrency(v.total)}">
-              <span>${escapeHtml(v.mes)}</span>
-            </div>`).join('')}
+    <div class="rep-head">
+      <div>
+        <h2>Relatorio geral</h2>
+        <p>Visao ampla para escolher quais graficos devem ficar no sistema.</p>
+      </div>
+      <div class="rep-filters">
+        <div class="rep-presets">
+          ${presets.map(([k, lab]) => `<button class="rep-preset ${st.periodo === k ? 'active' : ''}" data-periodo="${k}">${lab}</button>`).join('')}
+        </div>
+        <div class="rep-dates">
+          <input type="date" id="rep-de" value="${st.de}">
+          <span>ate</span>
+          <input type="date" id="rep-ate" value="${st.ate}">
+          <button class="btn btn-primary" id="rep-atualizar">Atualizar</button>
         </div>
       </div>
+    </div>
+    <div class="rep-kpis">
+      ${relatorioKpi('Receita', formatCurrency(r.receita), `${r.vendas_ativas} vendas ativas`, 'fa-money-bill', 'green')}
+      ${relatorioKpi('Lucro', formatCurrency(r.lucro), `Ticket medio ${formatCurrency(r.ticket_medio)}`, 'fa-chart-line', 'blue')}
+      ${relatorioKpi('Itens vendidos', String(r.itens_vendidos || 0), 'Quantidade somada no periodo', 'fa-shopping-cart', 'purple')}
+      ${relatorioKpi('Crediario aberto', formatCurrency(r.crediario_aberto), `Vencido ${formatCurrency(r.crediario_vencido)}`, 'fa-users', 'red')}
+      ${relatorioKpi('Estoque', formatCurrency(r.estoque_valor), `${r.estoque_alertas || 0} produtos em alerta`, 'fa-box', 'teal')}
+      ${relatorioKpi('Suprimentos', formatCurrency(r.suprimentos), `Sangrias ${formatCurrency(r.sangrias)}`, 'fa-donate', 'green')}
+      ${relatorioKpi('Ordens abertas', String(r.ordens_abertas || 0), `${r.ordens_finalizadas || 0} finalizadas`, 'fa-tools', 'orange')}
+      ${relatorioKpi('Alertas', String(r.alertas || 0), 'Produtos mais urgentes no estoque', 'fa-exclamation-triangle', 'orange')}
+    </div>
+    <div class="rep-charts">
+      <div class="card">
+        <h3>Receita e lucro por dia</h3>
+        <p class="muted">Grafico principal para acompanhar o periodo selecionado</p>
+        ${relatorioLineChart(r.porDia || [])}
+      </div>
+      <div class="card">
+        <h3>Formas de pagamento</h3>
+        <p class="muted">Participacao na receita</p>
+        ${relatorioDonut(r.formasPagamento || [])}
+      </div>
+    </div>
+    <div class="dashboard-grid">
       <div class="card report-section">
         <h3>Produtos mais vendidos</h3>
         <table class="report-table">
@@ -2174,8 +2419,6 @@ async function renderRelatorio() {
           </tbody>
         </table>
       </div>
-    </div>
-    <div class="dashboard-grid">
       <div class="card report-section">
         <h3>Top clientes</h3>
         <table class="report-table">
@@ -2186,17 +2429,23 @@ async function renderRelatorio() {
           </tbody>
         </table>
       </div>
-      <div class="card report-section">
-        <h3>Resumo financeiro</h3>
-        <table class="report-table">
-          <thead><tr><th>Tipo</th><th>Status</th><th>Total</th></tr></thead>
-          <tbody>${r.financeiroResumo.length ? r.financeiroResumo.map(f => `
-            <tr><td>${escapeHtml(f.tipo)}</td><td>${escapeHtml(f.status)}</td><td>${formatCurrency(f.total)}</td></tr>
-          `).join('') : '<tr><td colspan="3">Sem dados</td></tr>'}
-          </tbody>
-        </table>
-      </div>
     </div>`;
+
+  document.querySelectorAll('.rep-preset').forEach(btn => {
+    btn.onclick = () => {
+      st.periodo = btn.dataset.periodo;
+      const range = relatorioDefaultRange(st.periodo);
+      st.de = range.de;
+      st.ate = range.ate;
+      renderRelatorio();
+    };
+  });
+  document.getElementById('rep-atualizar').onclick = () => {
+    st.de = document.getElementById('rep-de').value;
+    st.ate = document.getElementById('rep-ate').value;
+    st.periodo = 'custom';
+    renderRelatorio();
+  };
 }
 
 // ===================== CONFIGURAÇÕES =====================
@@ -2284,7 +2533,8 @@ function bindEntitySave(id, apiKey, rerender, transform) {
     if (form && !form.reportValidity()) return;
     const fd = new FormData(form);
     const body = Object.fromEntries(fd);
-    if (transform) transform(body);
+    try { if (transform) transform(body); }
+    catch (err) { showToast(err.message, 'error'); return; }
     if (body.preco !== undefined) body.preco = parseFloat(body.preco);
     if (body.preco_custo !== undefined) body.preco_custo = parseFloat(body.preco_custo);
     if (body.estoque !== undefined) body.estoque = parseInt(body.estoque);
