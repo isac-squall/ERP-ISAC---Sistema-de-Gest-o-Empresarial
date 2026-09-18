@@ -13,8 +13,19 @@ db.exec(`
     email TEXT UNIQUE NOT NULL,
     senha TEXT NOT NULL,
     cargo TEXT DEFAULT 'Administrador',
+    celular TEXT,
+    data_nascimento TEXT,
+    cpf TEXT,
+    tipo_pessoa TEXT DEFAULT 'PF',
     ativo INTEGER DEFAULT 1,
     criado_em TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS perfis (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT UNIQUE NOT NULL,
+    descricao TEXT,
+    permissoes TEXT DEFAULT '[]'
   );
 
   CREATE TABLE IF NOT EXISTS clientes (
@@ -199,6 +210,49 @@ ensureColumn('caixa', 'desconto', 'REAL DEFAULT 0');
 ensureColumn('caixa', 'desconto_percent', 'REAL DEFAULT 0');
 ensureColumn('caixa', 'venda_id', 'INTEGER');
 ensureColumn('venda_itens', 'descricao', 'TEXT');
+ensureColumn('usuarios', 'celular', 'TEXT');
+ensureColumn('usuarios', 'data_nascimento', 'TEXT');
+ensureColumn('usuarios', 'cpf', 'TEXT');
+ensureColumn('usuarios', 'tipo_pessoa', "TEXT DEFAULT 'PF'");
+
+const PAGINAS_TODAS = [
+  'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
+  'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
+  'relatorio', 'configuracoes', 'manual'
+];
+const PERFIS_PADRAO = [
+  {
+    nome: 'Administrador',
+    descricao: 'Acesso total ao sistema',
+    permissoes: PAGINAS_TODAS
+  },
+  {
+    nome: 'Gerente',
+    descricao: 'Gestao operacional sem usuarios e configuracoes',
+    permissoes: [
+      'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
+      'ordens-servico', 'fornecedores', 'historico-vendas', 'relatorio', 'manual'
+    ]
+  },
+  {
+    nome: 'Vendedor',
+    descricao: 'Vendas, clientes, produtos e ordens de servico',
+    permissoes: [
+      'dashboard', 'vendas', 'clientes', 'produtos', 'ordens-servico',
+      'historico-vendas', 'manual'
+    ]
+  },
+  {
+    nome: 'Caixa',
+    descricao: 'PDV, caixa e atendimento',
+    permissoes: ['dashboard', 'vendas', 'caixa', 'clientes', 'historico-vendas', 'manual']
+  }
+];
+const insertPerfil = db.prepare('INSERT OR IGNORE INTO perfis (nome, descricao, permissoes) VALUES (?,?,?)');
+for (const p of PERFIS_PADRAO) {
+  insertPerfil.run(p.nome, p.descricao, JSON.stringify(p.permissoes));
+}
+db.prepare("UPDATE usuarios SET cargo = 'Caixa' WHERE cargo IN ('Operador','Funcionario')").run();
 
 const defaults = {
   cupom_titulo: 'Scrundai Software',
