@@ -84,7 +84,7 @@ function bindGlobalEvents() {
   document.addEventListener('click', () => {
     document.getElementById('notif-panel')?.classList.add('hidden');
     closeProdutoMenus();
-    esconderPosResultados();
+    fecharPosBusca();
   });
 
   document.getElementById('fullscreen-btn').onclick = () => {
@@ -1040,13 +1040,14 @@ let posProdutos = [];
 let erpConfig = {};
 let posTabs = [];
 let posTabIndex = 0;
-let posSearchField = 'nome';
+let posSearchField = 'produto';
+let posOsResultados = [];
+let posBuscaTimer = null;
 
-const POS_CAMPOS = [
-  { value: 'nome', label: 'Nome' },
-  { value: 'codigo', label: 'Código de barras' },
-  { value: 'sku', label: 'SKU / categoria' },
-  { value: 'id', label: 'ID' }
+const POS_BUSCA = [
+  { value: 'produto', label: 'Produto', hint: 'Nome, codigo de barras, SKU ou ID' },
+  { value: 'categoria', label: 'Categoria', hint: 'Lista produtos da categoria digitada' },
+  { value: 'os', label: 'Ordem de serviço', hint: 'Cliente, aparelho, problema ou numero da OS' }
 ];
 
 function posTabAtual() { return posTabs[posTabIndex]; }
@@ -1149,12 +1150,19 @@ async function renderVendas() {
     </div>
     <div class="pos-search-row">
       <div class="pos-search">
-        <i class="fas fa-search pos-search-icon"></i>
-        <select id="pos-search-field" title="Campo de busca">
-          ${POS_CAMPOS.map(c => `<option value="${c.value}">${c.label}</option>`).join('')}
-        </select>
-        <i class="fas fa-chevron-down pos-search-arrow"></i>
-        <input type="text" id="pos-search" placeholder="Pesquisar por nome, código de barras, SKU ou ID" autocomplete="off">
+        <button type="button" class="pos-search-toggle" id="pos-search-toggle" title="Buscar em">
+          <i class="fas fa-search"></i>
+          <i class="fas fa-chevron-down"></i>
+        </button>
+        <div class="pos-search-menu hidden" id="pos-search-menu">
+          <div class="pos-search-menu-title">BUSCAR EM</div>
+          ${POS_BUSCA.map(c => `
+            <button type="button" class="pos-search-option${c.value === posSearchField ? ' active' : ''}" data-field="${c.value}">
+              <strong>${c.label}</strong>
+              <span>${c.hint}</span>
+            </button>`).join('')}
+        </div>
+        <input type="text" id="pos-search" placeholder="${posBuscaPlaceholder()}" autocomplete="off">
         <div class="pos-results hidden" id="pos-results"></div>
       </div>
       <div class="pos-search-actions">
@@ -1197,15 +1205,55 @@ async function renderVendas() {
   updatePosUI();
 
   const searchEl = document.getElementById('pos-search');
-  searchEl.oninput = (e) => mostrarPosResultados(e.target.value);
+  const menuEl = document.getElementById('pos-search-menu');
+  const toggleEl = document.getElementById('pos-search-toggle');
+  toggleEl.onclick = (e) => {
+    e.stopPropagation();
+    const vaiAbrir = menuEl.classList.contains('hidden');
+    if (vaiAbrir) esconderPosResultados();
+    menuEl.classList.toggle('hidden');
+  };
+  menuEl.onclick = (e) => e.stopPropagation();
+  menuEl.querySelectorAll('.pos-search-option').forEach(btn => {
+    btn.onclick = () => {
+      posSearchField = btn.dataset.field;
+      menuEl.querySelectorAll('.pos-search-option').forEach(b => b.classList.toggle('active', b.dataset.field === posSearchField));
+      menuEl.classList.add('hidden');
+      searchEl.placeholder = posBuscaPlaceholder();
+      searchEl.value = '';
+      searchEl.focus();
+      if (posSearchField === 'os') mostrarPosResultados('');
+      else esconderPosResultados();
+    };
+  });
+  searchEl.onclick = (e) => e.stopPropagation();
+  document.querySelector('.pos-search').onclick = (e) => e.stopPropagation();
+  searchEl.onfocus = () => {
+    if (posSearchField === 'os') mostrarPosResultados(searchEl.value);
+  };
+  searchEl.oninput = (e) => {
+    clearTimeout(posBuscaTimer);
+    const q = e.target.value;
+    posBuscaTimer = setTimeout(() => mostrarPosResultados(q), posSearchField === 'os' ? 180 : 0);
+  };
   searchEl.onkeydown = async (e) => {
-    if (e.key === 'Escape') { esconderPosResultados(); return; }
+    if (e.key === 'Escape') { fecharPosBusca(); return; }
     if (e.key !== 'Enter') return;
     e.preventDefault();
     const q = e.target.value.trim();
     if (!q) return;
-    const achados = posFiltrarProdutos(q);
-    if (posSearchField === 'codigo') {
+    if (posSearchField === 'os') {
+      await mostrarPosResultados(q);
+      if (posOsResultados.length === 1) {
+        posAdicionarOS(posOsResultados[0]);
+        searchEl.value = '';
+        esconderPosResultados();
+      } else if (!posOsResultados.length) {
+        showToast('Ordem de serviço não encontrada', 'error');
+      }
+      return;
+    }
+    if (posSearchField === 'produto') {
       try {
         const p = await API.produtos.byCodigo(q);
         posAdicionarItem(p);
@@ -1214,17 +1262,14 @@ async function renderVendas() {
         return;
       } catch {}
     }
+    const achados = posFiltrarProdutos(q);
     if (achados.length) {
       posAdicionarItem(achados[0]);
       searchEl.value = '';
       esconderPosResultados();
     } else {
-      showToast('Produto não encontrado', 'error');
+      showToast(posSearchField === 'categoria' ? 'Nenhum produto nesta categoria' : 'Produto não encontrado', 'error');
     }
-  };
-  document.getElementById('pos-search-field').onchange = (e) => {
-    posSearchField = e.target.value;
-    mostrarPosResultados(document.getElementById('pos-search').value);
   };
 
   document.getElementById('pos-aba-prev').onclick = () => posIrAba(-1);
@@ -1239,25 +1284,66 @@ async function renderVendas() {
   document.getElementById('pos-f3').onclick = posCancelarVenda;
 }
 
-function posFiltrarProdutos(term) {
+function posBuscaPlaceholder() {
+  if (posSearchField === 'categoria') return 'Buscar categoria';
+  if (posSearchField === 'os') return 'Buscar ordem de serviço';
+  return 'Buscar produto';
+}
+
+function posFiltrarProdutos(term, campo) {
   const t = (term || '').trim().toLowerCase();
   if (!t) return [];
+  const field = campo || posSearchField;
   return (posProdutos || []).filter(p => {
-    if (posSearchField === 'id') return String(p.id) === t;
-    if (posSearchField === 'codigo') return String(p.codigo || '').toLowerCase().includes(t);
-    if (posSearchField === 'sku') return String(p.categoria || '').toLowerCase().includes(t);
-    return String(p.nome || '').toLowerCase().includes(t);
+    if (field === 'categoria') return String(p.categoria || '').toLowerCase().includes(t);
+    const nome = String(p.nome || '').toLowerCase();
+    const codigo = String(p.codigo || '').toLowerCase();
+    const sku = String(p.categoria || '').toLowerCase();
+    return nome.includes(t) || codigo.includes(t) || sku.includes(t) || String(p.id) === t;
   }).slice(0, 12);
 }
 
-function mostrarPosResultados(term) {
+async function mostrarPosResultados(term) {
   const box = document.getElementById('pos-results');
   if (!box) return;
-  const achados = posFiltrarProdutos(term);
+  const q = (term || '').trim();
+  if (!q && posSearchField !== 'os') { esconderPosResultados(); return; }
+  if (posSearchField === 'os') {
+    try {
+      const result = await API.ordensServico.list({ search: q, page: 1, limit: 12 });
+      posOsResultados = (result.data || []).filter(o => !['Entregue', 'Cancelada'].includes(o.status));
+    } catch {
+      posOsResultados = [];
+    }
+    if (!posOsResultados.length) {
+      box.innerHTML = '<div class="pos-result pos-result-empty">Nenhuma ordem de serviço encontrada</div>';
+      box.classList.remove('hidden');
+      return;
+    }
+    box.innerHTML = posOsResultados.map(o => `
+      <div class="pos-result" data-os="${o.id}">
+        <div>
+          <strong>OS ${o.id} · ${escapeHtml(o.equipamento || 'Equipamento')}</strong><br>
+          <small>${escapeHtml(o.cliente_nome || 'Sem cliente')} · ${escapeHtml(o.solicitacao || o.status)}</small>
+        </div>
+        <div class="pos-result-right">${formatCurrency(o.valor_previsto)}<br><small>${escapeHtml(o.status)}</small></div>
+      </div>`).join('');
+    box.classList.remove('hidden');
+    box.querySelectorAll('[data-os]').forEach(el => {
+      el.onclick = () => {
+        const os = posOsResultados.find(x => x.id === +el.dataset.os);
+        if (os) posAdicionarOS(os);
+        document.getElementById('pos-search').value = '';
+        esconderPosResultados();
+      };
+    });
+    return;
+  }
+  const achados = posFiltrarProdutos(q);
   if (!achados.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
   box.innerHTML = achados.map(p => `
     <div class="pos-result" data-id="${p.id}">
-      <div><strong>${escapeHtml(p.nome)}</strong><br><small>${escapeHtml(p.codigo || 'sem código')}</small></div>
+      <div><strong>${escapeHtml(p.nome)}</strong><br><small>${escapeHtml(p.codigo || p.categoria || 'sem código')}</small></div>
       <div class="pos-result-right">${formatCurrency(p.preco)}<br><small>Est. ${p.estoque}</small></div>
     </div>`).join('');
   box.classList.remove('hidden');
@@ -1274,6 +1360,39 @@ function mostrarPosResultados(term) {
 function esconderPosResultados() {
   const box = document.getElementById('pos-results');
   if (box) { box.classList.add('hidden'); box.innerHTML = ''; }
+  posOsResultados = [];
+}
+
+function fecharPosBusca() {
+  document.getElementById('pos-search-menu')?.classList.add('hidden');
+  esconderPosResultados();
+}
+
+function posAdicionarOS(os) {
+  if (!os) return;
+  if (['Entregue', 'Cancelada'].includes(os.status)) {
+    showToast('Esta ordem de serviço não pode ser cobrada', 'error');
+    return;
+  }
+  const tab = posTabAtual();
+  if (tab.itens.some(i => i.os_id === os.id)) {
+    showToast('Esta OS já está no carrinho', 'error');
+    return;
+  }
+  tab.itens.push({
+    produto_id: null, servico: true, os_id: os.id,
+    nome: `OS ${os.id} · ${os.equipamento || 'Serviço'}`,
+    codigo: `OS-${os.id}`,
+    preco_unitario: Number(os.valor_previsto) || 0,
+    quantidade: 1, estoque: null
+  });
+  if (!tab.cliente_id && os.cliente_id) {
+    tab.cliente_id = os.cliente_id;
+    tab.cliente_nome = os.cliente_nome || tab.cliente_nome;
+  }
+  salvarPosTabs();
+  updatePosUI();
+  showToast(`OS ${os.id} adicionada`, 'success');
 }
 
 function posAdicionarItem(produto, quantidade) {
@@ -1313,13 +1432,14 @@ function renderPosRows() {
   }
   return tab.itens.map((item, idx) => `<tr>
     <td>${idx + 1}</td>
-    <td>${escapeHtml(item.nome)}${item.servico ? ' <span class="promo-tag">serviço</span>' : ''}</td>
+    <td>${escapeHtml(item.nome)}${item.os_id ? ' <span class="promo-tag">OS</span>' : item.servico ? ' <span class="promo-tag">serviço</span>' : ''}</td>
     <td>${escapeHtml(item.codigo || '-')}</td>
     <td>
       <div class="pos-qty">
+        ${item.os_id ? `<span>${item.quantidade}</span>` : `
         <button type="button" data-qty="${idx}" data-delta="-1">-</button>
         <span>${item.quantidade}</span>
-        <button type="button" data-qty="${idx}" data-delta="1">+</button>
+        <button type="button" data-qty="${idx}" data-delta="1">+</button>`}
         <button type="button" class="pos-row-del" data-remove="${idx}" title="Remover"><i class="fas fa-times"></i></button>
       </div>
     </td>
@@ -1356,6 +1476,10 @@ function posAlterarQtd(idx, delta) {
   if (!item) return;
   const nova = item.quantidade + delta;
   if (nova <= 0) { posRemoverItem(idx); return; }
+  if (item.os_id) {
+    showToast('A ordem de serviço é cobrada em quantidade 1', 'error');
+    return;
+  }
   if (item.servico) {
     item.quantidade = nova;
   } else if (nova > item.estoque) {
@@ -1446,7 +1570,7 @@ function posProdutoServico() {
   document.querySelector('.modal-close-btn').onclick = closeModal;
 
   const renderLista = (term) => {
-    const lista = term ? posFiltrarProdutos(term) : (posProdutos || []).slice(0, 50);
+    const lista = term ? posFiltrarProdutos(term, 'produto') : (posProdutos || []).slice(0, 50);
     const box = document.getElementById('pm-list');
     box.innerHTML = lista.length ? lista.map(p => `
       <div class="pos-result" data-id="${p.id}">
@@ -1605,7 +1729,7 @@ function posFinalizarVenda() {
         cliente_id: tab.cliente_id || null,
         itens: tab.itens.map(i => ({
           produto_id: i.produto_id, descricao: i.servico ? i.nome : null,
-          quantidade: i.quantidade, preco_unitario: i.preco_unitario
+          quantidade: i.quantidade, preco_unitario: i.preco_unitario, os_id: i.os_id || null
         })),
         desconto: desc,
         forma_pagamento: forma,

@@ -210,6 +210,7 @@ ensureColumn('caixa', 'desconto', 'REAL DEFAULT 0');
 ensureColumn('caixa', 'desconto_percent', 'REAL DEFAULT 0');
 ensureColumn('caixa', 'venda_id', 'INTEGER');
 ensureColumn('venda_itens', 'descricao', 'TEXT');
+ensureColumn('venda_itens', 'os_id', 'INTEGER');
 ensureColumn('usuarios', 'celular', 'TEXT');
 ensureColumn('usuarios', 'data_nascimento', 'TEXT');
 ensureColumn('usuarios', 'cpf', 'TEXT');
@@ -311,6 +312,15 @@ const produtoExemplo = db.prepare('SELECT id FROM produtos LIMIT 1').get();
 if (!produtoExemplo) {
   db.prepare(`INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run('COCA-COLA', '7894900011517', 'Refrigerante 2L', 8, 5, 98, 5, 'Bebidas');
+}
+
+const insertOSDemo = db.prepare(`INSERT INTO ordens_servico (status, cliente_id, equipamento, solicitacao, valor_previsto)
+  VALUES (?,?,?,?,?)`);
+if (!db.prepare("SELECT id FROM ordens_servico WHERE equipamento LIKE '%notebook%' COLLATE NOCASE").get()) {
+  insertOSDemo.run('Pronta para entrega', 1, 'Notebook Dell Inspiron', 'Troca de tela e formatacao', 350);
+}
+if (!db.prepare("SELECT id FROM ordens_servico WHERE equipamento LIKE '%celular%' COLLATE NOCASE").get()) {
+  insertOSDemo.run('Pronta para entrega', 2, 'Celular Samsung Galaxy', 'Troca de bateria', 180);
 }
 
 module.exports = db;
