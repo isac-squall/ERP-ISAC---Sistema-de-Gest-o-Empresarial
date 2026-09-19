@@ -706,10 +706,11 @@ app.post('/api/vendas', (req, res) => {
     : 'Visitante';
   const insertVenda = db.prepare(`INSERT INTO vendas (cliente_id, total, desconto, forma_pagamento, usuario_id, valor_recebido, troco, parcelas, taxa_cartao)
     VALUES (?,?,?,?,?,?,?,?,?)`);
-  const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, descricao, quantidade, preco_unitario, subtotal) VALUES (?,?,?,?,?,?)');
+  const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, descricao, quantidade, preco_unitario, subtotal, os_id) VALUES (?,?,?,?,?,?,?)');
   const updateEstoque = db.prepare('UPDATE produtos SET estoque = estoque - ? WHERE id = ? AND estoque >= ?');
   const insertCaixa = db.prepare(`INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, cliente_nome, desconto, desconto_percent, venda_id, usuario_id)
     VALUES (?,?,?,?,?,?,?,?,?)`);
+  const marcarOS = db.prepare("UPDATE ordens_servico SET status='Entregue', data_entrega=datetime('now','localtime') WHERE id=? AND status NOT IN ('Entregue','Cancelada')");
 
   const txn = db.transaction(() => {
     let subtotal = 0;
@@ -734,7 +735,15 @@ app.post('/api/vendas', (req, res) => {
         if (ok.changes === 0) throw new Error('Estoque insuficiente');
       }
       insertItem.run(venda.lastInsertRowid, item.produto_id || null, item.descricao || null,
-        quantidade, preco, quantidade * preco);
+        quantidade, preco, quantidade * preco, item.os_id || null);
+      if (item.os_id) {
+        const os = db.prepare('SELECT id, status FROM ordens_servico WHERE id = ?').get(item.os_id);
+        if (!os) throw new Error(`Ordem de serviço #${item.os_id} não encontrada`);
+        if (['Entregue', 'Cancelada'].includes(os.status)) {
+          throw new Error(`Ordem de serviço #${item.os_id} não pode ser cobrada`);
+        }
+        marcarOS.run(item.os_id);
+      }
     }
     insertCaixa.run('Venda realizada', 'Venda', total, forma_pagamento, clienteNome, desc,
       subtotal > 0 ? (desc / subtotal) * 100 : 0, venda.lastInsertRowid, usuario_id);
@@ -795,6 +804,9 @@ app.post('/api/vendas/:id/cancelar', (req, res) => {
   const txn = db.transaction(() => {
     for (const item of itens) {
       if (item.produto_id) db.prepare('UPDATE produtos SET estoque = estoque + ? WHERE id = ?').run(item.quantidade, item.produto_id);
+      if (item.os_id) {
+        db.prepare("UPDATE ordens_servico SET status='Pronta para entrega', data_entrega=NULL WHERE id=? AND status='Entregue'").run(item.os_id);
+      }
     }
     db.prepare("UPDATE vendas SET status='Cancelada' WHERE id=?").run(req.params.id);
     db.prepare('INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, usuario_id) VALUES (?,?,?,?,?)')

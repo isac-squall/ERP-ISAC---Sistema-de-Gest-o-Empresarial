@@ -475,25 +475,42 @@ body {
   background: var(--bg-card); border: 2px solid var(--primary);
   border-radius: 6px; flex: 1; min-width: 320px; max-width: 640px;
 }
-.pos-search-icon {
-  position: absolute; left: 14px; color: var(--primary);
-  font-size: 16px; pointer-events: none;
+.pos-search-toggle {
+  display: flex; align-items: center; gap: 8px;
+  border: none; background: transparent; color: var(--primary);
+  padding: 0 10px 0 14px; height: 46px; cursor: pointer; flex-shrink: 0;
 }
-.pos-search select {
-  appearance: none; border: none; background: transparent;
-  color: var(--primary); font-size: 12px; font-weight: 600;
-  padding: 0 18px 0 40px; cursor: pointer; max-width: 74px;
+.pos-search-toggle .fa-search { font-size: 16px; }
+.pos-search-toggle .fa-chevron-down { font-size: 10px; }
+.pos-search-menu {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 800;
+  width: 320px; background: var(--bg-card); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(21,101,192,0.18);
+  padding: 12px; border: 1px solid var(--border);
 }
-.pos-search select:focus { outline: none; }
-.pos-search-arrow {
-  position: absolute; left: 96px; color: var(--primary);
-  font-size: 10px; pointer-events: none;
+.pos-search-menu-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+  color: var(--text-muted); margin-bottom: 10px;
 }
+.pos-search-option {
+  display: block; width: 100%; text-align: left; border: 1px solid var(--border);
+  background: var(--bg-card); color: var(--text); border-radius: 8px;
+  padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
+}
+.pos-search-option:last-child { margin-bottom: 0; }
+.pos-search-option strong { display: block; font-size: 14px; }
+.pos-search-option span { display: block; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.pos-search-option:hover { border-color: var(--primary); }
+.pos-search-option.active {
+  background: #1565C0; color: #fff; border-color: #1565C0;
+}
+.pos-search-option.active span { color: #BBDEFB; }
 .pos-search input {
   flex: 1; border: none; background: transparent; color: var(--text);
-  padding: 13px 14px; font-size: 14px;
+  padding: 13px 14px 13px 4px; font-size: 14px;
 }
 .pos-search input:focus { outline: none; }
+.pos-result-empty { cursor: default; color: var(--text-muted); }
 
 .pos-results {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0;
