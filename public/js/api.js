@@ -22,6 +22,7 @@ const API = {
   dashboard: () => API.request('/dashboard'),
   charts: (periodo) => API.request(`/dashboard/charts?periodo=${periodo || 'semana'}`),
   notificacoes: () => API.request('/notificacoes'),
+  assistente: (pergunta, pagina) => API.request('/assistente', { method: 'POST', body: { pergunta, pagina } }),
   config: {
     get: () => API.request('/config'),
     save: (d) => API.request('/config', { method: 'PUT', body: d })

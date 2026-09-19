@@ -1116,6 +1116,22 @@ app.get('/api/relatorio', (req, res) => {
   });
 });
 
+const assistenteRag = require('./assistente/rag');
+
+app.get('/api/assistente/modulos', (req, res) => {
+  res.json({ data: assistenteRag.listarModulos() });
+});
+
+app.post('/api/assistente', async (req, res) => {
+  try {
+    const { pergunta, pagina } = req.body || {};
+    const resposta = await assistenteRag.perguntar(pergunta, pagina);
+    res.json(resposta);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Falha no assistente' });
+  }
+});
+
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api')) {
     return res.status(404).json({ error: 'Rota não encontrada' });
