@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ERP ISAC - Sistema de gestão empresarial</title>
-  <link rel="stylesheet" href="css/styles.css?v=5">
+  <link rel="stylesheet" href="css/styles.css?v=6">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -154,8 +154,28 @@
 
   <div id="print-area" class="print-area hidden"></div>
 
+  <div id="ai-chat" class="ai-chat hidden">
+    <button type="button" class="ai-chat-toggle" id="ai-chat-toggle" title="Assistente ERP">
+      <i class="fas fa-robot"></i>
+    </button>
+    <div class="ai-chat-panel hidden" id="ai-chat-panel">
+      <div class="ai-chat-head">
+        <div>
+          <strong>Assistente ERP ISAC</strong>
+          <span>Duvidas por modulo e sessao</span>
+        </div>
+        <button type="button" id="ai-chat-close" title="Fechar">&times;</button>
+      </div>
+      <div class="ai-chat-messages" id="ai-chat-messages"></div>
+      <form class="ai-chat-form" id="ai-chat-form">
+        <input id="ai-chat-input" placeholder="Ex.: como cobrar uma OS?" autocomplete="off">
+        <button type="submit" class="btn btn-primary" id="ai-chat-send"><i class="fas fa-paper-plane"></i></button>
+      </form>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-  <script src="js/api.js?v=5"></script>
-  <script src="js/app.js?v=5"></script>
+  <script src="js/api.js?v=6"></script>
+  <script src="js/app.js?v=6"></script>
 </body>
 </html>

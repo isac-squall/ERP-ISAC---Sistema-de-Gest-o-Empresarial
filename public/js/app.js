@@ -51,6 +51,8 @@ function bindGlobalEvents() {
     localStorage.removeItem('erp_user');
     document.getElementById('app').classList.add('hidden');
     document.getElementById('login-screen').classList.remove('hidden');
+    document.getElementById('ai-chat')?.classList.add('hidden');
+    document.getElementById('ai-chat-panel')?.classList.add('hidden');
   };
 
   document.getElementById('sidebar-toggle').onclick = () =>
@@ -111,6 +113,8 @@ function bindGlobalEvents() {
     };
   });
 
+  initAssistenteChat();
+
   document.addEventListener('keydown', (e) => {
     if (currentPage !== 'vendas') return;
     if (e.key === 'F7') { e.preventDefault(); posFinalizarVenda(); return; }
@@ -149,6 +153,7 @@ function showApp() {
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('user-name').textContent = currentUser.nome;
+  document.getElementById('ai-chat')?.classList.remove('hidden');
   applyMenuPermissions();
   refreshNotificacoes();
   const start = canAccess('dashboard') ? 'dashboard' : (userPermissoes()[0] || 'manual');
@@ -2625,6 +2630,7 @@ async function renderManual() {
         <li><strong>Histórico</strong> — Consulte vendas, imprima cupom ou cancele (estoque volta automaticamente).</li>
         <li><strong>Relatório</strong> — Veja faturamento mensal, produtos mais vendidos e top clientes.</li>
         <li><strong>Configurações</strong> — Personalize cupom, taxas de cartão e pergunta de quantidade no PDV.</li>
+        <li><strong>Assistente IA</strong> — O botao azul no canto inferior direito responde duvidas identificando o modulo e a sessao.</li>
       </ol>
     </div>
     <div class="card">
@@ -2636,6 +2642,64 @@ async function renderManual() {
         <li>Calculadora e tela cheia: ferramentas rápidas.</li>
       </ul>
     </div>`;
+}
+
+function initAssistenteChat() {
+  const root = document.getElementById('ai-chat');
+  const panel = document.getElementById('ai-chat-panel');
+  const toggle = document.getElementById('ai-chat-toggle');
+  const closeBtn = document.getElementById('ai-chat-close');
+  const form = document.getElementById('ai-chat-form');
+  const input = document.getElementById('ai-chat-input');
+  const box = document.getElementById('ai-chat-messages');
+  if (!root || !panel || !form || box.dataset.ready) return;
+  box.dataset.ready = '1';
+
+  const chips = [
+    'Como vender no PDV?',
+    'Como cobrar uma OS?',
+    'Como abrir o caixa?',
+    'Quais niveis de acesso existem?'
+  ];
+  const addMsg = (role, texto, meta) => {
+    const el = document.createElement('div');
+    el.className = `ai-msg ${role}`;
+    el.innerHTML = `${meta ? `<span class="ai-msg-meta">${escapeHtml(meta)}</span>` : ''}${escapeHtml(texto)}`;
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+  };
+  addMsg('bot', 'Ola! Sou o assistente do ERP ISAC. Pergunte sobre o modulo ou a sessao em que estiver com duvida.');
+  const chipWrap = document.createElement('div');
+  chipWrap.className = 'ai-chat-chips';
+  chipWrap.innerHTML = chips.map(c => `<button type="button" class="ai-chip">${escapeHtml(c)}</button>`).join('');
+  box.appendChild(chipWrap);
+  chipWrap.querySelectorAll('.ai-chip').forEach(btn => {
+    btn.onclick = () => { input.value = btn.textContent; form.requestSubmit(); };
+  });
+
+  toggle.onclick = () => panel.classList.toggle('hidden');
+  closeBtn.onclick = () => panel.classList.add('hidden');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const pergunta = input.value.trim();
+    if (!pergunta) return;
+    input.value = '';
+    addMsg('user', pergunta);
+    const wait = document.createElement('div');
+    wait.className = 'ai-msg bot';
+    wait.textContent = 'Consultando o sistema...';
+    box.appendChild(wait);
+    box.scrollTop = box.scrollHeight;
+    try {
+      const r = await API.assistente(pergunta, currentPage);
+      wait.remove();
+      const meta = r.modulo ? `${r.modulo}${r.sessao ? ' / ' + r.sessao : ''}` : '';
+      addMsg('bot', r.texto || 'Nao consegui responder agora.', meta);
+    } catch (err) {
+      wait.remove();
+      addMsg('bot', err.message || 'Falha ao consultar o assistente.');
+    }
+  };
 }
 
 // ===================== HELPERS =====================
