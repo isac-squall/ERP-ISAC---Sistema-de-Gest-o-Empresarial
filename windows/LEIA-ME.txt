@@ -1,0 +1,48 @@
+ERP ISAC - Instalacao no Windows
+================================
+
+Requisitos
+- Windows 10 ou 11 de 64 bits
+- Nao precisa de internet para instalar
+
+Antes de instalar de novo
+Feche o ERP ISAC se estiver aberto. Se aparecer erro ao gravar node.exe,
+clique em Anular, feche o sistema e execute o instalador outra vez.
+
+Como instalar (recomendado)
+1. Copie ERP-ISAC-Setup.exe para o notebook Windows.
+2. Clique duas vezes no .exe e avance as telas.
+3. Ao terminar, use o atalho ERP ISAC na Area de Trabalho.
+
+Instalacao alternativa (ZIP)
+1. Extraia ERP-ISAC-Windows.zip.
+2. Abra a pasta ERP-ISAC (precisa ter as pastas runtime e app).
+3. Clique em Instalar.bat.
+
+Nao execute Instalar.bat de dentro da pasta windows do projeto Git.
+Essa pasta so tem os scripts, sem o Node.js.
+
+Como usar
+- Clique no atalho "ERP ISAC".
+- O navegador abre em http://localhost:3000
+- Login: admin@erpisac.com
+- Senha: admin123
+
+Outras contas de demonstracao
+- gerente@erpisac.com / gerente123
+- vendedor@erpisac.com / venda123
+- caixa@erpisac.com / caixa123
+
+Arquivos
+- Iniciar.vbs  abre o sistema sem janela preta
+- Iniciar.bat  abre com janela de log (para diagnosticar erro)
+- Parar.bat    encerra o servidor
+- Desinstalar.bat remove o programa deste usuario
+
+Onde fica instalado
+%LOCALAPPDATA%\ERP-ISAC
+
+O banco de dados (erp.db) fica nessa pasta. Faca backup copiando erp.db.
+
+Se a porta 3000 estiver ocupada
+Feche o outro programa ou execute Parar.bat e tente de novo.

@@ -24,7 +24,17 @@ Sistema ERP completo baseado no layout ERP ISAC, com todos os módulos funcionai
 - Busca e paginação em todas as listagens
 - Autenticação de usuários
 
-## Como executar
+## Instalacao no Windows
+
+1. Copie `dist/ERP-ISAC-Setup.exe` para o notebook.
+2. Clique duas vezes no `.exe` e avance as telas.
+3. Use o atalho **ERP ISAC** na Area de Trabalho.
+
+O sistema abre em **http://localhost:3000**. O instalador ja traz o Node.js e as dependencias; nao precisa de internet.
+
+Nao execute `windows/Instalar.bat` do repositorio Git: essa pasta so tem os scripts, sem o Node.js.
+
+## Como executar (desenvolvimento)
 
 ```bash
 cd erp-isac

@@ -1,0 +1,7 @@
+node_modules/
+erp.db-shm
+erp.db-wal
+*.db-shm
+*.db-wal
+dist/*.zip
+.monkeycode-tmp-files/
