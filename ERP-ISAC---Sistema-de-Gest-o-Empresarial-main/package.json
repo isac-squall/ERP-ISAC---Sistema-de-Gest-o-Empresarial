@@ -1,0 +1,61 @@
+{
+  "name": "erp-isac",
+  "version": "1.0.0",
+  "description": "Sistema de gestão empresarial ERP ISAC",
+  "main": "electron-main.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "desktop": "electron electron-main.js",
+    "dist": "npm run rebuild:electron && electron-builder --win nsis",
+    "rebuild:native": "npm rebuild better-sqlite3",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.1",
+    "electron": "36.9.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "br.com.erpisac.erp",
+    "productName": "ERP ISAC",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "server.js",
+      "database.js",
+      "electron-main.js",
+      "assistente/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "npmRebuild": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ERP ISAC"
+    }
+  }
+}

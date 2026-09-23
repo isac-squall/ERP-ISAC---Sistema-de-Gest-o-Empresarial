@@ -1,0 +1,29 @@
+directories:
+  output: release
+  buildResources: build
+appId: br.com.erpisac.erp
+productName: ERP ISAC
+files:
+  - filter:
+      - server.js
+      - database.js
+      - electron-main.js
+      - assistente/**/*
+      - public/**/*
+      - package.json
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/**/*
+npmRebuild: true
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ERP ISAC
+electronVersion: 36.9.0
