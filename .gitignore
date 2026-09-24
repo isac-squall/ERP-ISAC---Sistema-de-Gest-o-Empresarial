@@ -5,3 +5,4 @@ erp.db-wal
 *.db-wal
 dist/*.zip
 .monkeycode-tmp-files/
+certs/

@@ -54,6 +54,7 @@ if [ -f "${ROOT}/erp.db" ]; then
 fi
 cp -a "${ROOT}/public" "${STAGE}/ERP-ISAC/app/public"
 cp -a "${ROOT}/assistente" "${STAGE}/ERP-ISAC/app/assistente"
+cp -a "${ROOT}/nfce" "${STAGE}/ERP-ISAC/app/nfce"
 
 echo "Copiando node_modules e binario Windows do SQLite..."
 rm -rf "${STAGE}/ERP-ISAC/app/node_modules"

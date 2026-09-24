@@ -911,6 +911,18 @@ body {
 }
 .ai-chip:hover { border-color: var(--primary); color: var(--primary); }
 
+.nfce-box {
+  margin-top: 12px; padding: 12px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg);
+}
+.nfce-box p { margin: 4px 0; font-size: 13px; }
+.nfce-chave { font-family: ui-monospace, monospace; font-size: 12px; letter-spacing: 0.5px; word-break: break-all; }
+.nfce-ok { color: var(--success-dark); font-weight: 600; margin-bottom: 10px; }
+.nfce-warn { color: #E65100; font-weight: 600; margin-bottom: 10px; }
+.nfce-qr-wrap { width: 120px; height: 120px; margin: 8px 0; }
+.nfce-qr { width: 120px; height: 120px; background: #fff; }
+.nfce-qr rect { fill: #000; }
+
 .print-area { display: none; }
 @media print {
   body * { visibility: hidden; }
@@ -922,6 +934,8 @@ body {
   .cupom { width: 280px; font-size: 12px; }
   .cupom table { width: 100%; }
   .cupom td { padding: 2px 0; }
+  .nfce-qr-wrap, .nfce-qr { width: 140px; height: 140px; }
+  .danfe-nfce hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
   .etiqueta-preco, .etiqueta-barcode { display: block !important; }
 }
 

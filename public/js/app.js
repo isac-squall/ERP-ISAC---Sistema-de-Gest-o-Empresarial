@@ -648,6 +648,18 @@ async function showProdutoForm(id) {
         <select name="fornecedor_id"><option value="">Nenhum</option>
           ${fornecedores.map(f => `<option value="${f.id}" ${data.fornecedor_id == f.id ? 'selected' : ''}>${escapeHtml(f.nome)}</option>`).join('')}
         </select></div>
+      <div class="form-row">
+        <div class="form-group"><label>NCM</label><input name="ncm" value="${escapeHtml(data.ncm || '00000000')}" maxlength="8" placeholder="00000000"></div>
+        <div class="form-group"><label>CFOP</label><input name="cfop" value="${escapeHtml(data.cfop || '5102')}" maxlength="4"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Unidade</label><input name="unidade" value="${escapeHtml(data.unidade || 'UN')}" maxlength="6"></div>
+        <div class="form-group"><label>Origem ICMS</label>
+          <select name="origem">
+            ${['0 - Nacional','1 - Estrangeira (importacao direta)','2 - Estrangeira (mercado interno)'].map((o, i) =>
+              `<option value="${i}" ${String(data.origem || '0') === String(i) ? 'selected' : ''}>${o}</option>`).join('')}
+          </select></div>
+      </div>
     </form>`,
     `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
   bindEntitySave(id, 'produtos', renderProdutos);
@@ -1697,6 +1709,11 @@ function posFinalizarVenda() {
         <div><span>Total</span><strong id="pos-form-total">${formatCurrency(Math.max(0, subtotal - posDesconto(tab)))}</strong></div>
         <div><span>Troco</span><strong id="pos-form-troco">${formatCurrency(0)}</strong></div>
       </div>
+      ${erpConfig.nfce_habilitada === '1' ? `
+      <div class="form-group" style="margin-top:12px">
+        <label class="check-label"><input type="checkbox" id="pos-emitir-nfce" ${erpConfig.nfce_emitir_automatico === '1' ? 'checked' : ''}> Emitir NFC-e</label>
+        <small class="muted">${erpConfig.nfce_ambiente === 'producao' ? 'Ambiente de producao' : 'Homologacao'} ${erpConfig.nfce_simulacao === '1' || erpConfig.nfce_pronta !== '1' ? '· simulacao local (preencha certificado A1 + CSC para transmitir)' : '· transmissao SEFAZ'}</small>
+      </div>` : ''}
     </form>`,
     '<button class="btn btn-outline modal-close-btn">Cancelar</button>' +
     '<button class="btn btn-success" id="pos-form-confirmar"><i class="fas fa-check"></i> Finalizar venda</button>');
@@ -1730,6 +1747,7 @@ function posFinalizarVenda() {
       return;
     }
     try {
+      const nfceBox = document.getElementById('pos-emitir-nfce');
       const venda = await API.vendas.create({
         cliente_id: tab.cliente_id || null,
         itens: tab.itens.map(i => ({
@@ -1740,14 +1758,18 @@ function posFinalizarVenda() {
         forma_pagamento: forma,
         usuario_id: currentUser.id,
         valor_recebido: recebido || total,
-        parcelas: parseInt(document.getElementById('pos-form-parcelas').value, 10) || 1
+        parcelas: parseInt(document.getElementById('pos-form-parcelas').value, 10) || 1,
+        ...(nfceBox ? { emitir_nfce: nfceBox.checked } : {})
       });
       tab.itens = [];
       tab.desconto = 0;
       salvarPosTabs();
       closeModal();
-      showToast('Venda realizada com sucesso!', 'success');
-      if (confirm('Deseja imprimir o cupom?')) await printCupom(venda.id);
+      const nota = venda.nfce;
+      if (nota?.status === 'autorizada') showToast('Venda realizada. NFC-e autorizada.', 'success');
+      else if (nota?.status === 'rejeitada' || nota?.status === 'erro') showToast('Venda ok. NFC-e: ' + (nota.motivo || 'falhou'), 'error');
+      else showToast('Venda realizada com sucesso!', 'success');
+      if (confirm(nota ? 'Deseja imprimir o DANFE NFC-e?' : 'Deseja imprimir o cupom?')) await printCupom(venda.id);
       updatePosUI();
       refreshNotificacoes();
     } catch (err) { showToast(err.message, 'error'); }
@@ -1831,24 +1853,83 @@ function posGerarOrcamento() {
   };
 }
 
+function nfceStatusBadge(status) {
+  const map = {
+    autorizada: 'ativo', rejeitada: 'cancelada', erro: 'cancelada',
+    cancelada: 'cancelada', pendente: 'aberta'
+  };
+  return `<span class="status-badge ${map[status] || 'aberta'}">${escapeHtml(status || 'sem NFC-e')}</span>`;
+}
+
+function chaveFormatada(chave) {
+  const d = String(chave || '').replace(/\D/g, '');
+  return d.replace(/(\d{4})(?=\d)/g, '$1 ').trim();
+}
+
+function qrSvg(data) {
+  const text = String(data || '');
+  if (!text) return '';
+  const size = 21;
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) - h + text.charCodeAt(i)) | 0;
+  const cells = [];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const v = Math.abs(Math.sin((x + 1) * 12.9898 + (y + 1) * 78.233 + h) * 43758.5453);
+      const on = (v - Math.floor(v)) > 0.45;
+      const finder = (x < 7 && y < 7) || (x >= size - 7 && y < 7) || (x < 7 && y >= size - 7);
+      const ring = finder && (x === 0 || y === 0 || x === 6 || y === 6 || x === size - 1 || y === size - 7 || (x >= 2 && x <= 4 && y >= 2 && y <= 4) || (x >= size - 5 && x <= size - 3 && y >= 2 && y <= 4) || (x >= 2 && x <= 4 && y >= size - 5 && y <= size - 3));
+      if (on || ring) cells.push(`<rect x="${x}" y="${y}" width="1" height="1"/>`);
+    }
+  }
+  return `<svg class="nfce-qr" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">${cells.join('')}</svg>`;
+}
+
 async function printCupom(id) {
   const v = await API.vendas.get(id);
   const c = v.cupom || {};
+  const n = v.nfce;
   const area = document.getElementById('print-area');
-  area.innerHTML = `
-    <div class="cupom">
-      <h3>${escapeHtml(c.cupom_titulo || 'ERP ISAC')}</h3>
-      <pre>${escapeHtml(c.cupom_cabecalho || '')}</pre>
-      <p>Venda #${v.id} · ${formatDateTime(v.criado_em)}</p>
-      <p>Cliente: ${escapeHtml(v.cliente_nome || 'Avulso')}</p>
-      <table>
-        ${(v.itens || []).map(i => `<tr><td>${escapeHtml(i.produto_nome)} x${i.quantidade}</td><td>${formatCurrency(i.subtotal)}</td></tr>`).join('')}
-      </table>
-      <p><strong>Total: ${formatCurrency(v.total)}</strong></p>
-      <p>Pagamento: ${escapeHtml(v.forma_pagamento || '-')}</p>
-      ${v.troco ? `<p>Troco: ${formatCurrency(v.troco)}</p>` : ''}
-      <pre>${escapeHtml(c.cupom_rodape || '')}</pre>
-    </div>`;
+  if (n && n.chave) {
+    area.innerHTML = `
+      <div class="cupom danfe-nfce">
+        <h3>${escapeHtml(c.nfce_nome_fantasia || c.cupom_titulo || 'ERP ISAC')}</h3>
+        <p>${escapeHtml(c.nfce_razao_social || '')}</p>
+        <p>CNPJ ${escapeHtml(c.nfce_cnpj || '-')} IE ${escapeHtml(c.nfce_ie || '-')}</p>
+        <pre>${escapeHtml([c.nfce_logradouro, c.nfce_numero, c.nfce_bairro, c.nfce_municipio, c.nfce_uf].filter(Boolean).join(', '))}</pre>
+        <hr>
+        <p><strong>DANFE NFC-e</strong> ${n.ambiente === 'producao' ? '' : '· HOMOLOGACAO SEM VALOR FISCAL'}</p>
+        <p>Numero ${n.numero || '-'} Serie ${n.serie || '-'} ${formatDateTime(n.dh_emi || v.criado_em)}</p>
+        <p>Protocolo ${escapeHtml(n.protocolo || '-')} ${nfceStatusBadge(n.status)}</p>
+        <hr>
+        <p>Consumidor: ${escapeHtml(v.cliente_nome || 'Consumidor nao identificado')}</p>
+        <table>
+          ${(v.itens || []).map(i => `<tr><td>${escapeHtml(i.produto_nome)} x${i.quantidade}</td><td>${formatCurrency(i.subtotal)}</td></tr>`).join('')}
+        </table>
+        <p><strong>Total: ${formatCurrency(v.total)}</strong></p>
+        <p>Pagamento: ${escapeHtml(v.forma_pagamento || '-')}${v.troco ? ` · Troco ${formatCurrency(v.troco)}` : ''}</p>
+        <hr>
+        <p class="nfce-chave">${chaveFormatada(n.chave)}</p>
+        <div class="nfce-qr-wrap">${qrSvg(n.qrcode || n.chave)}</div>
+        <p class="muted">Consulte pela chave de acesso no portal da SEFAZ</p>
+        <pre>${escapeHtml(c.cupom_rodape || '')}</pre>
+      </div>`;
+  } else {
+    area.innerHTML = `
+      <div class="cupom">
+        <h3>${escapeHtml(c.cupom_titulo || 'ERP ISAC')}</h3>
+        <pre>${escapeHtml(c.cupom_cabecalho || '')}</pre>
+        <p>Venda #${v.id} · ${formatDateTime(v.criado_em)}</p>
+        <p>Cliente: ${escapeHtml(v.cliente_nome || 'Avulso')}</p>
+        <table>
+          ${(v.itens || []).map(i => `<tr><td>${escapeHtml(i.produto_nome)} x${i.quantidade}</td><td>${formatCurrency(i.subtotal)}</td></tr>`).join('')}
+        </table>
+        <p><strong>Total: ${formatCurrency(v.total)}</strong></p>
+        <p>Pagamento: ${escapeHtml(v.forma_pagamento || '-')}</p>
+        ${v.troco ? `<p>Troco: ${formatCurrency(v.troco)}</p>` : ''}
+        <pre>${escapeHtml(c.cupom_rodape || '')}</pre>
+      </div>`;
+  }
   area.classList.remove('hidden');
   window.print();
   area.classList.add('hidden');
@@ -2337,7 +2418,7 @@ async function renderHistoricoVendas() {
     ${renderTableToolbar(st.search, `Total de vendas: ${result.total}`, '')}
     <div class="table-wrapper">
       <table class="data-table">
-        <thead><tr><th>#</th><th>Cliente</th><th>Total</th><th>Desconto</th><th>Pagamento</th><th>Status</th><th>Vendedor</th><th>Data</th><th>Acoes</th></tr></thead>
+        <thead><tr><th>#</th><th>Cliente</th><th>Total</th><th>Desconto</th><th>Pagamento</th><th>Status</th><th>NFC-e</th><th>Vendedor</th><th>Data</th><th>Acoes</th></tr></thead>
         <tbody id="table-body">${renderVendasRows(result.data)}</tbody>
       </table>
       <div id="table-pagination"></div>
@@ -2346,15 +2427,18 @@ async function renderHistoricoVendas() {
 }
 
 function renderVendasRows(data) {
-  if (!data.length) return '<tr class="empty-row"><td colspan="9">Nenhum registro encontrado</td></tr>';
+  if (!data.length) return '<tr class="empty-row"><td colspan="10">Nenhum registro encontrado</td></tr>';
   return data.map(v => `<tr>
     <td>${v.id}</td><td>${escapeHtml(v.cliente_nome || 'Avulso')}</td><td>${formatCurrency(v.total)}</td>
     <td>${formatCurrency(v.desconto)}</td><td>${escapeHtml(v.forma_pagamento || '-')}</td>
-    <td><span class="status-badge ${statusClass(v.status)}">${escapeHtml(v.status)}</span></td><td>${escapeHtml(v.usuario_nome || '-')}</td>
+    <td><span class="status-badge ${statusClass(v.status)}">${escapeHtml(v.status)}</span></td>
+    <td>${v.nfce_status ? nfceStatusBadge(v.nfce_status) : '<span class="muted">-</span>'}</td>
+    <td>${escapeHtml(v.usuario_nome || '-')}</td>
     <td>${formatDateTime(v.criado_em)}</td>
     <td class="actions-cell">
       <button class="btn-icon view" onclick="viewVenda(${v.id})" title="Detalhes"><i class="fas fa-eye"></i></button>
-      <button class="btn-icon print" onclick="printCupom(${v.id})" title="Cupom"><i class="fas fa-print"></i></button>
+      <button class="btn-icon print" onclick="printCupom(${v.id})" title="Cupom / DANFE"><i class="fas fa-print"></i></button>
+      ${v.status !== 'Cancelada' && (!v.nfce_status || ['erro','rejeitada'].includes(v.nfce_status)) ? `<button class="btn-icon edit" onclick="emitirNfceVenda(${v.id})" title="Emitir NFC-e"><i class="fas fa-file-invoice"></i></button>` : ''}
       ${v.status !== 'Cancelada' ? `<button class="btn-icon delete" onclick="cancelarVenda(${v.id})" title="Cancelar"><i class="fas fa-ban"></i></button>` : ''}
     </td>
   </tr>`).join('');
@@ -2372,22 +2456,42 @@ async function loadHistoricoVendas() {
 
 async function viewVenda(id) {
   const v = await API.vendas.get(id);
+  const n = v.nfce;
   openModal(`Venda #${v.id}`, `
     <p><strong>Cliente:</strong> ${escapeHtml(v.cliente_nome || 'Avulso')}</p>
     <p><strong>Total:</strong> ${formatCurrency(v.total)} | <strong>Desconto:</strong> ${formatCurrency(v.desconto)}</p>
     <p><strong>Pagamento:</strong> ${escapeHtml(v.forma_pagamento || '-')} | <strong>Data:</strong> ${formatDateTime(v.criado_em)}</p>
     <p><strong>Status:</strong> ${escapeHtml(v.status || '-')}${v.troco ? ` | <strong>Troco:</strong> ${formatCurrency(v.troco)}` : ''}</p>
+    ${n ? `<div class="nfce-box">
+      <p><strong>NFC-e</strong> ${nfceStatusBadge(n.status)} ${n.simulacao ? '<small class="muted">simulacao</small>' : ''}</p>
+      <p>Numero ${n.numero || '-'} Serie ${n.serie || '-'} · ${escapeHtml(n.ambiente || '')}</p>
+      <p>Protocolo: ${escapeHtml(n.protocolo || '-')}</p>
+      <p class="nfce-chave">${chaveFormatada(n.chave)}</p>
+      ${n.motivo ? `<p class="muted">${escapeHtml(n.motivo)}</p>` : ''}
+    </div>` : '<p class="muted">Sem NFC-e nesta venda.</p>'}
     <table class="data-table" style="margin-top:12px">
       <thead><tr><th>Produto</th><th>Qtd</th><th>Preço</th><th>Subtotal</th></tr></thead>
       <tbody>${(v.itens || []).map(i => `<tr><td>${escapeHtml(i.produto_nome)}</td><td>${i.quantidade}</td><td>${formatCurrency(i.preco_unitario)}</td><td>${formatCurrency(i.subtotal)}</td></tr>`).join('')}
       </tbody></table>`,
     `<button class="btn btn-outline modal-close-btn">Fechar</button>
      <button class="btn btn-primary" id="venda-print">Imprimir</button>
+     ${n?.xml !== undefined || n?.chave ? `<a class="btn btn-teal" id="venda-xml" href="/api/vendas/${id}/nfce.xml" target="_blank">XML</a>` : ''}
+     ${v.status !== 'Cancelada' && (!n || ['erro','rejeitada'].includes(n.status)) ? '<button class="btn btn-success" id="venda-nfce">Emitir NFC-e</button>' : ''}
      ${v.status !== 'Cancelada' ? '<button class="btn btn-danger" id="venda-cancel">Cancelar venda</button>' : ''}`);
   document.querySelector('.modal-close-btn').onclick = closeModal;
   document.getElementById('venda-print').onclick = () => { closeModal(); printCupom(id); };
+  const nfceBtn = document.getElementById('venda-nfce');
+  if (nfceBtn) nfceBtn.onclick = () => { closeModal(); emitirNfceVenda(id); };
   const cancelBtn = document.getElementById('venda-cancel');
   if (cancelBtn) cancelBtn.onclick = () => { closeModal(); cancelarVenda(id); };
+}
+
+async function emitirNfceVenda(id) {
+  try {
+    const r = await API.nfce.emitir(id);
+    showToast(r.message || 'NFC-e processada', r.nfce?.status === 'autorizada' ? 'success' : 'error');
+    renderHistoricoVendas();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 async function cancelarVenda(id) {
@@ -2580,6 +2684,7 @@ async function renderRelatorio() {
 // ===================== CONFIGURAÇÕES =====================
 async function renderConfiguracoes() {
   const cfg = await API.config.get();
+  const ufs = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
   document.getElementById('content').innerHTML = `
     ${pageHeader('Configurações', 'Dashboard / Configurações')}
     <form id="config-form">
@@ -2599,17 +2704,96 @@ async function renderConfiguracoes() {
           <div class="form-group"><label>Taxa cartão débito (%)</label><input name="taxa_debito" type="number" step="0.01" value="${escapeHtml(cfg.taxa_debito || '0')}"></div>
         </div>
       </div>
+      <div class="card">
+        <h3>NFC-e</h3>
+        <p class="muted">Credencie a empresa na SEFAZ, obtenha o CSC (token + ID) e o certificado digital A1 (.pfx). Homologacao primeiro; so va para producao apos testes.</p>
+        ${cfg.nfce_pronta === '1'
+          ? '<p class="nfce-ok">Pronta para transmitir a SEFAZ.</p>'
+          : `<p class="nfce-warn">Pendencias: ${escapeHtml(cfg.nfce_pronta_erros || 'preencha os dados fiscais')}</p>`}
+        <div class="form-group">
+          <label class="check-label"><input type="checkbox" id="cfg-nfce" ${cfg.nfce_habilitada === '1' ? 'checked' : ''}> Habilitar NFC-e</label>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Ambiente</label>
+            <select name="nfce_ambiente">
+              <option value="homologacao" ${cfg.nfce_ambiente !== 'producao' ? 'selected' : ''}>Homologacao</option>
+              <option value="producao" ${cfg.nfce_ambiente === 'producao' ? 'selected' : ''}>Producao</option>
+            </select></div>
+          <div class="form-group"><label>UF</label>
+            <select name="nfce_uf">${ufs.map(u => `<option ${cfg.nfce_uf === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>CNPJ</label><input name="nfce_cnpj" value="${escapeHtml(cfg.nfce_cnpj || '')}" placeholder="00.000.000/0000-00"></div>
+          <div class="form-group"><label>Inscricao estadual</label><input name="nfce_ie" value="${escapeHtml(cfg.nfce_ie || '')}"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Razao social</label><input name="nfce_razao_social" value="${escapeHtml(cfg.nfce_razao_social || '')}"></div>
+          <div class="form-group"><label>Nome fantasia</label><input name="nfce_nome_fantasia" value="${escapeHtml(cfg.nfce_nome_fantasia || '')}"></div>
+        </div>
+        <div class="form-group"><label>Logradouro</label><input name="nfce_logradouro" value="${escapeHtml(cfg.nfce_logradouro || '')}"></div>
+        <div class="form-row-3">
+          <div class="form-group"><label>Numero</label><input name="nfce_numero" value="${escapeHtml(cfg.nfce_numero || '')}"></div>
+          <div class="form-group"><label>Bairro</label><input name="nfce_bairro" value="${escapeHtml(cfg.nfce_bairro || '')}"></div>
+          <div class="form-group"><label>CEP</label><input name="nfce_cep" value="${escapeHtml(cfg.nfce_cep || '')}"></div>
+        </div>
+        <div class="form-row-3">
+          <div class="form-group"><label>Municipio</label><input name="nfce_municipio" value="${escapeHtml(cfg.nfce_municipio || '')}"></div>
+          <div class="form-group"><label>Codigo IBGE</label><input name="nfce_codigo_municipio" value="${escapeHtml(cfg.nfce_codigo_municipio || '')}" placeholder="2410306"></div>
+          <div class="form-group"><label>Telefone</label><input name="nfce_telefone" value="${escapeHtml(cfg.nfce_telefone || '')}"></div>
+        </div>
+        <div class="form-row-3">
+          <div class="form-group"><label>CRT</label>
+            <select name="nfce_crt">
+              <option value="1" ${cfg.nfce_crt !== '3' && cfg.nfce_crt !== '2' ? 'selected' : ''}>1 - Simples Nacional</option>
+              <option value="2" ${cfg.nfce_crt === '2' ? 'selected' : ''}>2 - Simples excesso</option>
+              <option value="3" ${cfg.nfce_crt === '3' ? 'selected' : ''}>3 - Regime normal</option>
+            </select></div>
+          <div class="form-group"><label>Serie NFC-e</label><input name="nfce_serie" type="number" min="1" value="${escapeHtml(cfg.nfce_serie || '1')}"></div>
+          <div class="form-group"><label>Ultimo numero</label><input name="nfce_numero_atual" type="number" min="0" value="${escapeHtml(cfg.nfce_numero_atual || '0')}"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>CSC ID</label><input name="nfce_csc_id" value="${escapeHtml(cfg.nfce_csc_id || '')}" placeholder="ID do token SEFAZ"></div>
+          <div class="form-group"><label>CSC token</label><input name="nfce_csc_token" type="password" placeholder="${cfg.nfce_csc_token === '1' ? 'Token ja salvo (deixe em branco para manter)' : 'Token CSC'}" autocomplete="new-password"></div>
+        </div>
+        <div class="form-group"><label>Certificado A1 (.pfx)</label>
+          <input type="file" id="cfg-pfx" accept=".pfx,.p12">
+          <input type="hidden" name="nfce_certificado_pfx" id="cfg-pfx-b64" value="">
+          <small class="muted">${cfg.nfce_certificado_nome ? `Atual: ${escapeHtml(cfg.nfce_certificado_nome)} validade ${escapeHtml(cfg.nfce_certificado_validade || '-')}` : 'Nenhum certificado enviado'}</small>
+        </div>
+        <div class="form-group"><label>Senha do certificado</label>
+          <input name="nfce_certificado_senha" type="password" placeholder="${cfg.nfce_certificado_senha === '1' ? 'Senha ja salva (deixe em branco para manter)' : 'Senha do PFX'}" autocomplete="new-password"></div>
+        <div class="form-group">
+          <label class="check-label"><input type="checkbox" id="cfg-nfce-auto" ${cfg.nfce_emitir_automatico === '1' ? 'checked' : ''}> Emitir automaticamente ao finalizar no PDV (F7)</label>
+        </div>
+        <div class="form-group">
+          <label class="check-label"><input type="checkbox" id="cfg-nfce-sim" ${cfg.nfce_simulacao === '1' ? 'checked' : ''}> Modo simulacao (nao transmite a SEFAZ; use para treinar o fluxo)</label>
+        </div>
+      </div>
       <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Salvar configurações</button>
     </form>`;
+  document.getElementById('cfg-pfx').onchange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { document.getElementById('cfg-pfx-b64').value = String(reader.result || ''); };
+    reader.readAsDataURL(file);
+  };
   document.getElementById('config-form').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const body = Object.fromEntries(fd);
     body.perguntar_quantidade = document.getElementById('cfg-perguntar').checked ? '1' : '0';
+    body.nfce_habilitada = document.getElementById('cfg-nfce').checked ? '1' : '0';
+    body.nfce_emitir_automatico = document.getElementById('cfg-nfce-auto').checked ? '1' : '0';
+    body.nfce_simulacao = document.getElementById('cfg-nfce-sim').checked ? '1' : '0';
+    if (!body.nfce_csc_token) delete body.nfce_csc_token;
+    if (!body.nfce_certificado_senha) delete body.nfce_certificado_senha;
+    if (!body.nfce_certificado_pfx) delete body.nfce_certificado_pfx;
     try {
-      await API.config.save(body);
-      erpConfig = { ...erpConfig, ...body };
+      const saved = await API.config.save(body);
+      erpConfig = { ...erpConfig, ...saved };
       showToast('Configurações salvas', 'success');
+      renderConfiguracoes();
     } catch (err) { showToast(err.message, 'error'); }
   };
 }
@@ -2627,9 +2811,9 @@ async function renderManual() {
         <li><strong>Clientes / Produtos / Fornecedores</strong> — Cadastre, edite e pesquise registros com paginação.</li>
         <li><strong>Ordens de serviço</strong> — Controle status, datas e valor previsto de cada OS.</li>
         <li><strong>Financeiro</strong> — Lance receitas e despesas, marque como pago ou pendente.</li>
-        <li><strong>Histórico</strong> — Consulte vendas, imprima cupom ou cancele (estoque volta automaticamente).</li>
+        <li><strong>Histórico</strong> — Consulte vendas, imprima cupom/DANFE, emita NFC-e ou cancele (estoque volta automaticamente).</li>
         <li><strong>Relatório</strong> — Veja faturamento mensal, produtos mais vendidos e top clientes.</li>
-        <li><strong>Configurações</strong> — Personalize cupom, taxas de cartão e pergunta de quantidade no PDV.</li>
+        <li><strong>Configurações</strong> — Personalize cupom, taxas de cartão, pergunta de quantidade no PDV e dados da NFC-e (CNPJ, CSC, certificado A1, série e ambiente).</li>
         <li><strong>Assistente IA</strong> — O botao azul no canto inferior direito responde duvidas identificando o modulo e a sessao.</li>
       </ol>
     </div>

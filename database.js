@@ -186,6 +186,27 @@ db.exec(`
     FOREIGN KEY (fornecedor_id) REFERENCES fornecedores(id)
   );
 
+  CREATE TABLE IF NOT EXISTS nfce (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    venda_id INTEGER NOT NULL,
+    chave TEXT,
+    numero INTEGER,
+    serie INTEGER DEFAULT 1,
+    ambiente TEXT DEFAULT 'homologacao',
+    status TEXT DEFAULT 'pendente',
+    protocolo TEXT,
+    cstat TEXT,
+    motivo TEXT,
+    xml TEXT,
+    xml_retorno TEXT,
+    qrcode TEXT,
+    url_consulta TEXT,
+    dh_emi TEXT,
+    dh_autorizacao TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (venda_id) REFERENCES vendas(id)
+  );
+
   CREATE TABLE IF NOT EXISTS config (
     chave TEXT PRIMARY KEY,
     valor TEXT
@@ -211,6 +232,11 @@ ensureColumn('caixa', 'desconto_percent', 'REAL DEFAULT 0');
 ensureColumn('caixa', 'venda_id', 'INTEGER');
 ensureColumn('venda_itens', 'descricao', 'TEXT');
 ensureColumn('venda_itens', 'os_id', 'INTEGER');
+ensureColumn('produtos', 'ncm', "TEXT DEFAULT '00000000'");
+ensureColumn('produtos', 'cfop', "TEXT DEFAULT '5102'");
+ensureColumn('produtos', 'unidade', "TEXT DEFAULT 'UN'");
+ensureColumn('produtos', 'origem', "TEXT DEFAULT '0'");
+ensureColumn('vendas', 'nfce_id', 'INTEGER');
 ensureColumn('usuarios', 'celular', 'TEXT');
 ensureColumn('usuarios', 'data_nascimento', 'TEXT');
 ensureColumn('usuarios', 'cpf', 'TEXT');
@@ -261,7 +287,32 @@ const defaults = {
   cupom_rodape: 'Obrigado pela preferência\nSempre volte!',
   perguntar_quantidade: '1',
   taxa_credito: '0',
-  taxa_debito: '0'
+  taxa_debito: '0',
+  nfce_habilitada: '0',
+  nfce_ambiente: 'homologacao',
+  nfce_uf: 'RN',
+  nfce_cnpj: '',
+  nfce_ie: '',
+  nfce_razao_social: '',
+  nfce_nome_fantasia: 'Scrundai Software',
+  nfce_logradouro: 'Rua jose correia de andrade',
+  nfce_numero: 'S/N',
+  nfce_bairro: 'Centro',
+  nfce_municipio: 'Serrinha',
+  nfce_codigo_municipio: '2410306',
+  nfce_cep: '59374000',
+  nfce_telefone: '84998713472',
+  nfce_crt: '1',
+  nfce_serie: '1',
+  nfce_numero_atual: '0',
+  nfce_csc_id: '',
+  nfce_csc_token: '',
+  nfce_certificado_pfx: '',
+  nfce_certificado_senha: '',
+  nfce_certificado_nome: '',
+  nfce_certificado_validade: '',
+  nfce_emitir_automatico: '1',
+  nfce_simulacao: '1'
 };
 const insertConfig = db.prepare('INSERT OR IGNORE INTO config (chave, valor) VALUES (?, ?)');
 for (const [chave, valor] of Object.entries(defaults)) {
