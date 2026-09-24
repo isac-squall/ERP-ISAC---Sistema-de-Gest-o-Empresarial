@@ -35,8 +35,8 @@ module.exports = [
     sessao: 'PDV e carrinho',
     pagina: 'vendas',
     titulo: 'Como vender no caixa',
-    keywords: 'venda pdv caixa livre carrinho item produto finalizar f7 f8 f3 aba cliente visitante',
-    conteudo: `A tela Realizar vendas e o PDV. O caixa precisa estar aberto; se estiver fechado, o sistema pede para ir em Gerenciar caixa. A venda comeca vazia (Caixa livre). Busque o item, monte o carrinho, escolha o cliente (padrao Visitante) e finalize com F7. Formas de pagamento: Dinheiro, Cartao Debito, Cartao Credito e PIX. E possivel desconto, valor recebido, troco e parcelas. Ctrl+T abre nova aba, Ctrl+W fecha a aba, setas alternam abas.`,
+    keywords: 'venda pdv caixa livre carrinho item produto finalizar f7 f8 f3 aba cliente visitante nfce nota fiscal',
+    conteudo: `A tela Realizar vendas e o PDV. O caixa precisa estar aberto; se estiver fechado, o sistema pede para ir em Gerenciar caixa. A venda comeca vazia (Caixa livre). Busque o item, monte o carrinho, escolha o cliente (padrao Visitante) e finalize com F7. Formas de pagamento: Dinheiro, Cartao Debito, Cartao Credito e PIX. E possivel desconto, valor recebido, troco e parcelas. Se a NFC-e estiver habilitada, o F7 pode emitir a nota automaticamente. Ctrl+T abre nova aba, Ctrl+W fecha a aba, setas alternam abas.`,
     passos: [
       'Abra o caixa em Gerenciar caixa.',
       'Entre em Realizar vendas.',
@@ -212,12 +212,12 @@ module.exports = [
     sessao: 'Consulta e cancelamento',
     pagina: 'historico-vendas',
     titulo: 'Consultar, imprimir e cancelar vendas',
-    keywords: 'historico venda cupom cancelar estoque consulta pedido',
-    conteudo: `O Historico de vendas lista vendas com cliente, total, pagamento e data. E possivel abrir o detalhe, imprimir o cupom e cancelar. No cancelamento o estoque dos produtos volta e, se houver OS cobrada, a ordem retorna para Pronta para entrega.`,
+    keywords: 'historico venda cupom cancelar estoque consulta pedido nfce danfe xml emitir',
+    conteudo: `O Historico de vendas lista vendas com cliente, total, pagamento, status e NFC-e. E possivel abrir o detalhe, imprimir o cupom ou DANFE, baixar o XML, emitir NFC-e de venda antiga e cancelar. No cancelamento o estoque volta, OS cobrada retorna para Pronta para entrega e a NFC-e autorizada e cancelada na SEFAZ (ou em simulacao).`,
     passos: [
       'Abra Historico de vendas.',
       'Pesquise por cliente, numero ou forma de pagamento.',
-      'Imprima o cupom se precisar.',
+      'Imprima o DANFE ou baixe o XML se houver NFC-e.',
       'Cancele somente se a venda deve ser desfeita.'
     ]
   },
@@ -242,13 +242,31 @@ module.exports = [
     sessao: 'Cupom e PDV',
     pagina: 'configuracoes',
     titulo: 'Personalizar cupom e taxas',
-    keywords: 'configuracao cupom taxa cartao credito debito quantidade pdv',
-    conteudo: `Configuracoes altera titulo, cabecalho e rodape do cupom, pergunta de quantidade ao adicionar produto no PDV e taxas de cartao de credito e debito. A engrenagem do cabecalho abre esta tela.`,
+    keywords: 'configuracao cupom taxa cartao credito debito quantidade pdv nfce certificado csc sefaz',
+    conteudo: `Configuracoes altera titulo, cabecalho e rodape do cupom, pergunta de quantidade no PDV e taxas de cartao. Na secao NFC-e cadastre CNPJ, IE, endereco, CRT, serie, CSC (ID + token), certificado A1 (.pfx) e senha. Escolha Homologacao ou Producao. O modo simulacao treina o fluxo sem transmitir. A engrenagem do cabecalho abre esta tela.`,
     passos: [
       'Clique na engrenagem ou em Configuracoes.',
-      'Ajuste o texto do cupom.',
-      'Defina as taxas de cartao, se houver.',
+      'Ajuste o texto do cupom e as taxas.',
+      'Preencha os dados fiscais da NFC-e.',
+      'Envie o certificado A1 e o CSC.',
       'Salve as configuracoes.'
+    ]
+  },
+  {
+    id: 'nfce',
+    modulo: 'Configuracoes',
+    sessao: 'NFC-e',
+    pagina: 'configuracoes',
+    titulo: 'Emitir NFC-e no PDV',
+    keywords: 'nfce nfc-e nota fiscal consumidor certificado a1 pfx csc token sefaz danfe xml homologacao producao serie',
+    conteudo: `A NFC-e (Nota Fiscal de Consumidor Eletronica, modelo 65) e emitida no PDV ao finalizar a venda (F7) se estiver habilitada e com emitir automatico. Pre-requisitos: credenciamento na SEFAZ, certificado digital A1 (.pfx) com senha, CSC (token + ID) e serie cadastrada. Em Homologacao a nota nao tem valor fiscal. Sem certificado ou com modo simulacao, o sistema gera chave, XML, QR e protocolo local para treinar. No Historico voce imprime o DANFE, baixa o XML ou emite a nota de uma venda antiga. Cancelar a venda tambem cancela a NFC-e autorizada.`,
+    passos: [
+      'Credencie a empresa na SEFAZ do estado e obtenha o CSC.',
+      'Em Configuracoes, habilite NFC-e e preencha CNPJ, IE, endereco e codigo IBGE.',
+      'Envie o certificado A1 (.pfx) e a senha. Informe CSC ID e token.',
+      'Comece em Homologacao. Desmarque simulacao para transmitir de verdade.',
+      'Abra o caixa, venda no PDV e finalize com F7 marcando Emitir NFC-e.',
+      'Imprima o DANFE com chave e QR Code. Consulte no portal da SEFAZ.'
     ]
   },
   {

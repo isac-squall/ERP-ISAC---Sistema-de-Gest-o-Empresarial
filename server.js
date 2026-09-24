@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const db = require('./database');
+const nfce = require('./nfce');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -155,21 +156,75 @@ app.get('/api/notificacoes', (req, res) => {
 });
 
 app.get('/api/config', (req, res) => {
-  const rows = db.prepare('SELECT chave, valor FROM config').all();
-  const cfg = {};
-  rows.forEach(r => { cfg[r.chave] = r.valor; });
-  res.json(cfg);
+  res.json(nfce.sanitizar(nfce.loadConfig()));
 });
 
 app.put('/api/config', (req, res) => {
+  const body = req.body || {};
   const stmt = db.prepare('INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor');
-  const txn = db.transaction((body) => {
-    for (const [chave, valor] of Object.entries(body)) {
+  const txn = db.transaction((data) => {
+    for (const [chave, valor] of Object.entries(data)) {
+      if (nfce.SECRET_KEYS.includes(chave) && (valor === '1' || valor === '' || valor == null)) continue;
       stmt.run(chave, String(valor ?? ''));
     }
   });
-  txn(req.body || {});
-  res.json({ message: 'Configuração salva' });
+  txn(body);
+  if (body.nfce_certificado_pfx && body.nfce_certificado_senha && body.nfce_certificado_pfx !== '1') {
+    try {
+      const info = nfce.infoPfx(body.nfce_certificado_pfx, body.nfce_certificado_senha);
+      stmt.run('nfce_certificado_nome', info.nome || '');
+      stmt.run('nfce_certificado_validade', info.validade || '');
+    } catch (err) {
+      return res.status(400).json({ error: err.message || 'Certificado A1 invalido' });
+    }
+  }
+  res.json({ message: 'Configuração salva', ...nfce.sanitizar(nfce.loadConfig()) });
+});
+
+app.get('/api/nfce/status', (req, res) => {
+  const cfg = nfce.loadConfig();
+  const check = nfce.pronta(cfg);
+  res.json({
+    habilitada: cfg.nfce_habilitada === '1',
+    ambiente: cfg.nfce_ambiente || 'homologacao',
+    simulacao: cfg.nfce_simulacao === '1',
+    pronta: check.ok,
+    erros: check.erros,
+    certificado_nome: cfg.nfce_certificado_nome || '',
+    certificado_validade: cfg.nfce_certificado_validade || ''
+  });
+});
+
+app.post('/api/vendas/:id/nfce', async (req, res) => {
+  try {
+    const nota = await nfce.emitir(Number(req.params.id), { forcar: !!req.body?.forcar });
+    res.json({ message: nota.status === 'autorizada' ? 'NFC-e autorizada' : 'NFC-e nao autorizada', nfce: nfce.resumoPublico(nota) });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Falha ao emitir NFC-e' });
+  }
+});
+
+app.get('/api/vendas/:id/nfce', (req, res) => {
+  const nota = nfce.nfceDaVenda(Number(req.params.id));
+  if (!nota) return res.status(404).json({ error: 'Venda sem NFC-e' });
+  res.json(nfce.resumoPublico(nota));
+});
+
+app.get('/api/vendas/:id/nfce.xml', (req, res) => {
+  const nota = nfce.nfceDaVenda(Number(req.params.id));
+  if (!nota?.xml) return res.status(404).json({ error: 'XML nao encontrado' });
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="NFCe-${nota.chave || req.params.id}.xml"`);
+  res.send(nota.xml);
+});
+
+app.post('/api/vendas/:id/nfce/cancelar', async (req, res) => {
+  try {
+    const nota = await nfce.cancelarNfce(Number(req.params.id), req.body?.justificativa);
+    res.json({ message: 'NFC-e cancelada', nfce: nfce.resumoPublico(nota) });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Falha ao cancelar NFC-e' });
+  }
 });
 
 // ============ CLIENTES ============
@@ -304,15 +359,15 @@ app.get('/api/produtos/:id', (req, res) => {
 });
 
 app.post('/api/produtos', (req, res) => {
-  const { nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id } = req.body;
+  const { nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem } = req.body;
   if (!nome) return res.status(400).json({ error: 'Nome é obrigatório' });
-  const result = db.prepare('INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id) VALUES (?,?,?,?,?,?,?,?,?,?)').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null);
+  const result = db.prepare('INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null, ncm || '00000000', cfop || '5102', unidade || 'UN', origem || '0');
   res.json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/produtos/:id', (req, res) => {
-  const { nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id } = req.body;
-  db.prepare('UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, foto=?, estoque=?, estoque_minimo=?, categoria=?, fornecedor_id=? WHERE id=?').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null, req.params.id);
+  const { nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem } = req.body;
+  db.prepare('UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, foto=?, estoque=?, estoque_minimo=?, categoria=?, fornecedor_id=?, ncm=?, cfop=?, unidade=?, origem=? WHERE id=?').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null, ncm || '00000000', cfop || '5102', unidade || 'UN', origem || '0', req.params.id);
   res.json({ message: 'Produto atualizado' });
 });
 
@@ -694,8 +749,8 @@ app.get('/api/caixa/historico', (req, res) => {
 
 
 // ============ VENDAS ============
-app.post('/api/vendas', (req, res) => {
-  const { cliente_id, itens, desconto, forma_pagamento, usuario_id, valor_recebido, parcelas } = req.body;
+app.post('/api/vendas', async (req, res) => {
+  const { cliente_id, itens, desconto, forma_pagamento, usuario_id, valor_recebido, parcelas, emitir_nfce } = req.body;
   const status = db.prepare('SELECT aberto FROM caixa_status WHERE id = 1').get();
   if (!status?.aberto) return res.status(400).json({ error: 'Caixa fechado. Abra o caixa para realizar vendas.' });
   if (!itens?.length) return res.status(400).json({ error: 'Adicione itens à venda' });
@@ -752,7 +807,12 @@ app.post('/api/vendas', (req, res) => {
 
   try {
     const vendaId = txn();
-    res.json({ id: vendaId, message: 'Venda realizada' });
+    const nota = await nfce.emitirAposVenda(vendaId, emitir_nfce);
+    res.json({
+      id: vendaId,
+      message: 'Venda realizada',
+      nfce: nota ? nfce.resumoPublico(nota) : null
+    });
   } catch (e) {
     res.status(400).json({ error: e.message || 'Falha ao finalizar venda' });
   }
@@ -760,9 +820,12 @@ app.post('/api/vendas', (req, res) => {
 
 app.get('/api/vendas', (req, res) => {
   const { search = '', page = 1, limit = 15, cliente_id, status } = req.query;
-  let query = `SELECT v.*, c.nome as cliente_nome, u.nome as usuario_nome FROM vendas v
+  let query = `SELECT v.*, c.nome as cliente_nome, u.nome as usuario_nome,
+    n.status as nfce_status, n.chave as nfce_chave, n.numero as nfce_numero, n.serie as nfce_serie
+    FROM vendas v
     LEFT JOIN clientes c ON v.cliente_id = c.id
-    LEFT JOIN usuarios u ON v.usuario_id = u.id WHERE 1=1`;
+    LEFT JOIN usuarios u ON v.usuario_id = u.id
+    LEFT JOIN nfce n ON n.id = v.nfce_id WHERE 1=1`;
   const params = [];
   if (cliente_id) { query += ' AND v.cliente_id = ?'; params.push(cliente_id); }
   if (status) { query += ' AND v.status = ?'; params.push(status); }
@@ -772,7 +835,7 @@ app.get('/api/vendas', (req, res) => {
     params.push(s, s, s);
   }
   query += ' ORDER BY v.criado_em DESC, v.id DESC';
-  const countQ = query.replace(/SELECT v\.\*, c\.nome as cliente_nome, u\.nome as usuario_nome/, 'SELECT COUNT(*) as total');
+  const countQ = query.replace(/SELECT v\.\*, c\.nome as cliente_nome, u\.nome as usuario_nome,[\s\S]*?FROM vendas v/, 'SELECT COUNT(*) as total FROM vendas v');
   const total = db.prepare(countQ).get(...params)?.total || 0;
   const offset = (page - 1) * limit;
   const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset);
@@ -792,15 +855,24 @@ app.get('/api/vendas/:id', (req, res) => {
     FROM venda_itens vi
     LEFT JOIN produtos p ON vi.produto_id = p.id WHERE vi.venda_id = ?
   `).all(req.params.id);
-  const cfg = Object.fromEntries(db.prepare('SELECT chave, valor FROM config').all().map(r => [r.chave, r.valor]));
-  res.json({ ...venda, itens, cupom: cfg });
+  const cfg = nfce.sanitizar(nfce.loadConfig());
+  const nota = nfce.nfceDaVenda(Number(req.params.id));
+  res.json({ ...venda, itens, cupom: cfg, nfce: nfce.resumoPublico(nota) });
 });
 
-app.post('/api/vendas/:id/cancelar', (req, res) => {
+app.post('/api/vendas/:id/cancelar', async (req, res) => {
   const venda = db.prepare('SELECT * FROM vendas WHERE id = ?').get(req.params.id);
   if (!venda) return res.status(404).json({ error: 'Venda não encontrada' });
   if (venda.status === 'Cancelada') return res.status(400).json({ error: 'Venda já cancelada' });
   const itens = db.prepare('SELECT * FROM venda_itens WHERE venda_id = ?').all(req.params.id);
+  const nota = nfce.nfceDaVenda(Number(req.params.id));
+  if (nota && nota.status === 'autorizada') {
+    try {
+      await nfce.cancelarNfce(Number(req.params.id), req.body?.justificativa || 'Cancelamento da venda no PDV ERP ISAC');
+    } catch (err) {
+      return res.status(400).json({ error: 'Nao foi possivel cancelar a NFC-e: ' + err.message });
+    }
+  }
   const txn = db.transaction(() => {
     for (const item of itens) {
       if (item.produto_id) db.prepare('UPDATE produtos SET estoque = estoque + ? WHERE id = ?').run(item.quantidade, item.produto_id);

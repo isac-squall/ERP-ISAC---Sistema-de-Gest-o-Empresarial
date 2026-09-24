@@ -15,6 +15,7 @@ Sistema ERP completo baseado no layout ERP ISAC, com todos os módulos funcionai
 - **Fornecedores** - Cadastro de fornecedores
 - **Histórico de vendas** - Consulta de vendas realizadas
 - **Relatório geral** - Gráficos e rankings
+- **NFC-e** - Emissão no PDV (certificado A1, CSC, homologação/produção, DANFE)
 
 ## Recursos extras
 

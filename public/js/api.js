@@ -27,6 +27,13 @@ const API = {
     get: () => API.request('/config'),
     save: (d) => API.request('/config', { method: 'PUT', body: d })
   },
+  nfce: {
+    status: () => API.request('/nfce/status'),
+    emitir: (id, d) => API.request(`/vendas/${id}/nfce`, { method: 'POST', body: d || {} }),
+    get: (id) => API.request(`/vendas/${id}/nfce`),
+    xml: (id) => `/api/vendas/${id}/nfce.xml`,
+    cancelar: (id, justificativa) => API.request(`/vendas/${id}/nfce/cancelar`, { method: 'POST', body: { justificativa } })
+  },
 
   clientes: {
     list: (p) => API.request(`/clientes?${new URLSearchParams(p)}`),
@@ -103,7 +110,7 @@ const API = {
     list: (p) => API.request(`/vendas?${new URLSearchParams(p)}`),
     get: (id) => API.request(`/vendas/${id}`),
     create: (d) => API.request('/vendas', { method: 'POST', body: d }),
-    cancelar: (id) => API.request(`/vendas/${id}/cancelar`, { method: 'POST' })
+    cancelar: (id, justificativa) => API.request(`/vendas/${id}/cancelar`, { method: 'POST', body: { justificativa } })
   },
 
   orcamentos: {
