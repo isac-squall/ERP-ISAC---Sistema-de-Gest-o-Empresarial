@@ -165,12 +165,12 @@ module.exports = [
     sessao: 'Gestao de OS',
     pagina: 'ordens-servico',
     titulo: 'Abrir e acompanhar ordens de servico',
-    keywords: 'ordem servico os equipamento solicitacao status prevista entrega notebook celular',
-    conteudo: `Ordens de servico controla status (Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada), cliente, equipamento, solicitacao, valor previsto e datas. Cards mostram OS abertas, prontas e valor previsto. Para cobrar, va em Realizar vendas, lupa, Ordem de servico. OS de teste: Notebook Dell Inspiron (troca de tela) e Celular Samsung Galaxy (troca de bateria).`,
+    keywords: 'ordem servico os equipamento servicos equipamentos solicitacao status prevista entrega notebook celular',
+    conteudo: `Ordens de servico controla status (Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada), cliente, servicos/equipamentos, solicitacao, valor previsto e datas. No campo Servicos/Equipamentos voce cadastra aparelho (notebook, celular) ou servico (formatacao, instalacao). Cards mostram OS abertas, prontas e valor previsto. Para cobrar, va em Realizar vendas, lupa, Ordem de servico. OS de teste: Notebook Dell Inspiron (troca de tela) e Celular Samsung Galaxy (troca de bateria).`,
     passos: [
       'Abra Ordens de servico.',
       'Clique em Novo Servico.',
-      'Escolha cliente, equipamento, problema e valor previsto.',
+      'Escolha cliente, servicos/equipamentos, problema e valor previsto.',
       'Atualize o status conforme o conserto.',
       'Quando estiver pronta, cobre no PDV pela lupa de OS.'
     ]
