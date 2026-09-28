@@ -323,7 +323,7 @@ async function renderOrdensServico() {
     <div class="table-wrapper">
       <table class="data-table">
         <thead><tr>
-          <th>#</th><th>Status</th><th>Cliente</th><th>Equipamento</th>
+          <th>#</th><th>Status</th><th>Cliente</th><th>Serviços/Equipamentos</th>
           <th>Solicitacao</th><th>Previsto</th><th>Final</th><th>Entrega</th><th>Criada em</th><th>Acoes</th>
         </tr></thead>
         <tbody id="os-tbody">${renderOSTableRows(result.data)}</tbody>
@@ -382,7 +382,8 @@ async function showOSForm(id) {
             ${clientes.map(c => `<option value="${c.id}" ${data.cliente_id == c.id ? 'selected' : ''}>${c.nome}</option>`).join('')}
           </select></div>
       </div>
-      <div class="form-group"><label>Equipamento</label><input name="equipamento" value="${escapeHtml(data.equipamento || '')}"></div>
+      <div class="form-group"><label>Serviços/Equipamentos</label>
+        <input name="equipamento" value="${escapeHtml(data.equipamento || '')}" placeholder="Ex.: Notebook Dell, formatação, troca de tela"></div>
       <div class="form-group"><label>Solicitação</label><textarea name="solicitacao" rows="3">${escapeHtml(data.solicitacao || '')}</textarea></div>
       <div class="form-row">
         <div class="form-group"><label>Valor previsto</label><input name="valor_previsto" type="number" step="0.01" value="${data.valor_previsto || 0}"></div>
