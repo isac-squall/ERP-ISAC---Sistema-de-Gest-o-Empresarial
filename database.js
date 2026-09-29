@@ -312,7 +312,16 @@ const defaults = {
   nfce_certificado_nome: '',
   nfce_certificado_validade: '',
   nfce_emitir_automatico: '1',
-  nfce_simulacao: '1'
+  nfce_simulacao: '1',
+  empresa_nome: 'Sistema de gestão empresarial ERP ISAC',
+  empresa_telefone: '',
+  empresa_email: '',
+  empresa_instagram: '',
+  empresa_cidade: '',
+  empresa_estado: '',
+  empresa_endereco: '',
+  empresa_cnpj: '',
+  empresa_logo: ''
 };
 const insertConfig = db.prepare('INSERT OR IGNORE INTO config (chave, valor) VALUES (?, ?)');
 for (const [chave, valor] of Object.entries(defaults)) {

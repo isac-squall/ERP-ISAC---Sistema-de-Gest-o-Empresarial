@@ -28,6 +28,10 @@ const API = {
     save: (d) => API.request('/config', { method: 'PUT', body: d }),
     apagarBanco: (d) => API.request('/config/apagar-banco', { method: 'POST', body: d })
   },
+  empresa: {
+    get: () => API.request('/empresa'),
+    save: (d) => API.request('/empresa', { method: 'PUT', body: d })
+  },
   nfce: {
     status: () => API.request('/nfce/status'),
     emitir: (id, d) => API.request(`/vendas/${id}/nfce`, { method: 'POST', body: d || {} }),
