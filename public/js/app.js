@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
     localStorage.removeItem('erp_user');
   }
   bindGlobalEvents();
+  aplicarEmpresa();
 });
 
 function bindGlobalEvents() {
@@ -156,8 +157,64 @@ function showApp() {
   document.getElementById('ai-chat')?.classList.remove('hidden');
   applyMenuPermissions();
   refreshNotificacoes();
+  aplicarEmpresa();
   const start = canAccess('dashboard') ? 'dashboard' : (userPermissoes()[0] || 'manual');
   navigate(start);
+}
+
+let dadosEmpresa = {};
+
+function aplicarEmpresa(emp) {
+  const run = async () => {
+    const e = emp || (dadosEmpresa.nome ? dadosEmpresa : await API.empresa.get().catch(() => ({})));
+    dadosEmpresa = e || {};
+    const nome = dadosEmpresa.nome || 'ERP ISAC';
+    const logo = dadosEmpresa.logo || '';
+    document.title = nome;
+    const loginH1 = document.querySelector('.login-logo h1');
+    const loginP = document.querySelector('.login-logo p');
+    const loginIco = document.querySelector('.login-logo i');
+    let loginImg = document.getElementById('login-logo-img');
+    if (!loginImg) {
+      loginImg = document.createElement('img');
+      loginImg.id = 'login-logo-img';
+      loginImg.className = 'login-logo-img hidden';
+      loginImg.alt = '';
+      document.querySelector('.login-logo')?.prepend(loginImg);
+    }
+    if (logo) {
+      loginImg.src = logo;
+      loginImg.classList.remove('hidden');
+      if (loginIco) loginIco.classList.add('hidden');
+    } else {
+      loginImg.classList.add('hidden');
+      if (loginIco) loginIco.classList.remove('hidden');
+    }
+    if (loginH1) loginH1.textContent = nome;
+    if (loginP) loginP.textContent = [dadosEmpresa.cidade, dadosEmpresa.estado].filter(Boolean).join(' / ') || 'Sistema de gestão empresarial';
+    const brandTitle = document.querySelector('.brand-title');
+    const brandSub = document.querySelector('.brand-sub');
+    if (brandTitle) brandTitle.textContent = nome;
+    if (brandSub) brandSub.textContent = dadosEmpresa.cidade || 'Sistema de gestão empresarial';
+    const sideIco = document.querySelector('.sidebar-logo i');
+    let sideImg = document.getElementById('sidebar-logo-img');
+    if (!sideImg) {
+      sideImg = document.createElement('img');
+      sideImg.id = 'sidebar-logo-img';
+      sideImg.className = 'sidebar-logo-img hidden';
+      sideImg.alt = '';
+      document.querySelector('.sidebar-logo')?.prepend(sideImg);
+    }
+    if (logo) {
+      sideImg.src = logo;
+      sideImg.classList.remove('hidden');
+      if (sideIco) sideIco.classList.add('hidden');
+    } else {
+      sideImg.classList.add('hidden');
+      if (sideIco) sideIco.classList.remove('hidden');
+    }
+  };
+  run().catch(() => {});
 }
 
 async function refreshNotificacoes(fillPanel) {
@@ -1903,7 +1960,7 @@ function printPosDocumento(titulo, tab) {
   const total = Math.max(0, subtotal - desconto);
   area.innerHTML = `
     <div class="cupom">
-      <h3>${escapeHtml(erpConfig.cupom_titulo || 'ERP ISAC')}</h3>
+      <h3>${escapeHtml(erpConfig.empresa_nome || erpConfig.cupom_titulo || 'ERP ISAC')}</h3>
       <pre>${escapeHtml(erpConfig.cupom_cabecalho || '')}</pre>
       <h4>${escapeHtml(titulo)}</h4>
       <p>${formatDateTime(new Date())}</p>
@@ -2807,6 +2864,47 @@ async function renderConfiguracoes() {
   const ufs = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
   document.getElementById('content').innerHTML = `
     ${pageHeader('Configurações', 'Dashboard / Configurações')}
+    <form id="empresa-form" class="card empresa-card">
+      <div class="empresa-head">
+        <i class="fas fa-building"></i>
+        <div>
+          <h3>Editar empresa</h3>
+          <p class="muted">Atualize dados da loja, logo e contatos.</p>
+        </div>
+      </div>
+      <div class="empresa-logo-row">
+        <div class="empresa-logo-wrap">
+          <img id="empresa-logo-preview" class="empresa-logo ${cfg.empresa_logo ? '' : 'hidden'}" src="${escapeHtml(cfg.empresa_logo || '')}" alt="">
+          <div id="empresa-logo-placeholder" class="empresa-logo empresa-logo-ph ${cfg.empresa_logo ? 'hidden' : ''}"><i class="fas fa-store"></i></div>
+          <label class="empresa-logo-btn" for="empresa-logo-file" title="Trocar logo"><i class="fas fa-camera"></i></label>
+          <input type="file" id="empresa-logo-file" accept="image/png,image/jpeg" class="hidden">
+          <input type="hidden" name="logo" id="empresa-logo-value" value="${escapeHtml(cfg.empresa_logo || '')}">
+        </div>
+        <div>
+          <strong>Logo da loja</strong>
+          <p class="muted">PNG ou JPG<br>Maximo de 2MB</p>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Nome da loja</label><input name="nome" value="${escapeHtml(cfg.empresa_nome || '')}" placeholder="Sistema de gestão empresarial ERP ISAC"></div>
+        <div class="form-group"><label>Telefone</label><input name="telefone" value="${escapeHtml(cfg.empresa_telefone || '')}" placeholder="(00) 00000-0000"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>E-mail</label><input name="email" type="email" value="${escapeHtml(cfg.empresa_email || '')}" placeholder="email@exemplo.com"></div>
+        <div class="form-group"><label>Instagram</label><input name="instagram" value="${escapeHtml(cfg.empresa_instagram || '')}" placeholder="@instagram"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Cidade</label><input name="cidade" value="${escapeHtml(cfg.empresa_cidade || '')}" placeholder="Informe a cidade"></div>
+        <div class="form-group"><label>Estado</label><input name="estado" value="${escapeHtml(cfg.empresa_estado || '')}" placeholder="Informe o estado"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Endereco</label><input name="endereco" value="${escapeHtml(cfg.empresa_endereco || '')}" placeholder="Endereco completo"></div>
+        <div class="form-group"><label>CNPJ</label><input name="cnpj" value="${escapeHtml(cfg.empresa_cnpj || '')}" placeholder="Informe o CNPJ"></div>
+      </div>
+      <div class="empresa-actions">
+        <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> Salvar empresa</button>
+      </div>
+    </form>
     <form id="config-form">
       <div class="card">
         <h3>Cupom fiscal</h3>
@@ -2896,11 +2994,34 @@ async function renderConfiguracoes() {
         <div class="zona-critica-icon"><i class="fas fa-exclamation-triangle"></i></div>
         <div>
           <h3>Zona critica</h3>
-          <p>Apaga vendas, clientes, produtos, usuarios, configuracoes e imagens. A licenca atual sera preservada quando existir.</p>
+          <p>Apaga vendas, clientes, produtos, usuarios, configuracoes e imagens. A licenca e os dados da empresa serao preservados quando existirem.</p>
         </div>
       </div>
       <button type="button" class="btn-zona-critica" id="btn-apagar-banco"><i class="fas fa-trash"></i> Apagar banco de dados</button>
     </div>`;
+  document.getElementById('empresa-logo-file').onchange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { showToast('Logo deve ter no maximo 2MB', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      document.getElementById('empresa-logo-value').value = reader.result;
+      const preview = document.getElementById('empresa-logo-preview');
+      preview.src = reader.result;
+      preview.classList.remove('hidden');
+      document.getElementById('empresa-logo-placeholder')?.classList.add('hidden');
+    };
+    reader.readAsDataURL(file);
+  };
+  document.getElementById('empresa-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      const saved = await API.empresa.save(Object.fromEntries(fd));
+      aplicarEmpresa(saved);
+      showToast('Empresa salva', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  };
   document.getElementById('cfg-pfx').onchange = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;

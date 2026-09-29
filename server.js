@@ -186,6 +186,62 @@ function isLicencaKey(chave) {
   return /licen|serial/i.test(String(chave || ''));
 }
 
+function isPreservedConfigKey(chave) {
+  return isLicencaKey(chave) || String(chave || '').startsWith('empresa_');
+}
+
+function empresaPublica(cfg) {
+  return {
+    nome: cfg.empresa_nome || 'ERP ISAC',
+    telefone: cfg.empresa_telefone || '',
+    email: cfg.empresa_email || '',
+    instagram: cfg.empresa_instagram || '',
+    cidade: cfg.empresa_cidade || '',
+    estado: cfg.empresa_estado || '',
+    endereco: cfg.empresa_endereco || '',
+    cnpj: cfg.empresa_cnpj || '',
+    logo: cfg.empresa_logo || ''
+  };
+}
+
+app.get('/api/empresa', (req, res) => {
+  res.json(empresaPublica(nfce.loadConfig()));
+});
+
+app.put('/api/empresa', (req, res) => {
+  const body = req.body || {};
+  const logo = body.logo || body.empresa_logo || '';
+  if (logo && Buffer.byteLength(String(logo), 'utf8') > 4 * 1024 * 1024) {
+    return res.status(400).json({ error: 'Logo deve ter no maximo 2MB' });
+  }
+  const dados = {
+    empresa_nome: String(body.nome || body.empresa_nome || '').trim() || 'ERP ISAC',
+    empresa_telefone: String(body.telefone || body.empresa_telefone || '').trim(),
+    empresa_email: String(body.email || body.empresa_email || '').trim(),
+    empresa_instagram: String(body.instagram || body.empresa_instagram || '').trim(),
+    empresa_cidade: String(body.cidade || body.empresa_cidade || '').trim(),
+    empresa_estado: String(body.estado || body.empresa_estado || '').trim(),
+    empresa_endereco: String(body.endereco || body.empresa_endereco || '').trim(),
+    empresa_cnpj: String(body.cnpj || body.empresa_cnpj || '').trim()
+  };
+  if (logo !== undefined && logo !== null) dados.empresa_logo = String(logo);
+  const stmt = db.prepare('INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor');
+  const tx = db.transaction(() => {
+    for (const [chave, valor] of Object.entries(dados)) stmt.run(chave, valor);
+    stmt.run('cupom_titulo', dados.empresa_nome);
+    const cab = [dados.empresa_endereco, [dados.empresa_cidade, dados.empresa_estado].filter(Boolean).join(' / '), dados.empresa_telefone].filter(Boolean).join('\n');
+    if (cab) stmt.run('cupom_cabecalho', cab);
+    const atual = nfce.loadConfig();
+    if (!String(atual.nfce_cnpj || '').trim() && dados.empresa_cnpj) stmt.run('nfce_cnpj', dados.empresa_cnpj);
+    if (!String(atual.nfce_nome_fantasia || '').trim()) stmt.run('nfce_nome_fantasia', dados.empresa_nome);
+    if (!String(atual.nfce_telefone || '').trim() && dados.empresa_telefone) stmt.run('nfce_telefone', dados.empresa_telefone);
+    if (!String(atual.nfce_municipio || '').trim() && dados.empresa_cidade) stmt.run('nfce_municipio', dados.empresa_cidade);
+    if (!String(atual.nfce_logradouro || '').trim() && dados.empresa_endereco) stmt.run('nfce_logradouro', dados.empresa_endereco);
+  });
+  tx();
+  res.json({ message: 'Empresa salva', ...empresaPublica(nfce.loadConfig()) });
+});
+
 app.post('/api/config/apagar-banco', (req, res) => {
   const { confirmar, senha, usuario_id } = req.body || {};
   if (String(confirmar || '').trim().toUpperCase() !== 'APAGAR') {
@@ -201,7 +257,7 @@ app.post('/api/config/apagar-banco', (req, res) => {
   if (!senha) return res.status(400).json({ error: 'Informe a senha do administrador' });
   if (admin.senha !== senha) return res.status(401).json({ error: 'Senha invalida' });
 
-  const licencas = db.prepare('SELECT chave, valor FROM config').all().filter(r => isLicencaKey(r.chave));
+  const licencas = db.prepare('SELECT chave, valor FROM config').all().filter(r => isPreservedConfigKey(r.chave));
   const defaults = {
     cupom_titulo: 'Scrundai Software',
     cupom_cabecalho: 'Rua jose correia de andrade SERRINHA /RN\n(84) 99871-3472',
@@ -232,9 +288,18 @@ app.post('/api/config/apagar-banco', (req, res) => {
     nfce_certificado_senha: '',
     nfce_certificado_nome: '',
     nfce_certificado_validade: '',
-    nfce_emitir_automatico: '1',
-    nfce_simulacao: '1'
-  };
+      nfce_emitir_automatico: '1',
+      nfce_simulacao: '1',
+      empresa_nome: 'Sistema de gestão empresarial ERP ISAC',
+      empresa_telefone: '',
+      empresa_email: '',
+      empresa_instagram: '',
+      empresa_cidade: '',
+      empresa_estado: '',
+      empresa_endereco: '',
+      empresa_cnpj: '',
+      empresa_logo: ''
+    };
 
   try {
     db.pragma('foreign_keys = OFF');
@@ -249,7 +314,7 @@ app.post('/api/config/apagar-banco', (req, res) => {
       const configs = db.prepare('SELECT chave FROM config').all();
       const delCfg = db.prepare('DELETE FROM config WHERE chave = ?');
       for (const row of configs) {
-        if (!isLicencaKey(row.chave)) delCfg.run(row.chave);
+        if (!isPreservedConfigKey(row.chave)) delCfg.run(row.chave);
       }
       try {
         db.exec("DELETE FROM sqlite_sequence WHERE name IN ('venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produtos','ordens_servico','financeiro','caixa','clientes','fornecedores','usuarios')");

@@ -15,7 +15,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Fornecedores** — Cadastro vinculado a produtos e contas a pagar
 - **Historico de vendas** — Consulta, cupom/DANFE, XML da NFC-e e cancelamento
 - **Relatorio geral** — Receita, lucro, ticket medio, rankings e graficos por periodo
-- **Configuracoes** — Cupom, taxas de cartao, NFC-e (A1, CSC, serie, homologacao/producao) e Zona critica (apagar banco, preservando a licenca)
+- **Configuracoes** — Cadastro da empresa (logo, nome, contatos, CNPJ), cupom, taxas, NFC-e e Zona critica
 - **Manual** — Ajuda por modulo e assistente de duvidas no canto da tela
 
 ## Novidades
@@ -27,6 +27,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Relatorio geral e permissoes por cargo
 - Instalador Windows offline `dist/ERP-ISAC-Setup.exe`
 - Zona critica em Configuracoes: apaga vendas, clientes, produtos, usuarios, configuracoes e imagens; a licenca atual e preservada
+- Cadastro da empresa: logo, nome da loja, telefone, e-mail, Instagram, cidade, estado, endereco e CNPJ (login, sidebar e cupom)
 
 ## Produtos: importar e exportar
 
@@ -71,6 +72,16 @@ Campo **Servicos/Equipamentos**: aparelho (notebook, celular) ou servico (format
 Status: Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada.
 
 Para cobrar: **Realizar vendas** > lupa > Ordem de servico.
+
+## Cadastro da empresa
+
+Em **Configuracoes**, o bloco **Editar empresa** cadastra a loja que vai usar o sistema:
+
+- Logo (PNG ou JPG, ate 2 MB)
+- Nome da loja, telefone, e-mail, Instagram
+- Cidade, estado, endereco e CNPJ
+
+Esses dados aparecem no login, na barra lateral e no cupom. Salvar a empresa tambem atualiza o titulo/cabecalho do cupom.
 
 ## Zona critica
 
