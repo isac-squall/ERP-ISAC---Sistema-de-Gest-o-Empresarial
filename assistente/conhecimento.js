@@ -149,12 +149,13 @@ module.exports = [
     sessao: 'Estoque e cadastro',
     pagina: 'produtos',
     titulo: 'Produtos, estoque, codigo e promocao',
-    keywords: 'produto estoque preco codigo barras sku categoria promocao foto minimo',
-    conteudo: `Produtos controla nome, codigo de barras, descricao, preco de venda, preco de custo, estoque, estoque minimo, categoria, fornecedor, foto e promocao. Estoque baixo gera alerta no sino. Ajuste de estoque registra movimento. No PDV o estoque e baixado na venda e devolvido se a venda for cancelada.`,
+    keywords: 'produto estoque preco codigo barras sku categoria promocao foto minimo importar exportar csv excel xlsx xml json sql',
+    conteudo: `Produtos controla nome, codigo de barras, descricao, preco de venda, preco de custo, estoque, estoque minimo, categoria, fornecedor, foto e promocao. Estoque baixo gera alerta no sino. Ajuste de estoque registra movimento. No PDV o estoque e baixado na venda e devolvido se a venda for cancelada. Importar e Exportar na toolbar (e em Opcoes) aceitam Excel, CSV, TXT, JSON, XML, SQL, HTML e Markdown. Na importacao, produto com o mesmo codigo de barras ou o mesmo nome e atualizado; os demais sao cadastrados. Campos obrigatorios: nome, codigo, preco e estoque. Use Exportar > Baixar modelo para o layout.`,
     passos: [
-      'Abra Produtos e clique em Novo Produto.',
+      'Abra Produtos e clique em Adicionar ou use Importar.',
       'Informe nome, preco, estoque e categoria.',
       'Se quiser, cadastre codigo de barras para a lupa do PDV.',
+      'Use Importar/Exportar para planilha, CSV, JSON, XML ou SQL.',
       'Use o menu de acoes para estoque, promocao ou edicao.',
       'Mantenha o estoque minimo para receber alertas.'
     ]

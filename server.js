@@ -3,12 +3,13 @@ const cors = require('cors');
 const path = require('path');
 const db = require('./database');
 const nfce = require('./nfce');
+const produtosIo = require('./produtos/io');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '25mb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: false,
   lastModified: false,
@@ -350,6 +351,90 @@ app.get('/api/produtos/codigo/:codigo', (req, res) => {
   const row = db.prepare('SELECT id, nome, preco, estoque, estoque_minimo, codigo, categoria FROM produtos WHERE ativo = 1 AND codigo = ?').get(req.params.codigo);
   if (!row) return res.status(404).json({ error: 'Produto não encontrado' });
   res.json(row);
+});
+
+app.get('/api/produtos/formatos', (req, res) => {
+  res.json(produtosIo.FORMATOS);
+});
+
+function produtosParaExport() {
+  return db.prepare(`SELECT nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria, ncm, cfop, unidade, origem
+    FROM produtos WHERE ativo = 1 ORDER BY nome`).all();
+}
+
+function enviarArquivoProdutos(res, out, nome) {
+  res.setHeader('Content-Type', out.mime);
+  res.setHeader('Content-Disposition', `attachment; filename="${nome}.${out.ext}"`);
+  res.send(out.body);
+}
+
+app.get('/api/produtos/export', (req, res) => {
+  try {
+    const out = produtosIo.exportar(produtosParaExport(), req.query.formato || 'csv');
+    enviarArquivoProdutos(res, out, 'produtos');
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Falha ao exportar' });
+  }
+});
+
+app.get('/api/produtos/modelo', (req, res) => {
+  try {
+    const out = produtosIo.modelo(req.query.formato || 'csv');
+    enviarArquivoProdutos(res, out, 'modelo-produtos');
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Falha ao gerar modelo' });
+  }
+});
+
+app.post('/api/produtos/import', (req, res) => {
+  try {
+    const { conteudo, formato, nome, encoding } = req.body || {};
+    if (!conteudo) return res.status(400).json({ error: 'Envie um arquivo de produtos' });
+    const raw = encoding === 'base64' ? Buffer.from(conteudo, 'base64') : conteudo;
+    const parsed = produtosIo.parse(raw, { formato, nomeArquivo: nome });
+    if (!parsed.length) return res.status(400).json({ error: 'Nenhum produto encontrado no arquivo' });
+
+    const findCodigo = db.prepare(`SELECT id FROM produtos WHERE codigo IS NOT NULL AND codigo != '' AND codigo = ? ORDER BY ativo DESC, id DESC LIMIT 1`);
+    const findNome = db.prepare(`SELECT id FROM produtos WHERE lower(nome) = lower(?) ORDER BY ativo DESC, id DESC LIMIT 1`);
+    const ins = db.prepare(`INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria, ncm, cfop, unidade, origem, ativo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`);
+    const upd = db.prepare(`UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, estoque=?, estoque_minimo=?, categoria=?, ncm=?, cfop=?, unidade=?, origem=?, ativo=1 WHERE id=?`);
+    const mov = db.prepare(`INSERT INTO estoque_movimentos (produto_id, tipo, quantidade, estoque_anterior, estoque_novo, observacao, usuario_id) VALUES (?,?,?,?,?,?,?)`);
+    const getEstoque = db.prepare('SELECT estoque FROM produtos WHERE id = ?');
+
+    const erros = [];
+    let criados = 0;
+    let atualizados = 0;
+    const tx = db.transaction((lista) => {
+      lista.forEach((item, idx) => {
+        const p = produtosIo.normalizar(item);
+        const linha = idx + 2;
+        if (p.erros.length) {
+          erros.push({ linha, nome: p.nome || item.nome || '', codigo: p.codigo || '', erros: p.erros });
+          return;
+        }
+        let row = p.codigo ? findCodigo.get(p.codigo) : null;
+        if (!row) row = findNome.get(p.nome);
+        const vals = [p.nome, p.codigo, p.descricao, p.preco, p.preco_custo, p.estoque, p.estoque_minimo, p.categoria, p.ncm, p.cfop, p.unidade, p.origem];
+        if (row) {
+          const anterior = getEstoque.get(row.id)?.estoque || 0;
+          upd.run(...vals, row.id);
+          if (anterior !== p.estoque) {
+            mov.run(row.id, 'inventario', p.estoque, anterior, p.estoque, 'Importacao de produtos', req.body.usuario_id || null);
+          }
+          atualizados++;
+        } else {
+          const result = ins.run(...vals);
+          mov.run(result.lastInsertRowid, 'entrada', p.estoque, 0, p.estoque, 'Importacao de produtos', req.body.usuario_id || null);
+          criados++;
+        }
+      });
+    });
+    tx(parsed);
+    res.json({ total: parsed.length, criados, atualizados, rejeitados: erros.length, erros });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Falha ao importar' });
+  }
 });
 
 app.get('/api/produtos/:id', (req, res) => {

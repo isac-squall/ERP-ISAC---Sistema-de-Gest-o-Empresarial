@@ -503,6 +503,8 @@ async function renderProdutos() {
       <span class="toolbar-info">Total de produtos: ${result.total}</span>
       <div class="toolbar-spacer"></div>
       <button class="btn-icon-square" id="produtos-settings" title="Opções"><i class="fas fa-cog"></i></button>
+      <button class="btn btn-outline" id="produtos-importar" title="Importar produtos"><i class="fas fa-file-import"></i> Importar</button>
+      <button class="btn btn-outline" id="produtos-exportar" title="Exportar produtos"><i class="fas fa-file-export"></i> Exportar</button>
       <button class="btn btn-success" id="produtos-promocoes"><i class="fas fa-percent"></i> Promocoes</button>
       <button class="btn btn-primary" id="table-new">Adicionar</button>
     </div>
@@ -527,6 +529,8 @@ async function renderProdutos() {
   document.getElementById('table-new').onclick = () => showProdutoForm();
   document.getElementById('produtos-promocoes').onclick = () => showPromocoesLista();
   document.getElementById('produtos-settings').onclick = () => showProdutosOpcoes();
+  document.getElementById('produtos-importar').onclick = () => showProdutosImportar();
+  document.getElementById('produtos-exportar').onclick = () => showProdutosExportar();
 }
 
 function produtoFotoHtml(p) {
@@ -778,9 +782,124 @@ async function showPromocoesLista() {
 
 function showProdutosOpcoes() {
   openModal('Opções de produtos', `
-    <p class="muted">Use o menu de ações de cada produto para editar, imprimir preço, gerar código de barras, criar promoção, registrar compra/entrada, ajustar estoque ou fazer inventário.</p>`,
+    <p class="muted" style="margin-bottom:14px">Use o menu de ações de cada produto para editar, imprimir preço, gerar código de barras, criar promoção, registrar compra/entrada, ajustar estoque ou fazer inventário.</p>
+    <div class="produtos-io-actions">
+      <button type="button" class="btn btn-outline" id="opcoes-importar"><i class="fas fa-file-import"></i> Importar planilha</button>
+      <button type="button" class="btn btn-outline" id="opcoes-exportar"><i class="fas fa-file-export"></i> Exportar cadastro</button>
+    </div>
+    <p class="muted" style="margin-top:12px">Formatos: Excel, CSV, TXT, JSON, XML, SQL, HTML e Markdown. Produtos existentes são atualizados pelo código de barras ou pelo nome.</p>`,
     `<button class="btn btn-primary modal-close-btn">Ok</button>`);
   document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('opcoes-importar').onclick = () => showProdutosImportar();
+  document.getElementById('opcoes-exportar').onclick = () => showProdutosExportar();
+}
+
+function produtosFormatosOptions(selected) {
+  const list = [
+    ['xlsx', 'Excel (.xlsx)'],
+    ['xls', 'Excel XML (.xls)'],
+    ['csv', 'CSV (.csv)'],
+    ['tsv', 'TSV (.tsv)'],
+    ['txt', 'Texto (.txt)'],
+    ['json', 'JSON (.json)'],
+    ['xml', 'XML (.xml)'],
+    ['sql', 'SQL (.sql)'],
+    ['html', 'HTML (.html)'],
+    ['md', 'Markdown (.md)']
+  ];
+  return list.map(([id, label]) => `<option value="${id}" ${id === selected ? 'selected' : ''}>${label}</option>`).join('');
+}
+
+function baixarUrlProdutos(url) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function arquivoParaBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const idx = result.indexOf(',');
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    reader.onerror = () => reject(new Error('Falha ao ler o arquivo'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function showProdutosExportar() {
+  openModal('Exportar produtos', `
+    <p class="muted" style="margin-bottom:14px">Baixa todos os produtos ativos no formato escolhido. Use o modelo para conferir as colunas antes de importar.</p>
+    <div class="form-group"><label>Formato</label>
+      <select id="produtos-io-formato">${produtosFormatosOptions('xlsx')}</select>
+    </div>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button>
+     <button class="btn btn-outline" id="produtos-modelo">Baixar modelo</button>
+     <button class="btn btn-primary" id="produtos-export-ok">Exportar</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('produtos-modelo').onclick = () => {
+    baixarUrlProdutos(API.produtos.modeloUrl(document.getElementById('produtos-io-formato').value));
+  };
+  document.getElementById('produtos-export-ok').onclick = () => {
+    baixarUrlProdutos(API.produtos.exportUrl(document.getElementById('produtos-io-formato').value));
+    closeModal();
+    showToast('Download iniciado', 'success');
+  };
+}
+
+function showProdutosImportar() {
+  openModal('Importar produtos', `
+    <p class="muted" style="margin-bottom:14px">Envie Excel, CSV, TXT, JSON, XML, SQL, HTML ou Markdown. Produto com o mesmo código de barras (ou o mesmo nome) é atualizado; os demais são cadastrados.</p>
+    <div class="form-group"><label>Arquivo</label>
+      <input type="file" id="produtos-io-file" accept=".xlsx,.xls,.csv,.tsv,.txt,.json,.xml,.sql,.html,.md,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/json,text/xml">
+    </div>
+    <div class="form-group"><label>Formato (opcional)</label>
+      <select id="produtos-io-formato">
+        <option value="">Detectar automaticamente</option>
+        ${produtosFormatosOptions('')}
+      </select>
+    </div>
+    <p class="muted">Campos obrigatórios: nome, código de barras, preço e estoque. Baixe um modelo em Exportar se precisar do layout.</p>
+    <div id="produtos-io-result" class="produtos-io-result hidden"></div>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button>
+     <button class="btn btn-primary" id="produtos-import-ok">Importar</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('produtos-import-ok').onclick = async () => {
+    const input = document.getElementById('produtos-io-file');
+    const file = input.files && input.files[0];
+    if (!file) { showToast('Selecione um arquivo', 'error'); return; }
+    if (file.size > 15 * 1024 * 1024) { showToast('Arquivo deve ter no máximo 15MB', 'error'); return; }
+    const btn = document.getElementById('produtos-import-ok');
+    btn.disabled = true;
+    try {
+      const conteudo = await arquivoParaBase64(file);
+      const result = await API.produtos.importar({
+        conteudo,
+        encoding: 'base64',
+        nome: file.name,
+        formato: document.getElementById('produtos-io-formato').value || undefined,
+        usuario_id: currentUser && currentUser.id
+      });
+      const box = document.getElementById('produtos-io-result');
+      const linhasErro = (result.erros || []).slice(0, 8).map(e =>
+        `<li>Linha ${e.linha}: ${escapeHtml(e.nome || e.codigo || '-')} — ${escapeHtml((e.erros || []).join(', '))}</li>`
+      ).join('');
+      box.classList.remove('hidden');
+      box.innerHTML = `<p><strong>${result.criados}</strong> criados · <strong>${result.atualizados}</strong> atualizados · <strong>${result.rejeitados}</strong> rejeitados</p>
+        ${linhasErro ? `<ul>${linhasErro}</ul>` : ''}`;
+      showToast(`Importação: ${result.criados} novos, ${result.atualizados} atualizados`, 'success');
+      renderProdutos();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  };
 }
 
 async function showEstoqueMovimento(id, tipo) {

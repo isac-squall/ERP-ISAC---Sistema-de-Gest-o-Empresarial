@@ -61,6 +61,8 @@ Section "Instalar"
   File /r "app/assistente/*.*"
   SetOutPath "$INSTDIR\app\nfce"
   File /r "app/nfce/*.*"
+  SetOutPath "$INSTDIR\app\produtos"
+  File /r "app/produtos/*.*"
   SetOutPath "$INSTDIR\app\node_modules"
   File /r "app/node_modules/*.*"
 
