@@ -15,7 +15,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Fornecedores** — Cadastro vinculado a produtos e contas a pagar
 - **Historico de vendas** — Consulta, cupom/DANFE, XML da NFC-e e cancelamento
 - **Relatorio geral** — Receita, lucro, ticket medio, rankings e graficos por periodo
-- **Configuracoes** — Cupom, taxas de cartao e NFC-e (A1, CSC, serie, homologacao/producao)
+- **Configuracoes** — Cupom, taxas de cartao, NFC-e (A1, CSC, serie, homologacao/producao) e Zona critica (apagar banco, preservando a licenca)
 - **Manual** — Ajuda por modulo e assistente de duvidas no canto da tela
 
 ## Novidades
@@ -26,6 +26,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Assistente RAG por modulo/sessao (chat flutuante)
 - Relatorio geral e permissoes por cargo
 - Instalador Windows offline `dist/ERP-ISAC-Setup.exe`
+- Zona critica em Configuracoes: apaga vendas, clientes, produtos, usuarios, configuracoes e imagens; a licenca atual e preservada
 
 ## Produtos: importar e exportar
 
@@ -70,6 +71,16 @@ Campo **Servicos/Equipamentos**: aparelho (notebook, celular) ou servico (format
 Status: Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada.
 
 Para cobrar: **Realizar vendas** > lupa > Ordem de servico.
+
+## Zona critica
+
+Em **Configuracoes**, no rodape, **Apagar banco de dados** limpa vendas, clientes, produtos, usuarios, configuracoes e imagens.
+
+- So o administrador consegue executar
+- Confirme digitando `APAGAR` e a senha
+- A licenca atual e preservada quando existir
+- O administrador logado e recriado para entrar de novo
+- Nao da para desfazer
 
 ## Niveis de acesso
 

@@ -2890,7 +2890,17 @@ async function renderConfiguracoes() {
         </div>
       </div>
       <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Salvar configurações</button>
-    </form>`;
+    </form>
+    <div class="zona-critica">
+      <div class="zona-critica-info">
+        <div class="zona-critica-icon"><i class="fas fa-exclamation-triangle"></i></div>
+        <div>
+          <h3>Zona critica</h3>
+          <p>Apaga vendas, clientes, produtos, usuarios, configuracoes e imagens. A licenca atual sera preservada quando existir.</p>
+        </div>
+      </div>
+      <button type="button" class="btn-zona-critica" id="btn-apagar-banco"><i class="fas fa-trash"></i> Apagar banco de dados</button>
+    </div>`;
   document.getElementById('cfg-pfx').onchange = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -2916,6 +2926,49 @@ async function renderConfiguracoes() {
       renderConfiguracoes();
     } catch (err) { showToast(err.message, 'error'); }
   };
+  document.getElementById('btn-apagar-banco').onclick = () => showApagarBanco();
+}
+
+function showApagarBanco() {
+  openModal('Zona critica', `
+    <p class="zona-critica-warn">Esta acao apaga vendas, clientes, produtos, usuarios, configuracoes e imagens. Nao da para desfazer.</p>
+    <p class="muted" style="margin-bottom:14px">A licenca atual sera preservada quando existir. O administrador logado sera recriado para voce entrar de novo.</p>
+    <div class="form-group"><label>Digite APAGAR para confirmar</label>
+      <input id="apagar-confirmar" autocomplete="off" placeholder="APAGAR"></div>
+    <div class="form-group"><label>Senha do administrador</label>
+      <input id="apagar-senha" type="password" autocomplete="current-password"></div>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button>
+     <button class="btn btn-danger" id="apagar-banco-ok"><i class="fas fa-trash"></i> Apagar banco de dados</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('apagar-banco-ok').onclick = async () => {
+    const confirmar = document.getElementById('apagar-confirmar').value;
+    const senha = document.getElementById('apagar-senha').value;
+    if (String(confirmar || '').trim().toUpperCase() !== 'APAGAR') {
+      showToast('Digite APAGAR para confirmar', 'error');
+      return;
+    }
+    if (!senha) { showToast('Informe a senha do administrador', 'error'); return; }
+    const btn = document.getElementById('apagar-banco-ok');
+    btn.disabled = true;
+    try {
+      await API.config.apagarBanco({
+        confirmar,
+        senha,
+        usuario_id: currentUser && currentUser.id
+      });
+      closeModal();
+      showToast('Banco de dados apagado', 'success');
+      currentUser = null;
+      localStorage.removeItem('erp_user');
+      document.getElementById('app').classList.add('hidden');
+      document.getElementById('login-screen').classList.remove('hidden');
+      document.getElementById('ai-chat')?.classList.add('hidden');
+      document.getElementById('ai-chat-panel')?.classList.add('hidden');
+    } catch (err) {
+      showToast(err.message, 'error');
+      btn.disabled = false;
+    }
+  };
 }
 
 async function renderManual() {
@@ -2933,7 +2986,7 @@ async function renderManual() {
         <li><strong>Financeiro</strong> — Lance receitas e despesas, marque como pago ou pendente.</li>
         <li><strong>Histórico</strong> — Consulte vendas, imprima cupom/DANFE, emita NFC-e ou cancele (estoque volta automaticamente).</li>
         <li><strong>Relatório</strong> — Veja faturamento mensal, produtos mais vendidos e top clientes.</li>
-        <li><strong>Configurações</strong> — Personalize cupom, taxas de cartão, pergunta de quantidade no PDV e dados da NFC-e (CNPJ, CSC, certificado A1, série e ambiente).</li>
+        <li><strong>Configurações</strong> — Personalize cupom, taxas de cartão, NFC-e e use a Zona critica para apagar o banco (a licenca e preservada).</li>
         <li><strong>Assistente IA</strong> — O botao azul no canto inferior direito responde duvidas identificando o modulo e a sessao.</li>
       </ol>
     </div>

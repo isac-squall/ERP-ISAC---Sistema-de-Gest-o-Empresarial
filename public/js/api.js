@@ -25,7 +25,8 @@ const API = {
   assistente: (pergunta, pagina) => API.request('/assistente', { method: 'POST', body: { pergunta, pagina } }),
   config: {
     get: () => API.request('/config'),
-    save: (d) => API.request('/config', { method: 'PUT', body: d })
+    save: (d) => API.request('/config', { method: 'PUT', body: d }),
+    apagarBanco: (d) => API.request('/config/apagar-banco', { method: 'POST', body: d })
   },
   nfce: {
     status: () => API.request('/nfce/status'),
