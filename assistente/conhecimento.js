@@ -243,14 +243,15 @@ module.exports = [
     sessao: 'Cupom e PDV',
     pagina: 'configuracoes',
     titulo: 'Personalizar cupom e taxas',
-    keywords: 'configuracao cupom taxa cartao credito debito quantidade pdv nfce certificado csc sefaz',
-    conteudo: `Configuracoes altera titulo, cabecalho e rodape do cupom, pergunta de quantidade no PDV e taxas de cartao. Na secao NFC-e cadastre CNPJ, IE, endereco, CRT, serie, CSC (ID + token), certificado A1 (.pfx) e senha. Escolha Homologacao ou Producao. O modo simulacao treina o fluxo sem transmitir. A engrenagem do cabecalho abre esta tela.`,
+    keywords: 'configuracao cupom taxa cartao credito debito quantidade pdv nfce certificado csc sefaz zona critica apagar banco dados licenca',
+    conteudo: `Configuracoes altera titulo, cabecalho e rodape do cupom, pergunta de quantidade no PDV e taxas de cartao. Na secao NFC-e cadastre CNPJ, IE, endereco, CRT, serie, CSC (ID + token), certificado A1 (.pfx) e senha. Escolha Homologacao ou Producao. O modo simulacao treina o fluxo sem transmitir. A Zona critica no rodape apaga vendas, clientes, produtos, usuarios, configuracoes e imagens. A licenca atual e preservada quando existir. So o administrador, digitando APAGAR e a senha, consegue executar. Depois o admin e recriado para login.`,
     passos: [
       'Clique na engrenagem ou em Configuracoes.',
       'Ajuste o texto do cupom e as taxas.',
       'Preencha os dados fiscais da NFC-e.',
       'Envie o certificado A1 e o CSC.',
-      'Salve as configuracoes.'
+      'Salve as configuracoes.',
+      'Zona critica: Apagar banco de dados so com confirmacao APAGAR e senha do admin.'
     ]
   },
   {

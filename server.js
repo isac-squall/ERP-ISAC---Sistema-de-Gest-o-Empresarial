@@ -182,6 +182,106 @@ app.put('/api/config', (req, res) => {
   res.json({ message: 'Configuração salva', ...nfce.sanitizar(nfce.loadConfig()) });
 });
 
+function isLicencaKey(chave) {
+  return /licen|serial/i.test(String(chave || ''));
+}
+
+app.post('/api/config/apagar-banco', (req, res) => {
+  const { confirmar, senha, usuario_id } = req.body || {};
+  if (String(confirmar || '').trim().toUpperCase() !== 'APAGAR') {
+    return res.status(400).json({ error: 'Digite APAGAR para confirmar' });
+  }
+  const admin = usuario_id
+    ? db.prepare('SELECT * FROM usuarios WHERE id = ? AND ativo = 1').get(usuario_id)
+    : db.prepare("SELECT * FROM usuarios WHERE cargo = 'Administrador' AND ativo = 1 ORDER BY id LIMIT 1").get();
+  if (!admin) return res.status(400).json({ error: 'Administrador nao encontrado' });
+  if (admin.cargo !== 'Administrador') {
+    return res.status(403).json({ error: 'Somente o administrador pode apagar o banco' });
+  }
+  if (!senha) return res.status(400).json({ error: 'Informe a senha do administrador' });
+  if (admin.senha !== senha) return res.status(401).json({ error: 'Senha invalida' });
+
+  const licencas = db.prepare('SELECT chave, valor FROM config').all().filter(r => isLicencaKey(r.chave));
+  const defaults = {
+    cupom_titulo: 'Scrundai Software',
+    cupom_cabecalho: 'Rua jose correia de andrade SERRINHA /RN\n(84) 99871-3472',
+    cupom_rodape: 'Obrigado pela preferência\nSempre volte!',
+    perguntar_quantidade: '1',
+    taxa_credito: '0',
+    taxa_debito: '0',
+    nfce_habilitada: '0',
+    nfce_ambiente: 'homologacao',
+    nfce_uf: 'RN',
+    nfce_cnpj: '',
+    nfce_ie: '',
+    nfce_razao_social: '',
+    nfce_nome_fantasia: 'Scrundai Software',
+    nfce_logradouro: 'Rua jose correia de andrade',
+    nfce_numero: 'S/N',
+    nfce_bairro: 'Centro',
+    nfce_municipio: 'Serrinha',
+    nfce_codigo_municipio: '2410306',
+    nfce_cep: '59374000',
+    nfce_telefone: '84998713472',
+    nfce_crt: '1',
+    nfce_serie: '1',
+    nfce_numero_atual: '0',
+    nfce_csc_id: '',
+    nfce_csc_token: '',
+    nfce_certificado_pfx: '',
+    nfce_certificado_senha: '',
+    nfce_certificado_nome: '',
+    nfce_certificado_validade: '',
+    nfce_emitir_automatico: '1',
+    nfce_simulacao: '1'
+  };
+
+  try {
+    db.pragma('foreign_keys = OFF');
+    const tx = db.transaction(() => {
+      const tabelas = [
+        'venda_itens', 'nfce', 'vendas', 'orcamentos', 'estoque_movimentos',
+        'promocoes', 'produtos', 'ordens_servico', 'financeiro', 'caixa',
+        'clientes', 'fornecedores', 'usuarios'
+      ];
+      for (const t of tabelas) db.exec(`DELETE FROM ${t}`);
+      db.exec("UPDATE caixa_status SET aberto = 0, valor_inicial = 0, aberto_em = NULL, fechado_em = NULL, usuario_id = NULL WHERE id = 1");
+      const configs = db.prepare('SELECT chave FROM config').all();
+      const delCfg = db.prepare('DELETE FROM config WHERE chave = ?');
+      for (const row of configs) {
+        if (!isLicencaKey(row.chave)) delCfg.run(row.chave);
+      }
+      try {
+        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produtos','ordens_servico','financeiro','caixa','clientes','fornecedores','usuarios')");
+      } catch {}
+      db.prepare(`INSERT INTO usuarios (nome, email, senha, cargo, celular, data_nascimento, cpf, tipo_pessoa, ativo)
+        VALUES (?,?,?,?,?,?,?,?,1)`).run(
+        admin.nome || 'Administrador',
+        admin.email || 'admin@erpisac.com',
+        admin.senha || 'admin123',
+        'Administrador',
+        admin.celular || null,
+        admin.data_nascimento || null,
+        admin.cpf || null,
+        admin.tipo_pessoa || 'PF'
+      );
+      const insCfg = db.prepare('INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor');
+      for (const [chave, valor] of Object.entries(defaults)) insCfg.run(chave, valor);
+      for (const row of licencas) insCfg.run(row.chave, row.valor);
+    });
+    tx();
+    res.json({
+      message: 'Banco de dados apagado',
+      licenca_preservada: licencas.length > 0,
+      admin: { email: admin.email }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Falha ao apagar o banco' });
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+});
+
 app.get('/api/nfce/status', (req, res) => {
   const cfg = nfce.loadConfig();
   const check = nfce.pronta(cfg);
