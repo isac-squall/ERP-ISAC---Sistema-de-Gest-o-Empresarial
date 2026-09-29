@@ -911,6 +911,14 @@ body {
 }
 .ai-chip:hover { border-color: var(--primary); color: var(--primary); }
 
+.produtos-io-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.produtos-io-result {
+  margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg); font-size: 13px;
+}
+.produtos-io-result ul { margin: 8px 0 0 18px; }
+.produtos-io-result li { margin: 2px 0; }
+
 .nfce-box {
   margin-top: 12px; padding: 12px; border: 1px solid var(--border);
   border-radius: 6px; background: var(--bg);

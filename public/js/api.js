@@ -64,7 +64,11 @@ const API = {
     estoque: (id, d) => API.request(`/produtos/${id}/estoque`, { method: 'POST', body: d }),
     movimentos: (id) => API.request(`/produtos/${id}/estoque`),
     promocoes: (id) => API.request(`/produtos/${id}/promocoes`),
-    addPromocao: (id, d) => API.request(`/produtos/${id}/promocoes`, { method: 'POST', body: d })
+    addPromocao: (id, d) => API.request(`/produtos/${id}/promocoes`, { method: 'POST', body: d }),
+    formatos: () => API.request('/produtos/formatos'),
+    importar: (d) => API.request('/produtos/import', { method: 'POST', body: d }),
+    exportUrl: (formato) => `/api/produtos/export?formato=${encodeURIComponent(formato || 'csv')}`,
+    modeloUrl: (formato) => `/api/produtos/modelo?formato=${encodeURIComponent(formato || 'csv')}`
   },
   promocoes: {
     list: () => API.request('/promocoes'),
