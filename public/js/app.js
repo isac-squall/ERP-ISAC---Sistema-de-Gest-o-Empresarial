@@ -14,6 +14,8 @@ const PAGES = {
   fornecedores: { title: 'Fornecedores', breadcrumb: 'Dashboard / Fornecedores' },
   'historico-vendas': { title: 'Histórico de vendas', breadcrumb: 'Dashboard / Histórico de vendas' },
   relatorio: { title: 'Relatório geral', breadcrumb: 'Dashboard / Relatório geral' },
+  backup: { title: 'Gerenciar Backup', breadcrumb: 'Dashboard / Gerenciar Backup' },
+  impressoras: { title: 'Impressoras adicionadas', breadcrumb: 'Dashboard / Impressoras adicionadas' },
   configuracoes: { title: 'Configurações', breadcrumb: 'Dashboard / Configurações' },
   manual: { title: 'Manual', breadcrumb: 'Dashboard / Manual' }
 };
@@ -133,7 +135,7 @@ function userPermissoes() {
   const list = currentUser?.permissoes;
   if (Array.isArray(list) && list.length) return list;
   return currentUser?.cargo === 'Administrador'
-    ? ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', 'configuracoes', 'manual']
+    ? ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', 'backup', 'impressoras', 'configuracoes', 'manual']
     : ['dashboard', 'manual'];
 }
 
@@ -158,6 +160,7 @@ function showApp() {
   applyMenuPermissions();
   refreshNotificacoes();
   aplicarEmpresa();
+  carregarImpressoraAtiva();
   const start = canAccess('dashboard') ? 'dashboard' : (userPermissoes()[0] || 'manual');
   navigate(start);
 }
@@ -264,6 +267,8 @@ async function renderPage() {
       st.periodo = st.periodo || 'mes';
       return renderRelatorio();
     },
+    backup: renderBackup,
+    impressoras: renderImpressoras,
     configuracoes: renderConfiguracoes,
     manual: renderManual
   };
@@ -747,6 +752,7 @@ async function imprimirPrecoProduto(id) {
       ${p.codigo ? `<div class="etiqueta-codigo">${escapeHtml(p.codigo)}</div>` : ''}
       <div class="etiqueta-valor">${formatCurrency(p.preco)}</div>
     </div>`;
+  aplicarEstiloImpressao();
   area.classList.remove('hidden');
   window.print();
   area.classList.add('hidden');
@@ -772,6 +778,7 @@ async function imprimirCodigoBarras(id) {
       <svg id="barcode-svg"></svg>
       <div class="etiqueta-valor">${formatCurrency(p.preco)}</div>
     </div>`;
+  aplicarEstiloImpressao();
   area.classList.remove('hidden');
   drawBarcode('barcode-svg', codigo);
   window.print();
@@ -1973,6 +1980,7 @@ function printPosDocumento(titulo, tab) {
       <p><strong>Total: ${formatCurrency(total)}</strong></p>
       <pre>${escapeHtml(erpConfig.cupom_rodape || '')}</pre>
     </div>`;
+  aplicarEstiloImpressao();
   area.classList.remove('hidden');
   window.print();
   area.classList.add('hidden');
@@ -2107,6 +2115,7 @@ async function printCupom(id) {
         <pre>${escapeHtml(c.cupom_rodape || '')}</pre>
       </div>`;
   }
+  aplicarEstiloImpressao();
   area.classList.remove('hidden');
   window.print();
   area.classList.add('hidden');
@@ -3092,6 +3101,498 @@ function showApagarBanco() {
   };
 }
 
+const IMPRESSORA_PADRAO = { largura: '80mm', escala: 100, barras: 1, modo: 'Termica' };
+let impressoraAtivaCache = null;
+
+async function carregarImpressoraAtiva() {
+  try { impressoraAtivaCache = await API.impressoras.ativa(); }
+  catch { impressoraAtivaCache = null; }
+  return impressoraAtivaCache;
+}
+
+function impressoraPrintCfg() {
+  const p = impressoraAtivaCache || {};
+  const largura = p.largura || IMPRESSORA_PADRAO.largura;
+  const escala = Math.min(200, Math.max(50, parseInt(p.escala, 10) || 100));
+  const mapa = { '58mm': '58mm', '80mm': '80mm', A4: '210mm' };
+  return { largura, escala, page: mapa[largura] || '80mm', modo: p.modo || '' };
+}
+
+function aplicarEstiloImpressao() {
+  const cfg = impressoraPrintCfg();
+  let tag = document.getElementById('print-printer-style');
+  if (!tag) {
+    tag = document.createElement('style');
+    tag.id = 'print-printer-style';
+    document.head.appendChild(tag);
+  }
+  const w = cfg.largura === 'A4' ? '190mm' : cfg.largura;
+  const size = cfg.largura === 'A4' ? 'A4' : cfg.largura;
+  tag.textContent = `@media print {
+    @page { size: ${size}; margin: 4mm; }
+    .print-area { padding: 4px !important; }
+    .cupom, .etiqueta-preco, .etiqueta-barcode {
+      width: ${w} !important;
+      max-width: ${w} !important;
+      transform: scale(${cfg.escala / 100});
+      transform-origin: top left;
+      font-size: ${cfg.largura === '58mm' ? '11px' : cfg.largura === 'A4' ? '13px' : '12px'} !important;
+    }
+  }`;
+  document.getElementById('print-area')?.setAttribute('data-papel', cfg.largura);
+}
+
+function selectOptions(list, atual, extra) {
+  const vals = extra ? [extra, ...list.filter(v => v !== extra)] : list;
+  const cur = atual || vals[0];
+  return vals.map(v => `<option value="${escapeHtml(v)}" ${v === cur ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
+}
+
+function renderImpressorasRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="10">Nenhum registro encontrado</td></tr>';
+  return data.map(p => `<tr>
+    <td>${p.id}</td>
+    <td>${escapeHtml(p.nome)}</td>
+    <td>${escapeHtml(p.tipo || '-')}</td>
+    <td>${escapeHtml(p.modo || '-')}</td>
+    <td>${escapeHtml(p.envio || p.tipo || '-')}</td>
+    <td>${escapeHtml(p.largura || '-')}</td>
+    <td>${p.escala || 100}%</td>
+    <td>${p.barras ? 'Sim' : 'Nao'}</td>
+    <td><span class="status-badge ${p.ativa ? 'ativo' : 'inativo'}">${p.ativa ? 'Ativa' : 'Inativa'}</span></td>
+    <td class="actions-cell">
+      <button class="btn-icon edit" onclick="showImpressoraForm(${p.id})"><i class="fas fa-edit"></i></button>
+      <button class="btn-icon delete" onclick="deleteImpressora(${p.id})"><i class="fas fa-trash"></i></button>
+    </td></tr>`).join('');
+}
+
+async function renderImpressoras() {
+  const st = pageState.impressoras;
+  const result = await API.impressoras.list({ search: st.search, page: st.page, limit: st.limit });
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Impressoras adicionadas', 'Dashboard / Impressoras adicionadas')}
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Pesquisar..." value="${escapeHtml(st.search || '')}" id="table-search">
+      </div>
+      <span class="toolbar-info">Total de impressoras: ${result.total}</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-primary" id="table-new">Adicionar</button>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr>
+          <th>#</th><th>Nome</th><th>Tipo</th><th>modo</th><th>Envio</th>
+          <th>Larg papel</th><th>Escala</th><th>Barras</th><th>Status</th><th>Acoes</th>
+        </tr></thead>
+        <tbody id="table-body">${renderImpressorasRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('impressoras', result, loadImpressoras);
+  document.getElementById('table-new').onclick = () => showImpressoraForm();
+}
+
+async function loadImpressoras() {
+  const st = pageState.impressoras;
+  const result = await API.impressoras.list({ search: st.search, page: st.page, limit: st.limit });
+  document.getElementById('table-body').innerHTML = renderImpressorasRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadImpressoras();
+  });
+  document.querySelector('.toolbar-info').textContent = `Total de impressoras: ${result.total}`;
+}
+
+async function showImpressoraForm(id) {
+  const [opcoes, data] = await Promise.all([
+    API.impressoras.opcoes(),
+    id ? API.impressoras.get(id) : Promise.resolve({})
+  ]);
+  const nomes = opcoes.nomes || ['Nenhum', 'Generica'];
+  const tipos = opcoes.tipos || ['Nenhum', 'Wi-Fi', 'Bluetooth', 'USB'];
+  const modos = opcoes.modos || ['Nenhum', 'Termica', 'Jato de tinta'];
+  const larguras = opcoes.larguras || ['58mm', '80mm', 'A4'];
+  const portas = opcoes.portas || ['Nenhum'];
+  const escala = data.escala || 100;
+  const ativa = data.ativa !== 0;
+  const nomeAtual = data.nome || 'Nenhum';
+  const nomesSel = nomes.includes(nomeAtual) ? nomes : [...nomes, nomeAtual];
+  document.getElementById('content').innerHTML = `
+    <div class="impressora-form-wrap">
+      <button type="button" class="impressora-close" id="impressora-cancelar-x" title="Fechar">&times;</button>
+      <div class="page-header">
+        <h2>${id ? 'Editar impressora' : 'Cadastrar nova impressora'}</h2>
+        <div class="breadcrumb">Dashboard / <span class="breadcrumb-link">${id ? 'Editar impressora' : 'Cadastrar nova impressora'}</span></div>
+      </div>
+      <form id="impressora-form" class="impressora-form">
+        <div class="form-row">
+          <div class="form-group"><label>Selecione a impressora</label>
+            <select name="nome" id="imp-nome">${selectOptions(nomesSel, nomeAtual)}</select></div>
+          <div class="form-group"><label>Tipo de conexao</label>
+            <select name="tipo">${selectOptions(tipos, data.tipo || 'Nenhum')}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Modo de impressao</label>
+            <select name="modo">${selectOptions(modos, data.modo || 'Nenhum')}</select></div>
+          <div class="form-group"><label>Largura do Papel</label>
+            <select name="largura">${selectOptions(larguras, data.largura || '58mm')}</select></div>
+        </div>
+        <div class="form-group">
+          <label>Escala do cupom e PDF: <span id="imp-escala-val">${escala}%</span></label>
+          <div class="impressora-scale">
+            <input type="range" name="escala" id="imp-escala" min="50" max="200" step="5" value="${escala}">
+            <strong id="imp-escala-pct">${escala}%</strong>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Porta da impressora</label>
+            <select name="porta">${selectOptions(portas, data.porta || 'Nenhum')}</select></div>
+          <div class="form-group">
+            <label>Impressora ativa?</label>
+            <div class="impressora-ativa-row">
+              <label class="impressora-switch">
+                <input type="checkbox" id="imp-ativa" ${ativa ? 'checked' : ''}>
+                <span class="impressora-switch-ui"><span>Ativa</span></span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="check-label"><input type="checkbox" id="imp-barras" ${data.barras !== 0 ? 'checked' : ''}> Imprimir codigo de barras no cupom</label>
+        </div>
+        <div class="impressora-form-actions">
+          <button type="button" class="btn btn-outline" id="impressora-cancelar">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Salvar</button>
+        </div>
+      </form>
+    </div>`;
+  const range = document.getElementById('imp-escala');
+  const syncEscala = () => {
+    const v = range.value + '%';
+    document.getElementById('imp-escala-val').textContent = v;
+    document.getElementById('imp-escala-pct').textContent = v;
+  };
+  range.oninput = syncEscala;
+  document.getElementById('impressora-cancelar').onclick = () => navigate('impressoras');
+  document.getElementById('impressora-cancelar-x').onclick = () => navigate('impressoras');
+  document.getElementById('impressora-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {
+      nome: fd.get('nome'),
+      tipo: fd.get('tipo'),
+      modo: fd.get('modo'),
+      largura: fd.get('largura'),
+      escala: parseInt(fd.get('escala'), 10) || 100,
+      porta: fd.get('porta'),
+      ativa: document.getElementById('imp-ativa').checked ? 1 : 0,
+      barras: document.getElementById('imp-barras').checked ? 1 : 0
+    };
+    try {
+      if (id) await API.impressoras.update(id, body);
+      else await API.impressoras.create(body);
+      await carregarImpressoraAtiva();
+      showToast('Impressora salva', 'success');
+      navigate('impressoras');
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function deleteImpressora(id) {
+  if (!confirm('Deseja excluir esta impressora?')) return;
+  try {
+    await API.impressoras.delete(id);
+    await carregarImpressoraAtiva();
+    showToast('Impressora excluida', 'success');
+    renderImpressoras();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+function formatBackupSize(n) {
+  const v = Number(n) || 0;
+  if (v < 1024) return `${v} B`;
+  if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
+  return `${(v / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function renderBackupRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="5">Nenhum backup encontrado</td></tr>';
+  return data.map(b => `<tr>
+    <td>${b.id}</td>
+    <td>${escapeHtml(b.nome)}</td>
+    <td>${formatDateTime(b.criado_em)}</td>
+    <td>${escapeHtml(b.tamanho_fmt || formatBackupSize(b.tamanho))}</td>
+    <td class="actions-cell">
+      <button class="btn-icon view" title="Baixar" onclick="baixarBackup(${b.id})"><i class="fas fa-download"></i></button>
+      <button class="btn-icon edit" title="Restaurar" onclick="confirmarRestaurarBackup(${b.id})"><i class="fas fa-undo"></i></button>
+      <button class="btn-icon delete" title="Excluir" onclick="excluirBackup(${b.id})"><i class="fas fa-trash"></i></button>
+    </td></tr>`).join('');
+}
+
+async function renderBackup() {
+  const st = pageState.backup;
+  let status = {};
+  let result = { data: [], total: 0, page: 1, totalPages: 1, limit: st.limit || 15 };
+  try {
+    [result, status] = await Promise.all([
+      API.backups.list({ search: st.search, page: st.page, limit: st.limit }),
+      API.backups.status()
+    ]);
+  } catch (err) {
+    document.getElementById('content').innerHTML = `<div class="card"><p style="color:red">Erro: ${escapeHtml(err.message)}</p></div>`;
+    return;
+  }
+  const versao = status.versao || '1.0.0';
+  const instalada = status.versao_instalada || '';
+  const verificado = status.versao_verificada_em ? formatDateTime(status.versao_verificada_em) : 'Nenhuma verificacao';
+  const ultimo = status.ultimo_backup ? formatDateTime(status.ultimo_backup) : 'Nenhum realizado';
+  const msg = status.mensagem || '';
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <h2>Gerenciar Backup</h2>
+      <div class="breadcrumb">Dashboard / <span class="breadcrumb-link">Gerenciar Backup</span></div>
+    </div>
+    <div class="backup-status-row">
+      <div class="backup-status-card">
+        <div class="backup-status-icon green"><i class="fas fa-shield-alt"></i></div>
+        <div>
+          <strong>Status</strong>
+          <span>Dados protegidos</span>
+        </div>
+      </div>
+      <div class="backup-status-card">
+        <div class="backup-status-icon blue"><i class="fas fa-clock"></i></div>
+        <div>
+          <strong>Ultimo backup</strong>
+          <span>${escapeHtml(ultimo)}</span>
+        </div>
+      </div>
+      <div class="backup-status-card">
+        <div class="backup-status-icon teal"><i class="fas fa-cloud-download-alt"></i></div>
+        <div>
+          <strong>Versao atual: ${escapeHtml(versao)}</strong>
+          <span>Verificada: ${escapeHtml(verificado)}</span>
+          <span>Instalada: ${escapeHtml(instalada || 'Nenhuma registrada')}</span>
+        </div>
+      </div>
+    </div>
+    <div class="backup-actions-row">
+      <div class="backup-panel">
+        <div class="backup-panel-head">
+          <div class="backup-panel-icon green"><i class="fas fa-download"></i></div>
+          <div>
+            <strong>Fazer Backup</strong>
+            <span>Gera pacote completo ou somente banco.</span>
+          </div>
+        </div>
+        <ul>
+          <li>Realiza uma copia completa do banco de dados</li>
+          <li>Permite salvar .zip completo ou .db somente banco</li>
+          <li>Garante seguranca contra perda de dados</li>
+          <li>Pode ser restaurado posteriormente em caso de falha</li>
+        </ul>
+        <button class="btn btn-success btn-block" id="backup-realizar"><i class="fas fa-database"></i> Iniciar Backup</button>
+      </div>
+      <div class="backup-panel">
+        <div class="backup-panel-head">
+          <div class="backup-panel-icon orange"><i class="fas fa-upload"></i></div>
+          <div>
+            <strong>Restaurar Backup</strong>
+            <span>Substitui e atualiza o banco restaurado.</span>
+          </div>
+        </div>
+        <ul>
+          <li>Substitui completamente o banco de dados atual</li>
+          <li>Restaura vendas, usuarios, configuracoes e imagens</li>
+          <li>Verifica tabelas e colunas automaticamente</li>
+          <li>Pode desfazer alteracoes feitas apos o backup</li>
+        </ul>
+        <p class="backup-warn">Atencao: esta acao nao pode ser desfeita</p>
+        <button class="btn btn-block backup-btn-restore" id="backup-importar"><i class="fas fa-upload"></i> Selecionar Arquivo</button>
+      </div>
+      <div class="backup-panel">
+        <div class="backup-panel-head">
+          <div class="backup-panel-icon teal"><i class="fas fa-desktop"></i></div>
+          <div>
+            <strong>Atualizar Aplicativo</strong>
+            <span>Busca nova versao online.</span>
+          </div>
+        </div>
+        <ul>
+          <li>Verifica se existe uma nova versao publicada</li>
+          <li>Baixa e instala o atualizador assinado</li>
+          <li>Usa a release oficial configurada no sistema</li>
+          <li>Versao atual: ${escapeHtml(versao)}</li>
+        </ul>
+        <p class="backup-update-msg" id="backup-update-msg">${escapeHtml(msg || 'Clique para consultar a versao mais recente.')}</p>
+        <button class="btn btn-block backup-btn-update" id="backup-atualizar"><i class="fas fa-cloud-download-alt"></i> Buscar atualizacoes</button>
+      </div>
+    </div>
+    <div class="backup-tip">
+      <strong>Dica de Seguranca</strong>
+      <ul>
+        <li>Feche o sistema por ele mesmo</li>
+        <li>Faca backup antes de restaurar ou atualizar</li>
+        <li>Passe o arquivo .zip para pendrive ou nuvem</li>
+      </ul>
+    </div>
+    ${result.total ? `<div class="table-wrapper" style="margin-top:16px">
+      <table class="data-table">
+        <thead><tr><th>ID</th><th>Nome</th><th>Data</th><th>Tamanho</th><th>Acoes</th></tr></thead>
+        <tbody id="table-body">${renderBackupRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>` : ''}
+    <input type="file" id="backup-file" class="hidden" accept=".zip,.db,application/zip,application/x-sqlite3">`;
+  if (result.total) {
+    const pag = document.getElementById('table-pagination');
+    if (pag) {
+      renderPagination(pag, result.page, result.totalPages, result.total, result.limit, (p, l) => {
+        st.page = p; st.limit = l; loadBackups();
+      });
+    }
+  }
+  document.getElementById('backup-realizar').onclick = () => showRealizarBackup();
+  document.getElementById('backup-importar').onclick = () => document.getElementById('backup-file').click();
+  document.getElementById('backup-atualizar').onclick = () => verificarAtualizacaoApp();
+  document.getElementById('backup-file').onchange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    await restaurarBackupArquivo(file);
+  };
+}
+
+async function loadBackups() {
+  const st = pageState.backup;
+  const body = document.getElementById('table-body');
+  if (!body) { renderBackup(); return; }
+  const result = await API.backups.list({ search: st.search, page: st.page, limit: st.limit });
+  body.innerHTML = renderBackupRows(result.data);
+  const pag = document.getElementById('table-pagination');
+  if (pag) {
+    renderPagination(pag, result.page, result.totalPages, result.total, result.limit, (p, l) => {
+      st.page = p; st.limit = l; loadBackups();
+    });
+  }
+}
+
+function showRealizarBackup() {
+  openModal('Realizar backup', `
+    <p class="muted" style="margin-bottom:14px">O backup completo gera um ZIP com o banco. O backup so do banco baixa o arquivo SQLite.</p>
+    <div class="form-group"><label>Tipo</label>
+      <select id="backup-tipo">
+        <option value="completo">Completo (ZIP com erp.db)</option>
+        <option value="banco">Somente banco (erp.db)</option>
+      </select>
+    </div>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button>
+     <button class="btn btn-primary" id="backup-ok">Realizar backup</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('backup-ok').onclick = async () => {
+    const btn = document.getElementById('backup-ok');
+    btn.disabled = true;
+    try {
+      const r = await API.backups.criar({ tipo: document.getElementById('backup-tipo').value });
+      closeModal();
+      showToast(r.message || 'Backup realizado', 'success');
+      if (r.id) baixarBackup(r.id);
+      renderBackup();
+    } catch (err) {
+      showToast(err.message, 'error');
+      btn.disabled = false;
+    }
+  };
+}
+
+function baixarBackup(id) {
+  const a = document.createElement('a');
+  a.href = API.backups.downloadUrl(id);
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  showToast('Download iniciado', 'success');
+}
+
+function confirmarRestaurarBackup(id) {
+  openModal('Restaurar backup', `
+    <p class="zona-critica-warn">Esta acao substitui o banco atual pelo backup #${id}. Nao da para desfazer.</p>
+    <div class="form-group"><label>Senha do administrador *</label><input type="password" id="backup-senha" required></div>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button>
+     <button class="btn btn-danger" id="backup-restore-ok">Restaurar</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('backup-restore-ok').onclick = async () => {
+    const senha = document.getElementById('backup-senha').value;
+    if (!senha) { showToast('Informe a senha', 'error'); return; }
+    const btn = document.getElementById('backup-restore-ok');
+    btn.disabled = true;
+    try {
+      const r = await API.backups.restaurar(id, { senha, usuario_id: currentUser && currentUser.id });
+      closeModal();
+      showToast(r.message || 'Backup restaurado', 'success');
+      setTimeout(() => location.reload(), 800);
+    } catch (err) {
+      showToast(err.message, 'error');
+      btn.disabled = false;
+    }
+  };
+}
+
+async function restaurarBackupArquivo(file) {
+  if (file.size > 80 * 1024 * 1024) { showToast('Arquivo deve ter no maximo 80MB', 'error'); return; }
+  openModal('Restaurar de arquivo', `
+    <p class="zona-critica-warn">Substitui o banco atual por ${escapeHtml(file.name)}. Nao da para desfazer.</p>
+    <div class="form-group"><label>Senha do administrador *</label><input type="password" id="backup-senha" required></div>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button>
+     <button class="btn btn-danger" id="backup-restore-ok">Restaurar</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('backup-restore-ok').onclick = async () => {
+    const senha = document.getElementById('backup-senha').value;
+    if (!senha) { showToast('Informe a senha', 'error'); return; }
+    const btn = document.getElementById('backup-restore-ok');
+    btn.disabled = true;
+    try {
+      const conteudo = await arquivoParaBase64(file);
+      const r = await API.backups.restaurarArquivo({
+        senha,
+        usuario_id: currentUser && currentUser.id,
+        conteudo,
+        encoding: 'base64',
+        nome: file.name
+      });
+      closeModal();
+      showToast(r.message || 'Backup restaurado', 'success');
+      setTimeout(() => location.reload(), 800);
+    } catch (err) {
+      showToast(err.message, 'error');
+      btn.disabled = false;
+    }
+  };
+}
+
+async function excluirBackup(id) {
+  if (!confirm('Deseja excluir este backup?')) return;
+  try {
+    await API.backups.delete(id);
+    showToast('Backup excluido', 'success');
+    loadBackups();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function verificarAtualizacaoApp() {
+  const btn = document.getElementById('backup-atualizar');
+  const msg = document.getElementById('backup-update-msg');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await API.backups.verificarAtualizacao();
+    if (msg) msg.textContent = r.mensagem || 'Consulta concluida';
+    showToast(r.mensagem || 'Consulta concluida', r.tem_nova ? '' : 'success');
+  } catch (err) { showToast(err.message, 'error'); }
+  if (btn) btn.disabled = false;
+}
+
 async function renderManual() {
   document.getElementById('content').innerHTML = `
     ${pageHeader('Manual', 'Dashboard / Manual')}
@@ -3107,6 +3608,8 @@ async function renderManual() {
         <li><strong>Financeiro</strong> — Lance receitas e despesas, marque como pago ou pendente.</li>
         <li><strong>Histórico</strong> — Consulte vendas, imprima cupom/DANFE, emita NFC-e ou cancele (estoque volta automaticamente).</li>
         <li><strong>Relatório</strong> — Veja faturamento mensal, produtos mais vendidos e top clientes.</li>
+        <li><strong>Gerenciar Backup</strong> — Realize, baixe, restaure ou exclua copias do banco. Verifique atualizacao do aplicativo.</li>
+        <li><strong>Impressoras</strong> — Cadastre conexao (Wi-Fi, Bluetooth, USB), modo (termica ou jato de tinta) e largura (58mm, 80mm ou A4) para cupom e NFC-e.</li>
         <li><strong>Configurações</strong> — Personalize cupom, taxas de cartão, NFC-e e use a Zona critica para apagar o banco (a licenca e preservada).</li>
         <li><strong>Assistente IA</strong> — O botao azul no canto inferior direito responde duvidas identificando o modulo e a sessao.</li>
       </ol>

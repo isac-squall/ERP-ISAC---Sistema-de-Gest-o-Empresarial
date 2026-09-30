@@ -4,12 +4,13 @@ const path = require('path');
 const db = require('./database');
 const nfce = require('./nfce');
 const produtosIo = require('./produtos/io');
+const backupMod = require('./backup');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json({ limit: '25mb' }));
+app.use(express.json({ limit: '100mb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: false,
   lastModified: false,
@@ -53,7 +54,7 @@ function permissoesDoCargo(cargo) {
     return [
       'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
       'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
-      'relatorio', 'configuracoes', 'manual'
+      'relatorio', 'backup', 'impressoras', 'configuracoes', 'manual'
     ];
   }
   return ['dashboard', 'manual'];
@@ -307,7 +308,7 @@ app.post('/api/config/apagar-banco', (req, res) => {
       const tabelas = [
         'venda_itens', 'nfce', 'vendas', 'orcamentos', 'estoque_movimentos',
         'promocoes', 'produtos', 'ordens_servico', 'financeiro', 'caixa',
-        'clientes', 'fornecedores', 'usuarios'
+        'clientes', 'fornecedores', 'usuarios', 'impressoras'
       ];
       for (const t of tabelas) db.exec(`DELETE FROM ${t}`);
       db.exec("UPDATE caixa_status SET aberto = 0, valor_inicial = 0, aberto_em = NULL, fechado_em = NULL, usuario_id = NULL WHERE id = 1");
@@ -317,7 +318,7 @@ app.post('/api/config/apagar-banco', (req, res) => {
         if (!isPreservedConfigKey(row.chave)) delCfg.run(row.chave);
       }
       try {
-        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produtos','ordens_servico','financeiro','caixa','clientes','fornecedores','usuarios')");
+        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produtos','ordens_servico','financeiro','caixa','clientes','fornecedores','usuarios','impressoras')");
       } catch {}
       db.prepare(`INSERT INTO usuarios (nome, email, senha, cargo, celular, data_nascimento, cpf, tipo_pessoa, ativo)
         VALUES (?,?,?,?,?,?,?,?,1)`).run(
@@ -805,6 +806,8 @@ const PERMISSOES_DISPONIVEIS = [
   { key: 'fornecedores', label: 'Fornecedores' },
   { key: 'historico-vendas', label: 'Historico de vendas' },
   { key: 'relatorio', label: 'Relatorio geral' },
+  { key: 'backup', label: 'Gerenciar Backup' },
+  { key: 'impressoras', label: 'Impressoras adicionadas' },
   { key: 'configuracoes', label: 'Configuracoes' },
   { key: 'manual', label: 'Manual' }
 ];
@@ -1436,6 +1439,193 @@ app.get('/api/relatorio', (req, res) => {
     totalVendas,
     vendasPorMes
   });
+});
+
+const IMPRESSORA_NOMES = ['Nenhum', 'Generica', 'EPSON TM-T20', 'Bematech MP-4200', 'Elgin i9', 'Daruma DR800', 'HP DeskJet', 'Canon PIXMA', 'Brother HL'];
+const IMPRESSORA_TIPOS = ['Nenhum', 'Wi-Fi', 'Bluetooth', 'USB', 'Rede'];
+const IMPRESSORA_MODOS = ['Nenhum', 'Termica', 'Jato de tinta', 'Laser'];
+const IMPRESSORA_LARGURAS = ['58mm', '80mm', 'A4'];
+const IMPRESSORA_PORTAS = ['Nenhum', 'COM1', 'COM2', 'COM3', 'USB001', 'LPT1', 'TCP'];
+
+function impressoraPayload(body) {
+  const d = body || {};
+  const nome = String(d.nome || '').trim();
+  const tipo = IMPRESSORA_TIPOS.includes(d.tipo) ? d.tipo : 'Nenhum';
+  const modo = IMPRESSORA_MODOS.includes(d.modo) ? d.modo : 'Nenhum';
+  const largura = IMPRESSORA_LARGURAS.includes(d.largura) ? d.largura : '58mm';
+  const escala = Math.min(200, Math.max(50, parseInt(d.escala, 10) || 100));
+  const barras = d.barras === 0 || d.barras === '0' || d.barras === false ? 0 : 1;
+  const porta = String(d.porta || 'Nenhum').trim() || 'Nenhum';
+  const ativa = d.ativa === 0 || d.ativa === '0' || d.ativa === false ? 0 : 1;
+  const envio = tipo === 'Nenhum' ? '' : tipo;
+  return { nome, tipo, modo, envio, largura, escala, barras, porta, ativa };
+}
+
+app.get('/api/impressoras/opcoes', (req, res) => {
+  res.json({
+    nomes: IMPRESSORA_NOMES,
+    tipos: IMPRESSORA_TIPOS,
+    modos: IMPRESSORA_MODOS,
+    larguras: IMPRESSORA_LARGURAS,
+    portas: IMPRESSORA_PORTAS
+  });
+});
+
+app.get('/api/impressoras/ativa', (req, res) => {
+  const row = db.prepare('SELECT * FROM impressoras WHERE ativa = 1 ORDER BY id DESC LIMIT 1').get();
+  res.json(row || null);
+});
+
+app.get('/api/impressoras', (req, res) => {
+  const { search = '', page = 1, limit = 15 } = req.query;
+  let query = 'SELECT * FROM impressoras WHERE 1=1';
+  const params = [];
+  if (search) {
+    query += ' AND (nome LIKE ? OR tipo LIKE ? OR modo LIKE ? OR largura LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s, s);
+  }
+  query += ' ORDER BY id DESC';
+  const countQ = query.replace('SELECT *', 'SELECT COUNT(*) as total');
+  const total = db.prepare(countQ).get(...params)?.total || 0;
+  const offset = (page - 1) * limit;
+  const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset);
+  res.json({ data, total, page: +page, limit: +limit, totalPages: Math.ceil(total / limit) || 1 });
+});
+
+app.get('/api/impressoras/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM impressoras WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Impressora nao encontrada' });
+  res.json(row);
+});
+
+app.post('/api/impressoras', (req, res) => {
+  const p = impressoraPayload(req.body);
+  if (!p.nome || p.nome === 'Nenhum') return res.status(400).json({ error: 'Selecione a impressora' });
+  if (p.ativa) db.prepare('UPDATE impressoras SET ativa = 0').run();
+  const result = db.prepare(`INSERT INTO impressoras (nome, tipo, modo, envio, largura, escala, barras, porta, ativa)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(p.nome, p.tipo, p.modo, p.envio, p.largura, p.escala, p.barras, p.porta, p.ativa);
+  res.json({ id: result.lastInsertRowid, message: 'Impressora salva' });
+});
+
+app.put('/api/impressoras/:id', (req, res) => {
+  const atual = db.prepare('SELECT id FROM impressoras WHERE id = ?').get(req.params.id);
+  if (!atual) return res.status(404).json({ error: 'Impressora nao encontrada' });
+  const p = impressoraPayload(req.body);
+  if (!p.nome || p.nome === 'Nenhum') return res.status(400).json({ error: 'Selecione a impressora' });
+  if (p.ativa) db.prepare('UPDATE impressoras SET ativa = 0 WHERE id != ?').run(req.params.id);
+  db.prepare(`UPDATE impressoras SET nome=?, tipo=?, modo=?, envio=?, largura=?, escala=?, barras=?, porta=?, ativa=? WHERE id=?`)
+    .run(p.nome, p.tipo, p.modo, p.envio, p.largura, p.escala, p.barras, p.porta, p.ativa, req.params.id);
+  res.json({ message: 'Impressora atualizada' });
+});
+
+app.delete('/api/impressoras/:id', (req, res) => {
+  db.prepare('DELETE FROM impressoras WHERE id = ?').run(req.params.id);
+  res.json({ message: 'Impressora excluida' });
+});
+
+function formatBytes(n) {
+  const v = Number(n) || 0;
+  if (v < 1024) return `${v} B`;
+  if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
+  return `${(v / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+app.get('/api/backups/status', (req, res) => {
+  try {
+    res.json(backupMod.status());
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Falha ao ler status' });
+  }
+});
+
+app.get('/api/backups', (req, res) => {
+  try {
+    const { search, page, limit } = req.query;
+    const result = backupMod.listar({ search, page, limit });
+    result.data = result.data.map(r => ({ ...r, tamanho_fmt: formatBytes(r.tamanho) }));
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Falha ao listar backups' });
+  }
+});
+
+app.post('/api/backups', async (req, res) => {
+  try {
+    const item = await backupMod.criar((req.body || {}).tipo);
+    res.json({ ...item, tamanho_fmt: formatBytes(item.tamanho), message: 'Backup realizado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Falha ao criar backup' });
+  }
+});
+
+app.post('/api/backups/verificar-atualizacao', async (req, res) => {
+  try {
+    const r = await backupMod.verificarAtualizacao();
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Falha ao verificar atualizacao' });
+  }
+});
+
+app.post('/api/backups/restaurar-arquivo', async (req, res) => {
+  try {
+    const { senha, usuario_id, conteudo, nome, encoding } = req.body || {};
+    const admin = usuario_id
+      ? db.prepare('SELECT * FROM usuarios WHERE id = ? AND ativo = 1').get(usuario_id)
+      : db.prepare("SELECT * FROM usuarios WHERE cargo = 'Administrador' AND ativo = 1 ORDER BY id LIMIT 1").get();
+    if (!admin || admin.cargo !== 'Administrador') {
+      return res.status(403).json({ error: 'Somente o administrador pode restaurar backup' });
+    }
+    if (!senha) return res.status(400).json({ error: 'Informe a senha do administrador' });
+    if (admin.senha !== senha) return res.status(401).json({ error: 'Senha invalida' });
+    if (!conteudo) return res.status(400).json({ error: 'Envie um arquivo .zip ou .db' });
+    const raw = encoding === 'base64' ? Buffer.from(conteudo, 'base64') : Buffer.from(conteudo);
+    await backupMod.restaurar(raw, nome);
+    res.json({ message: 'Backup restaurado. Recarregue o sistema.' });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Falha ao restaurar backup' });
+  }
+});
+
+app.get('/api/backups/:id/download', (req, res) => {
+  try {
+    const item = backupMod.obter(req.params.id);
+    if (!item) return res.status(404).json({ error: 'Backup nao encontrado' });
+    if (!item.existe) return res.status(404).json({ error: 'Arquivo do backup nao esta no disco' });
+    res.setHeader('Content-Type', item.mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${item.nome}"`);
+    res.sendFile(item.path);
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Falha ao baixar backup' });
+  }
+});
+
+app.post('/api/backups/:id/restaurar', async (req, res) => {
+  try {
+    const { senha, usuario_id } = req.body || {};
+    const admin = usuario_id
+      ? db.prepare('SELECT * FROM usuarios WHERE id = ? AND ativo = 1').get(usuario_id)
+      : db.prepare("SELECT * FROM usuarios WHERE cargo = 'Administrador' AND ativo = 1 ORDER BY id LIMIT 1").get();
+    if (!admin || admin.cargo !== 'Administrador') {
+      return res.status(403).json({ error: 'Somente o administrador pode restaurar backup' });
+    }
+    if (!senha) return res.status(400).json({ error: 'Informe a senha do administrador' });
+    if (admin.senha !== senha) return res.status(401).json({ error: 'Senha invalida' });
+    await backupMod.restaurarPorId(req.params.id);
+    res.json({ message: 'Backup restaurado. Recarregue o sistema.' });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Falha ao restaurar backup' });
+  }
+});
+
+app.delete('/api/backups/:id', (req, res) => {
+  try {
+    backupMod.excluir(req.params.id);
+    res.json({ message: 'Backup excluido' });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Falha ao excluir backup' });
+  }
 });
 
 const assistenteRag = require('./assistente/rag');

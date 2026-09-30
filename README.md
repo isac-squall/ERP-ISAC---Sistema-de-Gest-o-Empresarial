@@ -15,6 +15,8 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Fornecedores** — Cadastro vinculado a produtos e contas a pagar
 - **Historico de vendas** — Consulta, cupom/DANFE, XML da NFC-e e cancelamento
 - **Relatorio geral** — Receita, lucro, ticket medio, rankings e graficos por periodo
+- **Gerenciar Backup** — Criar, listar, baixar, restaurar e excluir copias do banco; verificar atualizacao
+- **Impressoras** — Cadastro com conexao (Wi-Fi, Bluetooth, USB), modo (termica/jato de tinta) e largura (58mm, 80mm, A4)
 - **Configuracoes** — Cadastro da empresa (logo, nome, contatos, CNPJ), cupom, taxas, NFC-e e Zona critica
 - **Manual** — Ajuda por modulo e assistente de duvidas no canto da tela
 
@@ -28,6 +30,8 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Instalador Windows offline `dist/ERP-ISAC-Setup.exe`
 - Zona critica em Configuracoes: apaga vendas, clientes, produtos, usuarios, configuracoes e imagens; a licenca atual e preservada
 - Cadastro da empresa: logo, nome da loja, telefone, e-mail, Instagram, cidade, estado, endereco e CNPJ (login, sidebar e cupom)
+- Gerenciar Backup: realizar backup completo (ZIP) ou so do banco, baixar, restaurar (com senha do admin) e excluir; verificar atualizacao do app
+- Impressoras: conexao Wi-Fi/Bluetooth/USB, modo termica ou jato de tinta, papel 58mm/80mm/A4, escala do cupom e NFC-e
 
 ## Produtos: importar e exportar
 
@@ -64,6 +68,27 @@ Pre-requisitos: credenciamento na SEFAZ, certificado A1 (`.pfx` + senha), CSC (I
 5. No historico: DANFE, XML e cancelamento (cancela a NFC-e autorizada)
 
 Por padrao `nfce_simulacao=1` (treino sem SEFAZ).
+
+## Gerenciar Backup
+
+Menu **Gerenciar Backup** (somente Administrador).
+
+- **Realizar backup** gera um ZIP completo (`erp.db` + manifesto) ou so o arquivo SQLite
+- Os arquivos ficam na pasta `backups/` e na tabela da tela (ID, Nome, Data, Tamanho, Acoes)
+- Acoes: baixar, restaurar (pede senha do admin e substitui o banco) e excluir
+- **Restaurar arquivo** aceita `.zip` ou `.db` enviado do computador
+- **Verificar atualizacao** consulta a ultima release no GitHub
+
+Nao versionar a pasta `backups/`.
+
+## Impressoras
+
+Menu **Impressoras** (Administrador e Gerente).
+
+- **Adicionar** cadastra nome, tipo de conexao (Wi-Fi, Bluetooth, USB, Rede), modo (Termica, Jato de tinta, Laser) e largura (58mm, 80mm, A4)
+- Escala do cupom/PDF de 50% a 200%; porta COM/USB/LPT/TCP
+- So uma impressora fica **Ativa**; cupom, DANFE NFC-e e etiquetas usam essa largura e escala
+- Marque **Imprimir codigo de barras no cupom** se a termica deve imprimir barras
 
 ## Ordens de servico
 
@@ -161,4 +186,4 @@ Acesse **http://localhost:3000**. O servidor escuta em `0.0.0.0:3000`.
 
 ## Git
 
-Nao versionar `node_modules/`, `erp.db-shm`, `erp.db-wal` nem `dist/*.zip`. O instalador `dist/ERP-ISAC-Setup.exe` pode ir no repositorio.
+Nao versionar `node_modules/`, `erp.db-shm`, `erp.db-wal`, `backups/` nem `dist/*.zip`. O instalador `dist/ERP-ISAC-Setup.exe` pode ir no repositorio.

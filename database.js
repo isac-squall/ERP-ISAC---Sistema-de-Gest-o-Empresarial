@@ -211,6 +211,29 @@ db.exec(`
     chave TEXT PRIMARY KEY,
     valor TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS impressoras (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    tipo TEXT DEFAULT '',
+    modo TEXT DEFAULT '',
+    envio TEXT DEFAULT '',
+    largura TEXT DEFAULT '58mm',
+    escala INTEGER DEFAULT 100,
+    barras INTEGER DEFAULT 1,
+    porta TEXT DEFAULT '',
+    ativa INTEGER DEFAULT 1,
+    criado_em TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS backups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    tipo TEXT DEFAULT 'completo',
+    arquivo TEXT NOT NULL,
+    tamanho INTEGER DEFAULT 0,
+    criado_em TEXT DEFAULT (datetime('now','localtime'))
+  );
 `);
 
 function ensureColumn(table, column, def) {
@@ -245,7 +268,7 @@ ensureColumn('usuarios', 'tipo_pessoa', "TEXT DEFAULT 'PF'");
 const PAGINAS_TODAS = [
   'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
   'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
-  'relatorio', 'configuracoes', 'manual'
+  'relatorio', 'backup', 'impressoras', 'configuracoes', 'manual'
 ];
 const PERFIS_PADRAO = [
   {
@@ -258,7 +281,7 @@ const PERFIS_PADRAO = [
     descricao: 'Gestao operacional sem usuarios e configuracoes',
     permissoes: [
       'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
-      'ordens-servico', 'fornecedores', 'historico-vendas', 'relatorio', 'manual'
+      'ordens-servico', 'fornecedores', 'historico-vendas', 'relatorio', 'impressoras', 'manual'
     ]
   },
   {
@@ -278,6 +301,33 @@ const PERFIS_PADRAO = [
 const insertPerfil = db.prepare('INSERT OR IGNORE INTO perfis (nome, descricao, permissoes) VALUES (?,?,?)');
 for (const p of PERFIS_PADRAO) {
   insertPerfil.run(p.nome, p.descricao, JSON.stringify(p.permissoes));
+}
+const adminPerfil = db.prepare("SELECT id, permissoes FROM perfis WHERE nome = 'Administrador'").get();
+if (adminPerfil) {
+  let perms = [];
+  try { perms = JSON.parse(adminPerfil.permissoes || '[]'); } catch {}
+  if (!perms.includes('backup')) {
+    const i = perms.indexOf('configuracoes');
+    if (i >= 0) perms.splice(i, 0, 'backup');
+    else perms.push('backup');
+  }
+  if (!perms.includes('impressoras')) {
+    const i = perms.indexOf('configuracoes');
+    if (i >= 0) perms.splice(i, 0, 'impressoras');
+    else perms.push('impressoras');
+  }
+  db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), adminPerfil.id);
+}
+const gerentePerfil = db.prepare("SELECT id, permissoes FROM perfis WHERE nome = 'Gerente'").get();
+if (gerentePerfil) {
+  let perms = [];
+  try { perms = JSON.parse(gerentePerfil.permissoes || '[]'); } catch {}
+  if (!perms.includes('impressoras')) {
+    const i = perms.indexOf('manual');
+    if (i >= 0) perms.splice(i, 0, 'impressoras');
+    else perms.push('impressoras');
+    db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), gerentePerfil.id);
+  }
 }
 db.prepare("UPDATE usuarios SET cargo = 'Caixa' WHERE cargo IN ('Operador','Funcionario')").run();
 
@@ -321,7 +371,8 @@ const defaults = {
   empresa_estado: '',
   empresa_endereco: '',
   empresa_cnpj: '',
-  empresa_logo: ''
+  empresa_logo: '',
+  app_versao_instalada: ''
 };
 const insertConfig = db.prepare('INSERT OR IGNORE INTO config (chave, valor) VALUES (?, ?)');
 for (const [chave, valor] of Object.entries(defaults)) {
