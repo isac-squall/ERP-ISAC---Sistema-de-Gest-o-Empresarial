@@ -238,6 +238,39 @@ module.exports = [
     ]
   },
   {
+    id: 'backup',
+    modulo: 'Gerenciar Backup',
+    sessao: 'Copias de seguranca',
+    pagina: 'backup',
+    titulo: 'Fazer, baixar e restaurar backup',
+    keywords: 'backup restaurar copiar banco zip sqlite atualizacao versao gerenciar backup',
+    conteudo: `Gerenciar Backup lista as copias do banco (ID, nome, data, tamanho). Realizar backup gera ZIP completo (erp.db + manifesto) ou so o SQLite, gravado em backups/. Baixar, restaurar (senha do admin, substitui o banco) e excluir. Restaurar arquivo aceita .zip ou .db. Verificar atualizacao consulta a ultima release no GitHub. So o Administrador ve esta tela.`,
+    passos: [
+      'Abra Gerenciar Backup no menu (somente admin).',
+      'Clique em Realizar backup e escolha Completo ou Somente banco.',
+      'Use baixar, restaurar (com senha) ou excluir na linha.',
+      'Restaurar arquivo envia um .zip ou .db do computador.',
+      'Verificar atualizacao consulta se ha versao nova.'
+    ]
+  },
+  {
+    id: 'impressoras',
+    modulo: 'Impressoras',
+    sessao: 'Cadastro para notas',
+    pagina: 'impressoras',
+    titulo: 'Cadastrar impressora do cupom e NFC-e',
+    keywords: 'impressora wifi bluetooth usb termica jato tinta 58mm 80mm a4 cupom danfe papel conexao',
+    conteudo: `Impressoras adicionadas cadastra o equipamento usado na emissao de cupom e NFC-e. Tipo de conexao: Wi-Fi, Bluetooth, USB ou Rede. Modo: Termica, Jato de tinta ou Laser. Largura do papel: 58mm, 80mm ou A4. A escala ajusta o tamanho do cupom/PDF (50% a 200%). A impressora marcada como Ativa e usada na impressao. So uma fica ativa por vez.`,
+    passos: [
+      'Abra Impressoras no menu.',
+      'Clique em Adicionar.',
+      'Escolha a impressora, tipo de conexao, modo e largura do papel.',
+      'Ajuste a escala do cupom e a porta.',
+      'Deixe Ativa ligada e clique em Salvar.',
+      'No PDV ou no Historico, imprima o cupom/DANFE; o papel segue a largura cadastrada.'
+    ]
+  },
+  {
     id: 'configuracoes',
     modulo: 'Configuracoes',
     sessao: 'Cupom e PDV',
@@ -307,7 +340,7 @@ module.exports = [
     pagina: 'usuarios',
     titulo: 'O que cada nivel pode ver',
     keywords: 'permissao menu escondido cargo nivel acesso sem permissao',
-    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo. Gerente nao acessa Usuarios nem Configuracoes. Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Sem permissao a tela avisa Sem permissao para esta pagina.`,
+    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo, inclusive Gerenciar Backup e Impressoras. Gerente nao acessa Usuarios, Backup nem Configuracoes (acessa Impressoras). Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio, Backup, Impressoras nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Sem permissao a tela avisa Sem permissao para esta pagina.`,
     passos: [
       'Faca login com o usuario do cargo desejado.',
       'Confira o menu lateral filtrado.',

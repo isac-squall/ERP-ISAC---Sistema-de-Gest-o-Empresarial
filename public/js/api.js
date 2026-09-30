@@ -138,7 +138,28 @@ const API = {
     delete: (id) => API.request(`/financeiro/${id}`, { method: 'DELETE' })
   },
 
-  relatorio: (p) => API.request(`/relatorio?${new URLSearchParams(p || {})}`)
+  relatorio: (p) => API.request(`/relatorio?${new URLSearchParams(p || {})}`),
+
+  impressoras: {
+    list: (p) => API.request(`/impressoras?${new URLSearchParams(p || {})}`),
+    opcoes: () => API.request('/impressoras/opcoes'),
+    ativa: () => API.request('/impressoras/ativa'),
+    get: (id) => API.request(`/impressoras/${id}`),
+    create: (d) => API.request('/impressoras', { method: 'POST', body: d }),
+    update: (id, d) => API.request(`/impressoras/${id}`, { method: 'PUT', body: d }),
+    delete: (id) => API.request(`/impressoras/${id}`, { method: 'DELETE' })
+  },
+
+  backups: {
+    list: (p) => API.request(`/backups?${new URLSearchParams(p || {})}`),
+    status: () => API.request('/backups/status'),
+    criar: (d) => API.request('/backups', { method: 'POST', body: d || {} }),
+    downloadUrl: (id) => `/api/backups/${id}/download`,
+    restaurar: (id, d) => API.request(`/backups/${id}/restaurar`, { method: 'POST', body: d }),
+    restaurarArquivo: (d) => API.request('/backups/restaurar-arquivo', { method: 'POST', body: d }),
+    delete: (id) => API.request(`/backups/${id}`, { method: 'DELETE' }),
+    verificarAtualizacao: () => API.request('/backups/verificar-atualizacao', { method: 'POST', body: {} })
+  }
 };
 
 function formatCurrency(v) {

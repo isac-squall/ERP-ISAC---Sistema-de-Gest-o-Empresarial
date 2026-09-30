@@ -63,6 +63,8 @@ Section "Instalar"
   File /r "app/nfce/*.*"
   SetOutPath "$INSTDIR\app\produtos"
   File /r "app/produtos/*.*"
+  SetOutPath "$INSTDIR\app\backup"
+  File /r "app/backup/*.*"
   SetOutPath "$INSTDIR\app\node_modules"
   File /r "app/node_modules/*.*"
 

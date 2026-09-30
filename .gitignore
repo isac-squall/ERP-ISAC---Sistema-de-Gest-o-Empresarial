@@ -6,3 +6,6 @@ erp.db-wal
 dist/*.zip
 .monkeycode-tmp-files/
 certs/
+backups/
+.erp-backup-*.db
+.erp-restore-*.db
