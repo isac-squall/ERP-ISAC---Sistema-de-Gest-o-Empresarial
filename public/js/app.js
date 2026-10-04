@@ -14,6 +14,11 @@ const PAGES = {
   fornecedores: { title: 'Fornecedores', breadcrumb: 'Dashboard / Fornecedores' },
   'historico-vendas': { title: 'Histórico de vendas', breadcrumb: 'Dashboard / Histórico de vendas' },
   relatorio: { title: 'Relatório geral', breadcrumb: 'Dashboard / Relatório geral' },
+  'contador-nfe': { title: 'Listar NFe emitidas', breadcrumb: 'Dashboard / Contador / Listar NFe emitidas' },
+  'contador-compras': { title: 'Relatório de Compras', breadcrumb: 'Dashboard / Contador / Relatório de Compras' },
+  'contador-xml': { title: 'Download XML NFes', breadcrumb: 'Dashboard / Contador / Download XML NFes' },
+  'contador-extrato': { title: 'Download extrato', breadcrumb: 'Dashboard / Contador / Download extrato' },
+  'contador-sped': { title: 'SPED Fiscal', breadcrumb: 'Dashboard / Contador / SPED Fiscal' },
   backup: { title: 'Gerenciar Backup', breadcrumb: 'Dashboard / Gerenciar Backup' },
   impressoras: { title: 'Impressoras adicionadas', breadcrumb: 'Dashboard / Impressoras adicionadas' },
   configuracoes: { title: 'Configurações', breadcrumb: 'Dashboard / Configurações' },
@@ -62,7 +67,14 @@ function bindGlobalEvents() {
     document.getElementById('sidebar').classList.toggle('collapsed');
 
   document.querySelectorAll('.nav-item').forEach(el => {
-    el.onclick = (e) => { e.preventDefault(); navigate(el.dataset.page); };
+    el.onclick = (e) => {
+      e.preventDefault();
+      if (el.dataset.groupToggle) {
+        el.closest('.nav-group')?.classList.toggle('open');
+        return;
+      }
+      if (el.dataset.page) navigate(el.dataset.page);
+    };
   });
 
   document.querySelector('.modal-close').onclick = closeModal;
@@ -131,12 +143,23 @@ function bindGlobalEvents() {
   });
 }
 
+const CONTADOR_PAGES = ['contador-nfe', 'contador-compras', 'contador-xml', 'contador-extrato', 'contador-sped'];
+
 function userPermissoes() {
   const list = currentUser?.permissoes;
-  if (Array.isArray(list) && list.length) return list;
-  return currentUser?.cargo === 'Administrador'
-    ? ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', 'backup', 'impressoras', 'configuracoes', 'manual']
-    : ['dashboard', 'manual'];
+  let allowed;
+  if (Array.isArray(list) && list.length) allowed = [...list];
+  else if (currentUser?.cargo === 'Administrador') {
+    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
+  } else {
+    allowed = ['dashboard', 'manual'];
+  }
+  if (currentUser?.cargo === 'Administrador' || currentUser?.cargo === 'Gerente') {
+    for (const k of CONTADOR_PAGES) {
+      if (!allowed.includes(k)) allowed.push(k);
+    }
+  }
+  return allowed;
 }
 
 function canAccess(page) {
@@ -148,6 +171,10 @@ function applyMenuPermissions() {
   document.querySelectorAll('.nav-item').forEach(el => {
     const page = el.dataset.page;
     el.classList.toggle('hidden', page && !allowed.includes(page));
+  });
+  document.querySelectorAll('.nav-group').forEach(group => {
+    const any = [...group.querySelectorAll('[data-page]')].some(el => allowed.includes(el.dataset.page));
+    group.classList.toggle('hidden', !any);
   });
   document.getElementById('settings-btn')?.classList.toggle('hidden', !allowed.includes('configuracoes'));
 }
@@ -244,6 +271,11 @@ function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page));
+  document.querySelectorAll('.nav-group').forEach(group => {
+    const inside = [...group.querySelectorAll('[data-page]')].some(el => el.dataset.page === page);
+    group.classList.toggle('open', inside);
+    group.querySelector('.nav-group-toggle')?.classList.toggle('active', inside);
+  });
   pageState[page] = pageState[page] || { page: 1, limit: 15, search: '' };
   renderPage();
 }
@@ -267,6 +299,11 @@ async function renderPage() {
       st.periodo = st.periodo || 'mes';
       return renderRelatorio();
     },
+    'contador-nfe': renderContadorNfe,
+    'contador-compras': renderContadorCompras,
+    'contador-xml': renderContadorXml,
+    'contador-extrato': renderContadorExtrato,
+    'contador-sped': renderContadorSped,
     backup: renderBackup,
     impressoras: renderImpressoras,
     configuracoes: renderConfiguracoes,
@@ -3099,6 +3136,330 @@ function showApagarBanco() {
       btn.disabled = false;
     }
   };
+}
+
+function contadorPeriodoParams(st) {
+  st.periodo = st.periodo || 'mes';
+  if (!st.de || !st.ate) {
+    const range = relatorioDefaultRange(st.periodo);
+    st.de = range.de;
+    st.ate = range.ate;
+  }
+  const p = { periodo: st.periodo, de: st.de, ate: st.ate };
+  if (st.search) p.search = st.search;
+  if (st.status) p.status = st.status;
+  if (st.page) p.page = st.page;
+  if (st.limit) p.limit = st.limit;
+  return p;
+}
+
+function contadorFiltrosHtml(st, extra = '') {
+  const presets = [['hoje', 'Hoje'], ['7dias', '7 dias'], ['30dias', '30 dias'], ['mes', 'Mes'], ['ano', 'Ano']];
+  return `
+    <div class="contador-filters">
+      <div class="rep-presets">
+        ${presets.map(([k, lab]) => `<button type="button" class="rep-preset ${st.periodo === k ? 'active' : ''}" data-periodo="${k}">${lab}</button>`).join('')}
+      </div>
+      <div class="form-group"><label>De</label><input type="date" id="cnt-de" value="${st.de || ''}"></div>
+      <div class="form-group"><label>Ate</label><input type="date" id="cnt-ate" value="${st.ate || ''}"></div>
+      ${extra}
+      <button type="button" class="btn btn-primary" id="cnt-atualizar">Atualizar</button>
+    </div>`;
+}
+
+function bindContadorFiltros(pageKey, extraRead) {
+  const st = pageState[pageKey];
+  document.querySelectorAll('.rep-preset').forEach(btn => {
+    btn.onclick = () => {
+      st.periodo = btn.dataset.periodo;
+      const range = relatorioDefaultRange(st.periodo);
+      st.de = range.de; st.ate = range.ate; st.page = 1;
+      renderPage();
+    };
+  });
+  document.getElementById('cnt-atualizar').onclick = () => {
+    st.de = document.getElementById('cnt-de').value;
+    st.ate = document.getElementById('cnt-ate').value;
+    st.periodo = 'custom';
+    st.page = 1;
+    if (extraRead) extraRead(st);
+    renderPage();
+  };
+}
+
+function baixarContadorUrl(url) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  showToast('Download iniciado', 'success');
+}
+
+function contadorKpis(items) {
+  const colors = ['blue', 'green', 'teal', 'orange', 'red', 'purple'];
+  return `<div class="contador-kpis">${items.map((it, i) => `
+    <div class="stat-card ${colors[i % colors.length]}"><h4>${it.label}</h4><div class="stat-value">${it.value}</div></div>
+  `).join('')}</div>`;
+}
+
+async function renderContadorNfe() {
+  const st = pageState['contador-nfe'];
+  st.limit = st.limit || 15;
+  st.page = st.page || 1;
+  let result;
+  try { result = await API.contador.nfe(contadorPeriodoParams(st)); }
+  catch (err) {
+    document.getElementById('content').innerHTML = `<div class="card"><p style="color:red">Erro: ${escapeHtml(err.message)}</p></div>`;
+    return;
+  }
+  const r = result.resumo || {};
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Listar NFe emitidas', 'Dashboard / Contador / Listar NFe emitidas')}
+    ${contadorFiltrosHtml(st, `
+      <div class="form-group"><label>Status</label>
+        <select id="cnt-status">
+          <option value="">Todos</option>
+          ${['autorizada','cancelada','pendente','rejeitada','erro'].map(s => `<option value="${s}" ${st.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Busca</label><input type="text" id="cnt-search" value="${escapeHtml(st.search || '')}" placeholder="Numero, chave, cliente"></div>
+    `)}
+    ${contadorKpis([
+      { label: 'Notas', value: String(r.qtd || 0) },
+      { label: 'Autorizadas', value: String(r.autorizadas || 0) },
+      { label: 'Canceladas', value: String(r.canceladas || 0) },
+      { label: 'Valor', value: formatCurrency(r.valor) }
+    ])}
+    <div class="toolbar">
+      <span class="toolbar-info">${result.total} NFC-e no periodo ${result.de} a ${result.ate}</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-teal" id="cnt-zip"><i class="fas fa-file-archive"></i> Baixar XMLs (ZIP)</button>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Numero</th><th>Serie</th><th>Cliente</th><th>Chave</th><th>Status</th><th>Valor</th><th>Emissao</th><th>Acoes</th></tr></thead>
+        <tbody id="table-body">${renderContadorNfeRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindContadorFiltros('contador-nfe', (s) => {
+    s.status = document.getElementById('cnt-status').value;
+    s.search = document.getElementById('cnt-search').value.trim();
+  });
+  document.getElementById('cnt-zip').onclick = () => baixarContadorUrl(API.contador.xmlZipUrl(contadorPeriodoParams(st)));
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; renderContadorNfe();
+  });
+}
+
+function renderContadorNfeRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="9">Nenhuma NFC-e no periodo</td></tr>';
+  return data.map(n => `<tr>
+    <td>${n.id}</td>
+    <td>${n.numero || '-'}</td>
+    <td>${n.serie || '-'}</td>
+    <td>${escapeHtml(n.cliente_nome || 'Avulso')}</td>
+    <td class="nfce-chave">${chaveFormatada(n.chave)}</td>
+    <td>${nfceStatusBadge(n.status)}</td>
+    <td>${formatCurrency(n.venda_total)}</td>
+    <td>${formatDateTime(n.dh_emi || n.criado_em)}</td>
+    <td class="actions-cell">
+      ${n.venda_id ? `<button class="btn-icon view" onclick="viewVenda(${n.venda_id})" title="Venda"><i class="fas fa-eye"></i></button>
+      <button class="btn-icon print" onclick="printCupom(${n.venda_id})" title="DANFE"><i class="fas fa-print"></i></button>` : ''}
+      ${n.tem_xml && n.venda_id ? `<a class="btn-icon view" href="/api/vendas/${n.venda_id}/nfce.xml" title="XML" download><i class="fas fa-file-code"></i></a>` : ''}
+    </td>
+  </tr>`).join('');
+}
+
+async function renderContadorCompras() {
+  const st = pageState['contador-compras'];
+  st.limit = st.limit || 15;
+  st.page = st.page || 1;
+  let result;
+  try { result = await API.contador.compras(contadorPeriodoParams(st)); }
+  catch (err) {
+    document.getElementById('content').innerHTML = `<div class="card"><p style="color:red">Erro: ${escapeHtml(err.message)}</p></div>`;
+    return;
+  }
+  const r = result.resumo || {};
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Relatorio de Compras', 'Dashboard / Contador / Relatorio de Compras')}
+    ${contadorFiltrosHtml(st, `<div class="form-group"><label>Busca</label><input type="text" id="cnt-search" value="${escapeHtml(st.search || '')}" placeholder="Descricao, fornecedor"></div>`)}
+    ${contadorKpis([
+      { label: 'Lancamentos', value: String(r.qtd || 0) },
+      { label: 'Total', value: formatCurrency(r.total) },
+      { label: 'Pago', value: formatCurrency(r.pago) },
+      { label: 'Pendente', value: formatCurrency(r.pendente) }
+    ])}
+    <div class="contador-mini">
+      <div class="card"><h4>Por fornecedor</h4><ul>${(result.porFornecedor || []).map(f => `<li><span>${escapeHtml(f.fornecedor)}</span><strong>${formatCurrency(f.total)}</strong></li>`).join('') || '<li class="muted">Sem dados</li>'}</ul></div>
+      <div class="card"><h4>Por categoria</h4><ul>${(result.porCategoria || []).map(f => `<li><span>${escapeHtml(f.categoria)}</span><strong>${formatCurrency(f.total)}</strong></li>`).join('') || '<li class="muted">Sem dados</li>'}</ul></div>
+    </div>
+    <div class="toolbar">
+      <span class="toolbar-info">${result.total} compras de ${result.de} a ${result.ate}</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-success" id="cnt-csv"><i class="fas fa-file-csv"></i> Exportar CSV</button>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Descricao</th><th>Fornecedor</th><th>Categoria</th><th>Valor</th><th>Vencimento</th><th>Pagamento</th><th>Status</th></tr></thead>
+        <tbody>${(result.data || []).length ? result.data.map(f => `<tr>
+          <td>${f.id}</td><td>${escapeHtml(f.descricao || '-')}</td>
+          <td>${escapeHtml(f.fornecedor_nome || '-')}</td><td>${escapeHtml(f.categoria || '-')}</td>
+          <td>${formatCurrency(f.valor)}</td><td>${formatDate(f.data_vencimento)}</td>
+          <td>${formatDate(f.data_pagamento)}</td>
+          <td><span class="status-badge ${statusClass(f.status)}">${escapeHtml(f.status || '-')}</span></td>
+        </tr>`).join('') : '<tr class="empty-row"><td colspan="8">Nenhuma compra no periodo</td></tr>'}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindContadorFiltros('contador-compras', (s) => { s.search = document.getElementById('cnt-search').value.trim(); });
+  document.getElementById('cnt-csv').onclick = () => baixarContadorUrl(API.contador.comprasCsvUrl(contadorPeriodoParams(st)));
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; renderContadorCompras();
+  });
+}
+
+async function renderContadorXml() {
+  const st = pageState['contador-xml'];
+  st.limit = st.limit || 15;
+  st.page = st.page || 1;
+  let result;
+  try { result = await API.contador.nfe(contadorPeriodoParams(st)); }
+  catch (err) {
+    document.getElementById('content').innerHTML = `<div class="card"><p style="color:red">Erro: ${escapeHtml(err.message)}</p></div>`;
+    return;
+  }
+  const r = result.resumo || {};
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Download XML NFes', 'Dashboard / Contador / Download XML NFes')}
+    ${contadorFiltrosHtml(st)}
+    ${contadorKpis([
+      { label: 'Notas', value: String(r.qtd || 0) },
+      { label: 'Com XML', value: String(r.com_xml || 0) },
+      { label: 'Autorizadas', value: String(r.autorizadas || 0) },
+      { label: 'Periodo', value: `${result.de} a ${result.ate}` }
+    ])}
+    <div class="contador-panel">
+      <h3>Pacote de XMLs</h3>
+      <p>Gera um ZIP com os arquivos XML das NFC-e do periodo (nome NFCe-chave.xml).</p>
+      <ul>
+        <li>Inclui somente notas que ja possuem XML gravado</li>
+        <li>Use o mesmo filtro de datas da listagem</li>
+        <li>O download individual continua disponivel no historico de vendas</li>
+      </ul>
+      <div class="contador-actions">
+        <button class="btn btn-primary" id="cnt-zip"><i class="fas fa-file-archive"></i> Baixar ZIP (${r.com_xml || 0} XML)</button>
+      </div>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>Numero</th><th>Chave</th><th>Status</th><th>XML</th><th>Emissao</th><th>Acoes</th></tr></thead>
+        <tbody>${(result.data || []).length ? result.data.map(n => `<tr>
+          <td>${n.numero || '-'}/${n.serie || '-'}</td>
+          <td class="nfce-chave">${chaveFormatada(n.chave)}</td>
+          <td>${nfceStatusBadge(n.status)}</td>
+          <td>${n.tem_xml ? 'Sim' : 'Nao'}</td>
+          <td>${formatDateTime(n.dh_emi || n.criado_em)}</td>
+          <td class="actions-cell">${n.tem_xml && n.venda_id ? `<a class="btn-icon view" href="/api/vendas/${n.venda_id}/nfce.xml" download title="Baixar XML"><i class="fas fa-download"></i></a>` : '-'}</td>
+        </tr>`).join('') : '<tr class="empty-row"><td colspan="6">Nenhuma NFC-e no periodo</td></tr>'}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindContadorFiltros('contador-xml');
+  document.getElementById('cnt-zip').onclick = () => baixarContadorUrl(API.contador.xmlZipUrl(contadorPeriodoParams(st)));
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; renderContadorXml();
+  });
+}
+
+async function renderContadorExtrato() {
+  const st = pageState['contador-extrato'];
+  let result;
+  try { result = await API.contador.extrato(contadorPeriodoParams(st)); }
+  catch (err) {
+    document.getElementById('content').innerHTML = `<div class="card"><p style="color:red">Erro: ${escapeHtml(err.message)}</p></div>`;
+    return;
+  }
+  const r = result.resumo || {};
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Download extrato', 'Dashboard / Contador / Download extrato')}
+    ${contadorFiltrosHtml(st)}
+    ${contadorKpis([
+      { label: 'Vendas', value: formatCurrency(r.vendas_total) },
+      { label: 'Receitas', value: formatCurrency(r.financeiro_receitas) },
+      { label: 'Despesas', value: formatCurrency(r.financeiro_despesas) },
+      { label: 'Saldo', value: formatCurrency(r.saldo) }
+    ])}
+    <div class="contador-panel">
+      <h3>Extrato contabil</h3>
+      <p>Consolida vendas, movimentos de caixa e lancamentos financeiros do periodo ${result.de} a ${result.ate} (${escapeHtml(result.empresa || '')}).</p>
+      <ul>
+        <li>${(result.vendas || []).length} vendas · ${(result.caixa || []).length} movimentos de caixa · ${(result.financeiro || []).length} lancamentos</li>
+        <li>TXT para conferencia impressa; CSV para planilha</li>
+      </ul>
+      <div class="contador-actions">
+        <button class="btn btn-primary" id="cnt-txt"><i class="fas fa-file-alt"></i> Baixar TXT</button>
+        <button class="btn btn-success" id="cnt-csv"><i class="fas fa-file-csv"></i> Baixar CSV</button>
+      </div>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>Tipo</th><th>ID</th><th>Descricao</th><th>Valor</th><th>Data</th></tr></thead>
+        <tbody>
+          ${(result.vendas || []).slice(0, 8).map(v => `<tr><td>Venda</td><td>${v.id}</td><td>${escapeHtml(v.cliente_nome || 'Avulso')} · ${escapeHtml(v.forma_pagamento || '')}</td><td>${formatCurrency(v.total)}</td><td>${formatDateTime(v.criado_em)}</td></tr>`).join('')}
+          ${(result.financeiro || []).slice(0, 8).map(f => `<tr><td>${escapeHtml(f.tipo)}</td><td>${f.id}</td><td>${escapeHtml(f.descricao || '-')}</td><td>${formatCurrency(f.valor)}</td><td>${formatDate(f.data_pagamento || f.data_vencimento)}</td></tr>`).join('')}
+          ${!(result.vendas || []).length && !(result.financeiro || []).length ? '<tr class="empty-row"><td colspan="5">Nenhum movimento no periodo</td></tr>' : ''}
+        </tbody>
+      </table>
+    </div>`;
+  bindContadorFiltros('contador-extrato');
+  document.getElementById('cnt-txt').onclick = () => baixarContadorUrl(API.contador.extratoTxtUrl(contadorPeriodoParams(st)));
+  document.getElementById('cnt-csv').onclick = () => baixarContadorUrl(API.contador.extratoCsvUrl(contadorPeriodoParams(st)));
+}
+
+async function renderContadorSped() {
+  const st = pageState['contador-sped'];
+  if (!st.mes) st.mes = new Date().toISOString().slice(0, 7);
+  let result;
+  try { result = await API.contador.sped({ mes: st.mes }); }
+  catch (err) {
+    document.getElementById('content').innerHTML = `<div class="card"><p style="color:red">Erro: ${escapeHtml(err.message)}</p></div>`;
+    return;
+  }
+  const r = result.resumo || {};
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('SPED Fiscal', 'Dashboard / Contador / SPED Fiscal')}
+    <div class="contador-filters">
+      <div class="form-group"><label>Mes de apuracao</label><input type="month" id="cnt-mes" value="${st.mes}"></div>
+      <button type="button" class="btn btn-primary" id="cnt-atualizar">Atualizar</button>
+    </div>
+    ${contadorKpis([
+      { label: 'Notas no mes', value: String(r.qtd || 0) },
+      { label: 'Autorizadas', value: String(r.autorizadas || 0) },
+      { label: 'Valor', value: formatCurrency(r.valor) },
+      { label: 'Registros', value: String(r.registros || 0) }
+    ])}
+    <div class="contador-panel">
+      <h3>Arquivo EFD ICMS/IPI</h3>
+      <p>Gera o SPED Fiscal (layout simplificado blocos 0, C, H e 9) com as NFC-e do mes ${escapeHtml(result.mes || st.mes)}.</p>
+      <ul>
+        <li>Empresa: ${escapeHtml(r.empresa || '-')} · CNPJ ${escapeHtml(r.cnpj || '-')} · IE ${escapeHtml(r.ie || '-')}</li>
+        <li>Periodo ${result.de} a ${result.ate} · ${r.itens || 0} itens (C170)</li>
+        <li>Arquivo texto no padrao |registro|campos| para o contador importar no PVA</li>
+        <li>Preencha razao social, CNPJ, IE e endereco em Configuracoes / NFC-e antes de enviar a SEFAZ</li>
+      </ul>
+      <div class="contador-actions">
+        <button class="btn btn-primary" id="cnt-sped"><i class="fas fa-file-download"></i> Baixar SPED (${escapeHtml(result.nome || 'sped-fiscal.txt')})</button>
+      </div>
+    </div>`;
+  document.getElementById('cnt-atualizar').onclick = () => {
+    st.mes = document.getElementById('cnt-mes').value;
+    renderContadorSped();
+  };
+  document.getElementById('cnt-sped').onclick = () => baixarContadorUrl(API.contador.spedTxtUrl({ mes: st.mes }));
 }
 
 const IMPRESSORA_PADRAO = { largura: '80mm', escala: 100, barras: 1, modo: 'Termica' };

@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <title>ERP ISAC - Sistema de gestão empresarial</title>
-  <link rel="stylesheet" href="css/styles.css?v=13">
+  <link rel="stylesheet" href="css/styles.css?v=15">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -77,6 +78,29 @@
         <a href="#" class="nav-item" data-page="relatorio">
           <i class="fas fa-chart-pie"></i> Relatório geral
         </a>
+        <div class="nav-group" data-group="contador">
+          <a href="#" class="nav-item nav-group-toggle" data-group-toggle="contador">
+            <i class="fas fa-calculator"></i> Contador
+            <i class="fas fa-chevron-down nav-group-caret"></i>
+          </a>
+          <div class="nav-submenu" data-submenu="contador">
+            <a href="#" class="nav-item nav-subitem" data-page="contador-nfe">
+              <i class="fas fa-file-invoice"></i> Listar NFe emitidas
+            </a>
+            <a href="#" class="nav-item nav-subitem" data-page="contador-compras">
+              <i class="fas fa-shopping-basket"></i> Relatório de Compras
+            </a>
+            <a href="#" class="nav-item nav-subitem" data-page="contador-xml">
+              <i class="fas fa-file-code"></i> Download XML NFes
+            </a>
+            <a href="#" class="nav-item nav-subitem" data-page="contador-extrato">
+              <i class="fas fa-file-download"></i> Download extrato
+            </a>
+            <a href="#" class="nav-item nav-subitem" data-page="contador-sped">
+              <i class="fas fa-file-alt"></i> SPED Fiscal
+            </a>
+          </div>
+        </div>
         <a href="#" class="nav-item" data-page="backup">
           <i class="fas fa-database"></i> Gerenciar Backup
         </a>
@@ -181,7 +205,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-  <script src="js/api.js?v=13"></script>
-  <script src="js/app.js?v=13"></script>
+  <script src="js/api.js?v=15"></script>
+  <script src="js/app.js?v=15"></script>
 </body>
 </html>

@@ -112,6 +112,23 @@ body {
   border-left-color: var(--primary-dark);
 }
 .nav-item.active i { color: white; }
+.nav-group { display: block; }
+.nav-group.hidden { display: none; }
+.nav-group-toggle { position: relative; padding-right: 36px; }
+.nav-group-caret {
+  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+  font-size: 10px; color: var(--text-muted); transition: transform 0.2s;
+}
+.nav-group.open .nav-group-caret { transform: translateY(-50%) rotate(180deg); }
+.nav-group-toggle.active {
+  background: rgba(33,150,243,0.12); color: var(--primary);
+  border-left-color: var(--primary);
+}
+.nav-group-toggle.active i { color: var(--primary); }
+.nav-submenu { display: none; background: rgba(0,0,0,0.03); }
+.nav-group.open .nav-submenu { display: block; }
+.nav-subitem { padding-left: 36px; font-size: 13px; }
+.nav-subitem i { font-size: 12px; }
 
 .main-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
@@ -1055,6 +1072,22 @@ body {
 .impressora-switch input:not(:checked) + .impressora-switch-ui::after { left: 0; right: auto; }
 .impressora-form-actions { display: flex; gap: 10px; margin-top: 8px; }
 
+.contador-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.contador-panel {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
+  padding: 16px; margin-bottom: 16px;
+}
+.contador-panel h3 { font-size: 15px; margin-bottom: 6px; }
+.contador-panel p, .contador-panel li { font-size: 13px; color: var(--text-muted); }
+.contador-panel ul { margin: 8px 0 12px 18px; }
+.contador-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 16px; }
+.contador-filters .form-group { margin: 0; min-width: 140px; }
+.contador-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.contador-mini { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.contador-mini .card { padding: 12px 14px; }
+.contador-mini h4 { font-size: 13px; margin-bottom: 8px; }
+.contador-mini li { font-size: 13px; display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; }
+
 .produtos-io-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .produtos-io-result {
   margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border);
@@ -1093,7 +1126,7 @@ body {
 
 @media (max-width: 768px) {
   .sidebar { position: fixed; height: 100vh; }
-  .stats-row, .stats-row-4, .stats-row-5, .fin-forecast-row, .rep-kpis, .rep-charts { grid-template-columns: 1fr; }
+  .stats-row, .stats-row-4, .stats-row-5, .fin-forecast-row, .rep-kpis, .rep-charts, .contador-kpis, .contador-mini { grid-template-columns: 1fr; }
   .pos-layout { grid-template-columns: 1fr; }
   .form-row, .form-row-3 { grid-template-columns: 1fr; }
   .dashboard-grid { grid-template-columns: 1fr; }

@@ -15,6 +15,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Fornecedores** — Cadastro vinculado a produtos e contas a pagar
 - **Historico de vendas** — Consulta, cupom/DANFE, XML da NFC-e e cancelamento
 - **Relatorio geral** — Receita, lucro, ticket medio, rankings e graficos por periodo
+- **Contador** — Submenu: Listar NFe emitidas, Relatorio de Compras, Download XML NFes, Download extrato e SPED Fiscal
 - **Gerenciar Backup** — Criar, listar, baixar, restaurar e excluir copias do banco; verificar atualizacao
 - **Impressoras** — Cadastro com conexao (Wi-Fi, Bluetooth, USB), modo (termica/jato de tinta) e largura (58mm, 80mm, A4)
 - **Configuracoes** — Cadastro da empresa (logo, nome, contatos, CNPJ), cupom, taxas, NFC-e e Zona critica
@@ -32,6 +33,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Cadastro da empresa: logo, nome da loja, telefone, e-mail, Instagram, cidade, estado, endereco e CNPJ (login, sidebar e cupom)
 - Gerenciar Backup: realizar backup completo (ZIP) ou so do banco, baixar, restaurar (com senha do admin) e excluir; verificar atualizacao do app
 - Impressoras: conexao Wi-Fi/Bluetooth/USB, modo termica ou jato de tinta, papel 58mm/80mm/A4, escala do cupom e NFC-e
+- Contador: listar NFC-e, relatorio de compras, ZIP de XMLs, extrato TXT/CSV e SPED Fiscal (EFD ICMS/IPI simplificado)
 
 ## Produtos: importar e exportar
 
@@ -68,6 +70,18 @@ Pre-requisitos: credenciamento na SEFAZ, certificado A1 (`.pfx` + senha), CSC (I
 5. No historico: DANFE, XML e cancelamento (cancela a NFC-e autorizada)
 
 Por padrao `nfce_simulacao=1` (treino sem SEFAZ).
+
+## Contador
+
+Menu **Contador** (submenu recolhivel; Administrador e Gerente).
+
+- **Listar NFe emitidas** — NFC-e do periodo (numero, chave, status, valor); DANFE, XML e ZIP
+- **Relatorio de Compras** — despesas do Financeiro, totais e CSV
+- **Download XML NFes** — ZIP com os XML das notas do periodo
+- **Download extrato** — TXT ou CSV com vendas, caixa e financeiro
+- **SPED Fiscal** — arquivo EFD ICMS/IPI (blocos 0, C, H e 9) do mes de apuracao
+
+Preencha CNPJ, IE e endereco em Configuracoes antes de gerar o SPED.
 
 ## Gerenciar Backup
 
@@ -125,7 +139,7 @@ O menu lateral mostra so as telas do cargo. Perfil de acesso define as paginas.
 | Cargo | Acesso |
 | --- | --- |
 | Administrador | Tudo |
-| Gerente | Sem Usuarios e Configuracoes |
+| Gerente | Sem Usuarios, Backup e Configuracoes (acessa Contador e Impressoras) |
 | Vendedor | Vendas, clientes, produtos, OS e historico |
 | Caixa | PDV, caixa, clientes e historico |
 

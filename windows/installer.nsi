@@ -65,6 +65,8 @@ Section "Instalar"
   File /r "app/produtos/*.*"
   SetOutPath "$INSTDIR\app\backup"
   File /r "app/backup/*.*"
+  SetOutPath "$INSTDIR\app\contador"
+  File /r "app/contador/*.*"
   SetOutPath "$INSTDIR\app\node_modules"
   File /r "app/node_modules/*.*"
 
