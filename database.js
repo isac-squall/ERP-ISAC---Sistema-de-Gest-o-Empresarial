@@ -265,10 +265,13 @@ ensureColumn('usuarios', 'data_nascimento', 'TEXT');
 ensureColumn('usuarios', 'cpf', 'TEXT');
 ensureColumn('usuarios', 'tipo_pessoa', "TEXT DEFAULT 'PF'");
 
+const PAGINAS_CONTADOR = [
+  'contador-nfe', 'contador-compras', 'contador-xml', 'contador-extrato', 'contador-sped'
+];
 const PAGINAS_TODAS = [
   'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
   'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
-  'relatorio', 'backup', 'impressoras', 'configuracoes', 'manual'
+  'relatorio', ...PAGINAS_CONTADOR, 'backup', 'impressoras', 'configuracoes', 'manual'
 ];
 const PERFIS_PADRAO = [
   {
@@ -281,7 +284,8 @@ const PERFIS_PADRAO = [
     descricao: 'Gestao operacional sem usuarios e configuracoes',
     permissoes: [
       'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
-      'ordens-servico', 'fornecedores', 'historico-vendas', 'relatorio', 'impressoras', 'manual'
+      'ordens-servico', 'fornecedores', 'historico-vendas', 'relatorio',
+      ...PAGINAS_CONTADOR, 'impressoras', 'manual'
     ]
   },
   {
@@ -316,18 +320,35 @@ if (adminPerfil) {
     if (i >= 0) perms.splice(i, 0, 'impressoras');
     else perms.push('impressoras');
   }
+  for (const k of PAGINAS_CONTADOR) {
+    if (!perms.includes(k)) {
+      const i = perms.indexOf('backup');
+      if (i >= 0) perms.splice(i, 0, k);
+      else perms.push(k);
+    }
+  }
   db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), adminPerfil.id);
 }
 const gerentePerfil = db.prepare("SELECT id, permissoes FROM perfis WHERE nome = 'Gerente'").get();
 if (gerentePerfil) {
   let perms = [];
   try { perms = JSON.parse(gerentePerfil.permissoes || '[]'); } catch {}
+  let dirty = false;
   if (!perms.includes('impressoras')) {
     const i = perms.indexOf('manual');
     if (i >= 0) perms.splice(i, 0, 'impressoras');
     else perms.push('impressoras');
-    db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), gerentePerfil.id);
+    dirty = true;
   }
+  for (const k of PAGINAS_CONTADOR) {
+    if (!perms.includes(k)) {
+      const i = perms.indexOf('impressoras');
+      if (i >= 0) perms.splice(i, 0, k);
+      else perms.push(k);
+      dirty = true;
+    }
+  }
+  if (dirty) db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), gerentePerfil.id);
 }
 db.prepare("UPDATE usuarios SET cargo = 'Caixa' WHERE cargo IN ('Operador','Funcionario')").run();
 

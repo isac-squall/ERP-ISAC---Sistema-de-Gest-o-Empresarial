@@ -140,6 +140,18 @@ const API = {
 
   relatorio: (p) => API.request(`/relatorio?${new URLSearchParams(p || {})}`),
 
+  contador: {
+    nfe: (p) => API.request(`/contador/nfe?${new URLSearchParams(p || {})}`),
+    xmlZipUrl: (p) => `/api/contador/nfe/xml.zip?${new URLSearchParams(p || {})}`,
+    compras: (p) => API.request(`/contador/compras?${new URLSearchParams(p || {})}`),
+    comprasCsvUrl: (p) => `/api/contador/compras.csv?${new URLSearchParams(p || {})}`,
+    extrato: (p) => API.request(`/contador/extrato?${new URLSearchParams(p || {})}`),
+    extratoTxtUrl: (p) => `/api/contador/extrato.txt?${new URLSearchParams(p || {})}`,
+    extratoCsvUrl: (p) => `/api/contador/extrato.csv?${new URLSearchParams(p || {})}`,
+    sped: (p) => API.request(`/contador/sped?${new URLSearchParams(p || {})}`),
+    spedTxtUrl: (p) => `/api/contador/sped.txt?${new URLSearchParams(p || {})}`
+  },
+
   impressoras: {
     list: (p) => API.request(`/impressoras?${new URLSearchParams(p || {})}`),
     opcoes: () => API.request('/impressoras/opcoes'),

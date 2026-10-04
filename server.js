@@ -5,6 +5,7 @@ const db = require('./database');
 const nfce = require('./nfce');
 const produtosIo = require('./produtos/io');
 const backupMod = require('./backup');
+const contador = require('./contador');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -54,7 +55,8 @@ function permissoesDoCargo(cargo) {
     return [
       'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
       'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
-      'relatorio', 'backup', 'impressoras', 'configuracoes', 'manual'
+      'relatorio', 'contador-nfe', 'contador-compras', 'contador-xml',
+      'contador-extrato', 'contador-sped', 'backup', 'impressoras', 'configuracoes', 'manual'
     ];
   }
   return ['dashboard', 'manual'];
@@ -806,6 +808,11 @@ const PERMISSOES_DISPONIVEIS = [
   { key: 'fornecedores', label: 'Fornecedores' },
   { key: 'historico-vendas', label: 'Historico de vendas' },
   { key: 'relatorio', label: 'Relatorio geral' },
+  { key: 'contador-nfe', label: 'Listar NFe emitidas' },
+  { key: 'contador-compras', label: 'Relatorio de Compras' },
+  { key: 'contador-xml', label: 'Download XML NFes' },
+  { key: 'contador-extrato', label: 'Download extrato' },
+  { key: 'contador-sped', label: 'SPED Fiscal' },
   { key: 'backup', label: 'Gerenciar Backup' },
   { key: 'impressoras', label: 'Impressoras adicionadas' },
   { key: 'configuracoes', label: 'Configuracoes' },
@@ -1626,6 +1633,70 @@ app.delete('/api/backups/:id', (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message || 'Falha ao excluir backup' });
   }
+});
+
+// ============ CONTADOR ============
+function sendAnexo(res, nome, body, tipo) {
+  res.setHeader('Content-Type', tipo);
+  res.setHeader('Content-Disposition', `attachment; filename="${nome}"`);
+  res.send(body);
+}
+
+app.get('/api/contador/nfe', (req, res) => {
+  try { res.json(contador.listarNfe(req.query)); }
+  catch (err) { res.status(400).json({ error: err.message || 'Falha ao listar NFe' }); }
+});
+
+app.get('/api/contador/nfe/xml.zip', (req, res) => {
+  try {
+    const z = contador.zipXmlNfe(req.query);
+    sendAnexo(res, z.nome, z.buf, 'application/zip');
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao gerar ZIP de XMLs' });
+  }
+});
+
+app.get('/api/contador/compras', (req, res) => {
+  try { res.json(contador.listarCompras(req.query)); }
+  catch (err) { res.status(400).json({ error: err.message || 'Falha no relatorio de compras' }); }
+});
+
+app.get('/api/contador/compras.csv', (req, res) => {
+  try {
+    const c = contador.comprasCsv(req.query);
+    sendAnexo(res, c.nome, c.texto, 'text/csv; charset=utf-8');
+  } catch (err) { res.status(400).json({ error: err.message || 'Falha ao exportar compras' }); }
+});
+
+app.get('/api/contador/extrato', (req, res) => {
+  try { res.json(contador.montarExtrato(req.query)); }
+  catch (err) { res.status(400).json({ error: err.message || 'Falha ao montar extrato' }); }
+});
+
+app.get('/api/contador/extrato.txt', (req, res) => {
+  try {
+    const e = contador.extratoTxt(req.query);
+    sendAnexo(res, e.nome, e.texto, 'text/plain; charset=utf-8');
+  } catch (err) { res.status(400).json({ error: err.message || 'Falha ao gerar extrato' }); }
+});
+
+app.get('/api/contador/extrato.csv', (req, res) => {
+  try {
+    const e = contador.extratoCsv(req.query);
+    sendAnexo(res, e.nome, e.texto, 'text/csv; charset=utf-8');
+  } catch (err) { res.status(400).json({ error: err.message || 'Falha ao gerar extrato CSV' }); }
+});
+
+app.get('/api/contador/sped', (req, res) => {
+  try { res.json(contador.spedPreview(req.query)); }
+  catch (err) { res.status(400).json({ error: err.message || 'Falha ao gerar SPED' }); }
+});
+
+app.get('/api/contador/sped.txt', (req, res) => {
+  try {
+    const s = contador.gerarSped(req.query);
+    sendAnexo(res, s.nome, s.texto, 'text/plain; charset=utf-8');
+  } catch (err) { res.status(400).json({ error: err.message || 'Falha ao gerar SPED Fiscal' }); }
 });
 
 const assistenteRag = require('./assistente/rag');

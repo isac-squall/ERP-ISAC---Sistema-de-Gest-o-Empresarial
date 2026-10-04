@@ -238,6 +238,83 @@ module.exports = [
     ]
   },
   {
+    id: 'contador-nfe',
+    modulo: 'Contador',
+    sessao: 'Listar NFe emitidas',
+    pagina: 'contador-nfe',
+    titulo: 'Listar NFC-e emitidas no periodo',
+    keywords: 'contador nfe nfce nota fiscal listar emitidas chave protocolo xml danfe',
+    conteudo: `O menu Contador (submenu recolhivel) reune as funcoes fiscais. Listar NFe emitidas mostra numero, serie, cliente, chave, status, valor e data. Filtros: Hoje, 7 dias, 30 dias, Mes, Ano ou de/ate, alem de status e busca. Acoes: ver a venda, imprimir DANFE e baixar o XML. Tambem gera ZIP com todos os XMLs do periodo. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Abra Contador no menu e clique em Listar NFe emitidas.',
+      'Escolha o periodo ou as datas.',
+      'Filtre por status se quiser so autorizadas.',
+      'Use o olho, a impressora ou o XML na linha.',
+      'Clique em Baixar XMLs (ZIP) para o pacote do periodo.'
+    ]
+  },
+  {
+    id: 'contador-compras',
+    modulo: 'Contador',
+    sessao: 'Relatorio de Compras',
+    pagina: 'contador-compras',
+    titulo: 'Relatorio de compras e despesas',
+    keywords: 'contador compras despesa fornecedor relatorio csv pagar',
+    conteudo: `Relatorio de Compras lista as despesas do Financeiro no periodo, com totais pago e pendente, ranking por fornecedor e por categoria. Exporta CSV (UTF-8 com BOM) para o contador. Os lancamentos vem de Contas a pagar.`,
+    passos: [
+      'Abra Contador > Relatorio de Compras.',
+      'Escolha o periodo.',
+      'Confira os cards e os rankings.',
+      'Clique em Exportar CSV se precisar enviar ao contador.'
+    ]
+  },
+  {
+    id: 'contador-xml',
+    modulo: 'Contador',
+    sessao: 'Download XML NFes',
+    pagina: 'contador-xml',
+    titulo: 'Baixar XML das NFC-e em ZIP',
+    keywords: 'contador xml nfe zip download arquivo sefaz',
+    conteudo: `Download XML NFes gera um ZIP com os arquivos XML das NFC-e do periodo (nome NFCe-chave.xml). So entram notas que ja possuem XML gravado. O download individual continua no historico de vendas.`,
+    passos: [
+      'Abra Contador > Download XML NFes.',
+      'Escolha o periodo.',
+      'Clique em Baixar ZIP.',
+      'Envie o arquivo ao contador.'
+    ]
+  },
+  {
+    id: 'contador-extrato',
+    modulo: 'Contador',
+    sessao: 'Download extrato',
+    pagina: 'contador-extrato',
+    titulo: 'Baixar extrato contabil',
+    keywords: 'contador extrato txt csv caixa vendas financeiro saldo',
+    conteudo: `Download extrato consolida vendas, movimentos de caixa e lancamentos financeiros do periodo. Baixa TXT (conferencia impressa) ou CSV (planilha). Os cards mostram vendas, receitas, despesas e saldo.`,
+    passos: [
+      'Abra Contador > Download extrato.',
+      'Escolha o periodo.',
+      'Confira o saldo.',
+      'Baixe TXT ou CSV.'
+    ]
+  },
+  {
+    id: 'contador-sped',
+    modulo: 'Contador',
+    sessao: 'SPED Fiscal',
+    pagina: 'contador-sped',
+    titulo: 'Gerar arquivo SPED Fiscal',
+    keywords: 'contador sped fiscal efd icms ipi pva sefaz bloco c100 c170',
+    conteudo: `SPED Fiscal gera o arquivo EFD ICMS/IPI (layout simplificado, blocos 0, C, H e 9) com as NFC-e do mes de apuracao. Inclui 0000/0005 da empresa, C100 por nota e C170 pelos itens. Preencha razao social, CNPJ, IE e endereco em Configuracoes / NFC-e antes de enviar ao PVA. O arquivo e texto no padrao |registro|campos|.`,
+    passos: [
+      'Preencha CNPJ, IE e endereco em Configuracoes.',
+      'Abra Contador > SPED Fiscal.',
+      'Escolha o mes de apuracao.',
+      'Clique em Baixar SPED.',
+      'Entregue o .txt ao contador para importar no PVA.'
+    ]
+  },
+  {
     id: 'backup',
     modulo: 'Gerenciar Backup',
     sessao: 'Copias de seguranca',
@@ -340,7 +417,7 @@ module.exports = [
     pagina: 'usuarios',
     titulo: 'O que cada nivel pode ver',
     keywords: 'permissao menu escondido cargo nivel acesso sem permissao',
-    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo, inclusive Gerenciar Backup e Impressoras. Gerente nao acessa Usuarios, Backup nem Configuracoes (acessa Impressoras). Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio, Backup, Impressoras nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Sem permissao a tela avisa Sem permissao para esta pagina.`,
+    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo, inclusive Contador, Gerenciar Backup e Impressoras. Gerente nao acessa Usuarios, Backup nem Configuracoes (acessa Contador e Impressoras). Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio, Contador, Backup, Impressoras nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Sem permissao a tela avisa Sem permissao para esta pagina.`,
     passos: [
       'Faca login com o usuario do cargo desejado.',
       'Confira o menu lateral filtrado.',

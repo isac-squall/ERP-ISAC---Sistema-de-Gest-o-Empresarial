@@ -57,6 +57,7 @@ cp -a "${ROOT}/assistente" "${STAGE}/ERP-ISAC/app/assistente"
 cp -a "${ROOT}/nfce" "${STAGE}/ERP-ISAC/app/nfce"
 cp -a "${ROOT}/produtos" "${STAGE}/ERP-ISAC/app/produtos"
 cp -a "${ROOT}/backup" "${STAGE}/ERP-ISAC/app/backup"
+cp -a "${ROOT}/contador" "${STAGE}/ERP-ISAC/app/contador"
 
 echo "Copiando node_modules e binario Windows do SQLite..."
 rm -rf "${STAGE}/ERP-ISAC/app/node_modules"
