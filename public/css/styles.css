@@ -1108,6 +1108,95 @@ body {
 .nfce-qr { width: 120px; height: 120px; background: #fff; }
 .nfce-qr rect { fill: #000; }
 
+.licenca-lock {
+  position: fixed; inset: 0; z-index: 1400;
+  background: rgba(15, 23, 42, 0.72);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.licenca-lock-card {
+  background: var(--bg-card); border-radius: 16px; padding: 32px 28px;
+  max-width: 420px; width: 100%; text-align: center;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+}
+.licenca-lock-icon {
+  width: 56px; height: 56px; border-radius: 14px; margin: 0 auto 14px;
+  background: #fee2e2; color: #b91c1c;
+  display: flex; align-items: center; justify-content: center; font-size: 22px;
+}
+.licenca-lock-card h2 { font-size: 22px; margin-bottom: 8px; }
+.licenca-lock-card p { color: var(--text-muted); font-size: 14px; margin-bottom: 18px; }
+
+.licenca-modal { position: fixed; inset: 0; z-index: 1500; display: flex; align-items: center; justify-content: center; }
+.licenca-modal-overlay { position: absolute; inset: 0; background: rgba(15,23,42,0.45); }
+.licenca-modal-box {
+  position: relative; background: #fff; color: #0f172a;
+  width: 92%; max-width: 640px; border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(15,23,42,0.28); overflow: hidden;
+}
+.licenca-modal-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding: 18px 20px 8px;
+}
+.licenca-modal-brand { display: flex; gap: 12px; align-items: center; }
+.licenca-modal-ico {
+  width: 42px; height: 42px; border-radius: 12px;
+  background: #2563eb; color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 18px;
+}
+.licenca-modal-brand strong { display: block; font-size: 16px; }
+.licenca-modal-brand span { display: block; font-size: 12px; color: #64748b; }
+.licenca-modal-x {
+  background: none; border: none; font-size: 24px; color: #94a3b8; cursor: pointer; line-height: 1;
+}
+.licenca-modal-body { padding: 8px 20px 20px; }
+.licenca-banner {
+  display: flex; align-items: center; gap: 12px;
+  border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; font-weight: 700;
+}
+.licenca-banner.teste { background: #fff7d6; color: #8a5a00; }
+.licenca-banner.ativado { background: #dcfce7; color: #166534; }
+.licenca-banner.vencido, .licenca-banner.bloqueado { background: #fee2e2; color: #991b1b; }
+.licenca-banner .licenca-banner-ico {
+  width: 32px; height: 32px; border-radius: 50%; background: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.licenca-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.licenca-stat {
+  border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px;
+  background: #f8fafc;
+}
+.licenca-stat small {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: #64748b;
+}
+.licenca-stat strong { display: block; margin-top: 6px; font-size: 15px; }
+.licenca-ids {
+  border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px 16px; background: #f8fafc;
+}
+.licenca-ids h4 {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; margin-bottom: 12px;
+}
+.licenca-ids label { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: #64748b; margin: 8px 0 4px; }
+.licenca-ids input {
+  width: 100%; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 9px 10px; font-family: ui-monospace, monospace; font-size: 13px; background: #fff; color: #0f172a;
+}
+.licenca-activate { margin-top: 14px; }
+.licenca-activate label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.licenca-activate input {
+  width: 100%; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 10px 12px; font-family: ui-monospace, monospace; font-size: 13px;
+}
+.licenca-gerar { margin-top: 14px; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+.licenca-gerar summary { cursor: pointer; font-size: 13px; color: #64748b; }
+.licenca-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.licenca-motivo { font-size: 13px; color: #b91c1c; margin: 8px 0 0; }
+@media (max-width: 768px) {
+  .licenca-stats { grid-template-columns: 1fr; }
+}
+
 .print-area { display: none; }
 @media print {
   body * { visibility: hidden; }

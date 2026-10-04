@@ -401,13 +401,29 @@ module.exports = [
     sessao: 'Ferramentas',
     pagina: 'dashboard',
     titulo: 'Sino, tema, calculadora e tela cheia',
-    keywords: 'sino notificacao tema escuro claro calculadora tela cheia engrenagem',
-    conteudo: `No cabecalho: sino (notificacoes de estoque, OS pronta e contas atrasadas), engrenagem (configuracoes), interruptor (tema claro/escuro), calculadora e tela cheia. O nome do usuario abre o menu Sair.`,
+    keywords: 'sino notificacao tema escuro claro calculadora tela cheia engrenagem licenca computador ativar',
+    conteudo: `No cabecalho: sino (notificacoes de estoque, OS pronta e contas atrasadas), icone de computador (Informacoes do computador: status da licenca, BIOS, UUID e disco), engrenagem (configuracoes), interruptor (tema claro/escuro), calculadora e tela cheia. O nome do usuario abre o menu Sair.`,
     passos: [
       'Sino: ver alertas.',
+      'Icone de computador: status da licenca e IDs da maquina.',
       'Engrenagem: configuracoes.',
       'Interruptor: tema claro ou escuro.',
       'Calculadora e expandir: ferramentas rapidas.'
+    ]
+  },
+  {
+    id: 'licenca',
+    modulo: 'Licenca',
+    sessao: 'Mensalidade e ativacao',
+    pagina: 'dashboard',
+    titulo: 'Ativar a licenca da mensalidade',
+    keywords: 'licenca mensalidade teste ativar chave computador bios uuid disco bloqueado vencido erpISAC',
+    conteudo: `O ERP inicia em teste de 30 dias. O icone de computador no cabecalho abre Informacoes do computador: status (Teste/Ativado/Vencido), tempo restante, BIOS Serial, UUID e Disco Serial. A chave de ativacao tem o formato ERPISAC-AAAAMMDD-XXXX-XXXXXXXX e vale so para esta maquina. Se o teste ou a mensalidade vencer, o sistema bloqueia as telas e as APIs (HTTP 402) ate ativar. Login e o modal de licenca continuam liberados. O fornecedor gera a chave no proprio modal com a senha mestre. A Zona critica preserva a licenca.`,
+    passos: [
+      'Clique no icone de computador no cabecalho.',
+      'Confira status, tempo restante e os tres IDs da maquina.',
+      'Cole a chave de ativacao e clique em Ativar.',
+      'Se o sistema estiver bloqueado, use Informacoes do computador na tela de bloqueio.'
     ]
   },
   {

@@ -14,11 +14,19 @@ const API = {
     let data = {};
     try { data = text ? JSON.parse(text) : {}; }
     catch { throw new Error(res.ok ? 'Resposta inválida do servidor' : 'Erro na requisição'); }
+    if (res.status === 402 && typeof window.mostrarBloqueioLicenca === 'function') {
+      window.mostrarBloqueioLicenca(data.licenca || data);
+    }
     if (!res.ok) throw new Error(data.error || 'Erro na requisição');
     return data;
   },
 
   login: (email, senha) => API.request('/auth/login', { method: 'POST', body: { email, senha } }),
+  licenca: {
+    get: () => API.request('/licenca'),
+    ativar: (chave) => API.request('/licenca/ativar', { method: 'POST', body: { chave } }),
+    gerar: (d) => API.request('/licenca/gerar', { method: 'POST', body: d || {} })
+  },
   dashboard: () => API.request('/dashboard'),
   charts: (periodo) => API.request(`/dashboard/charts?periodo=${periodo || 'semana'}`),
   notificacoes: () => API.request('/notificacoes'),
