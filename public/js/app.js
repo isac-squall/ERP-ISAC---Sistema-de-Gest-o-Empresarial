@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   bindGlobalEvents();
   aplicarEmpresa();
+  checarLicenca();
 });
 
 function bindGlobalEvents() {
@@ -90,6 +91,10 @@ function bindGlobalEvents() {
   }
 
   document.getElementById('settings-btn').onclick = () => navigate('configuracoes');
+  document.getElementById('licenca-btn')?.addEventListener('click', () => abrirLicencaModal());
+  document.getElementById('licenca-close')?.addEventListener('click', fecharLicencaModal);
+  document.querySelector('.licenca-modal-overlay')?.addEventListener('click', fecharLicencaModal);
+  document.getElementById('licenca-lock-open')?.addEventListener('click', () => abrirLicencaModal());
 
   document.getElementById('notif-btn').onclick = async (e) => {
     e.stopPropagation();
@@ -179,7 +184,7 @@ function applyMenuPermissions() {
   document.getElementById('settings-btn')?.classList.toggle('hidden', !allowed.includes('configuracoes'));
 }
 
-function showApp() {
+async function showApp() {
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('user-name').textContent = currentUser.nome;
@@ -188,6 +193,8 @@ function showApp() {
   refreshNotificacoes();
   aplicarEmpresa();
   carregarImpressoraAtiva();
+  const st = await checarLicenca();
+  if (st && st.bloqueada) return;
   const start = canAccess('dashboard') ? 'dashboard' : (userPermissoes()[0] || 'manual');
   navigate(start);
 }
@@ -3971,6 +3978,7 @@ async function renderManual() {
         <li><strong>Relatório</strong> — Veja faturamento mensal, produtos mais vendidos e top clientes.</li>
         <li><strong>Gerenciar Backup</strong> — Realize, baixe, restaure ou exclua copias do banco. Verifique atualizacao do aplicativo.</li>
         <li><strong>Impressoras</strong> — Cadastre conexao (Wi-Fi, Bluetooth, USB), modo (termica ou jato de tinta) e largura (58mm, 80mm ou A4) para cupom e NFC-e.</li>
+        <li><strong>Licenca</strong> — Icone de computador no cabecalho: status da mensalidade, BIOS/UUID/disco e ativacao da chave. Teste de 30 dias; depois o sistema bloqueia.</li>
         <li><strong>Configurações</strong> — Personalize cupom, taxas de cartão, NFC-e e use a Zona critica para apagar o banco (a licenca e preservada).</li>
         <li><strong>Assistente IA</strong> — O botao azul no canto inferior direito responde duvidas identificando o modulo e a sessao.</li>
       </ol>
@@ -3979,6 +3987,7 @@ async function renderManual() {
       <h3>Atalhos do cabeçalho</h3>
       <ul class="manual-list">
         <li>Sino: notificações de estoque baixo, OS pronta e contas atrasadas.</li>
+        <li>Icone de computador: Informacoes do computador (status da licenca, BIOS, UUID e disco).</li>
         <li>Engrenagem: abre Configurações.</li>
         <li>Interruptor: tema claro/escuro.</li>
         <li>Calculadora e tela cheia: ferramentas rápidas.</li>
@@ -4054,6 +4063,149 @@ function bindTableEvents(pageKey, result, reloadFn) {
   document.getElementById('table-search').oninput = debounce((e) => {
     st.search = e.target.value; st.page = 1; reloadFn();
   }, 400);
+}
+
+let licencaCache = null;
+let licencaBloqueada = false;
+
+function licencaBanner(st) {
+  const modo = st.modo || (st.bloqueada ? 'bloqueado' : 'teste');
+  const map = {
+    teste: { cls: 'teste', ico: 'fa-exclamation', titulo: 'Periodo de teste' },
+    ativado: { cls: 'ativado', ico: 'fa-check', titulo: 'Licenca ativa' },
+    vencido: { cls: 'vencido', ico: 'fa-ban', titulo: 'Mensalidade vencida' },
+    bloqueado: { cls: 'bloqueado', ico: 'fa-lock', titulo: 'Sistema bloqueado' },
+    'outra-maquina': { cls: 'vencido', ico: 'fa-exclamation', titulo: 'Chave de outra maquina' }
+  };
+  const m = map[modo] || map.teste;
+  return `<div class="licenca-banner ${m.cls}"><span class="licenca-banner-ico"><i class="fas ${m.ico}"></i></span> ${m.titulo}</div>`;
+}
+
+function renderLicencaBody(st) {
+  const s = st || {};
+  return `
+    ${licencaBanner(s)}
+    <div class="licenca-stats">
+      <div class="licenca-stat"><small><i class="fas fa-cog"></i> STATUS</small><strong>${escapeHtml(s.status_label || '-')}</strong></div>
+      <div class="licenca-stat"><small><i class="fas fa-shield-alt"></i> MAQUINA</small><strong>${escapeHtml(s.maquina_label || '-')}</strong></div>
+      <div class="licenca-stat"><small><i class="fas fa-clock"></i> TEMPO</small><strong>${escapeHtml(s.tempo || '-')}</strong></div>
+    </div>
+    <div class="licenca-ids">
+      <h4><i class="fas fa-microchip"></i> Identificadores da maquina</h4>
+      <label>BIOS SERIAL</label><input readonly value="${escapeHtml(s.bios || '-')}">
+      <label>UUID</label><input readonly value="${escapeHtml(s.uuid || '-')}">
+      <label>DISCO SERIAL</label><input readonly value="${escapeHtml(s.disco || '-')}">
+    </div>
+    ${s.motivo ? `<p class="licenca-motivo">${escapeHtml(s.motivo)}</p>` : ''}
+    <div class="licenca-activate">
+      <label>Chave de ativacao (mensalidade)</label>
+      <input id="licenca-chave" placeholder="ERPISAC-AAAAMMDD-XXXX-XXXXXXXX" autocomplete="off">
+    </div>
+    <details class="licenca-gerar">
+      <summary>Gerar chave (fornecedor)</summary>
+      <div class="form-row" style="margin-top:10px">
+        <div class="form-group"><label>Senha mestre</label><input type="password" id="licenca-master" autocomplete="off"></div>
+        <div class="form-group"><label>Dias</label><input type="number" id="licenca-dias" min="1" max="3660" value="30"></div>
+      </div>
+      <button type="button" class="btn btn-outline" id="licenca-gerar">Gerar chave desta maquina</button>
+      <p class="muted" id="licenca-gerada" style="margin-top:8px"></p>
+    </details>
+    <div class="licenca-modal-actions">
+      <button type="button" class="btn btn-outline" id="licenca-verificar"><i class="fas fa-sync"></i> Verificar novamente</button>
+      ${s.bloqueada ? '' : '<button type="button" class="btn btn-outline" id="licenca-fechar-btn">Fechar</button>'}
+      <button type="button" class="btn btn-primary" id="licenca-ativar">Ativar</button>
+    </div>`;
+}
+
+function aplicarBloqueioLicenca(st) {
+  licencaCache = st || licencaCache;
+  licencaBloqueada = !!(st && st.bloqueada);
+  const lock = document.getElementById('licenca-lock');
+  const msg = document.getElementById('licenca-lock-msg');
+  if (!lock) return;
+  if (licencaBloqueada) {
+    if (msg) msg.textContent = st.motivo || 'Periodo de teste encerrado. Ative a licenca da mensalidade para continuar.';
+    lock.classList.remove('hidden');
+    document.getElementById('app')?.classList.add('hidden');
+    document.getElementById('ai-chat')?.classList.add('hidden');
+  } else {
+    lock.classList.add('hidden');
+  }
+}
+
+window.mostrarBloqueioLicenca = function (st) {
+  aplicarBloqueioLicenca(st);
+  abrirLicencaModal(st);
+};
+
+async function checarLicenca() {
+  try {
+    const st = await API.licenca.get();
+    aplicarBloqueioLicenca(st);
+    return st;
+  } catch {
+    return null;
+  }
+}
+
+async function abrirLicencaModal(st) {
+  const data = st || licencaCache || await checarLicenca();
+  licencaCache = data || licencaCache;
+  const box = document.getElementById('licenca-modal-body');
+  if (box) box.innerHTML = renderLicencaBody(licencaCache || {});
+  document.getElementById('licenca-modal')?.classList.remove('hidden');
+  document.getElementById('licenca-verificar')?.addEventListener('click', async () => {
+    const novo = await checarLicenca();
+    abrirLicencaModal(novo);
+  });
+  document.getElementById('licenca-fechar-btn')?.addEventListener('click', fecharLicencaModal);
+  document.getElementById('licenca-ativar')?.addEventListener('click', ativarLicencaAgora);
+  document.getElementById('licenca-gerar')?.addEventListener('click', gerarChaveLicenca);
+}
+
+async function gerarChaveLicenca() {
+  const master = document.getElementById('licenca-master')?.value || '';
+  const dias = document.getElementById('licenca-dias')?.value || 30;
+  const out = document.getElementById('licenca-gerada');
+  try {
+    const r = await API.licenca.gerar({
+      master,
+      dias,
+      bios: licencaCache?.bios,
+      uuid: licencaCache?.uuid,
+      disco: licencaCache?.disco
+    });
+    if (out) out.textContent = r.chave || '';
+    const input = document.getElementById('licenca-chave');
+    if (input) input.value = r.chave || '';
+    showToast('Chave gerada', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function fecharLicencaModal() {
+  if (licencaBloqueada) return;
+  document.getElementById('licenca-modal')?.classList.add('hidden');
+}
+
+async function ativarLicencaAgora() {
+  const chave = document.getElementById('licenca-chave')?.value || '';
+  if (!chave.trim()) { showToast('Informe a chave de ativacao', 'error'); return; }
+  try {
+    const st = await API.licenca.ativar(chave.trim());
+    licencaCache = st;
+    aplicarBloqueioLicenca(st);
+    showToast(st.message || 'Licenca ativada', 'success');
+    if (!st.bloqueada) {
+      document.getElementById('licenca-modal')?.classList.add('hidden');
+      if (currentUser && currentUser.id) showApp();
+    } else {
+      abrirLicencaModal(st);
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
 }
 
 function bindEntitySave(id, apiKey, rerender, transform) {

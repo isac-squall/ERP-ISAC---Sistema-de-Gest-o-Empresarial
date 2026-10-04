@@ -6,6 +6,7 @@ const nfce = require('./nfce');
 const produtosIo = require('./produtos/io');
 const backupMod = require('./backup');
 const contador = require('./contador');
+const licenca = require('./licenca');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,6 +20,42 @@ app.use(express.static(path.join(__dirname, 'public'), {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   }
 }));
+
+app.get('/api/licenca', (req, res) => {
+  try { res.json(licenca.publico()); }
+  catch (err) { res.status(500).json({ error: err.message || 'Falha ao ler licenca' }); }
+});
+
+app.post('/api/licenca/ativar', (req, res) => {
+  try {
+    const st = licenca.ativar(req.body?.chave);
+    res.json({ message: 'Licenca ativada', ...st });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao ativar licenca' });
+  }
+});
+
+app.post('/api/licenca/gerar', (req, res) => {
+  try {
+    const r = licenca.gerar(req.body || {});
+    res.json({ message: 'Chave gerada', ...r });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao gerar chave' });
+  }
+});
+
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api')) return next();
+  if (licenca.rotaLivre(req)) return next();
+  const st = licenca.publico();
+  if (st.bloqueada) {
+    return res.status(402).json({
+      error: st.motivo || 'Sistema bloqueado. Ative a licenca da mensalidade.',
+      licenca: st
+    });
+  }
+  next();
+});
 
 function paginate(query, params, page = 1, limit = 15, search = '') {
   const offset = (page - 1) * limit;

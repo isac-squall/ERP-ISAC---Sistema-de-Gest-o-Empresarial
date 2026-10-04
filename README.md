@@ -19,6 +19,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Gerenciar Backup** — Criar, listar, baixar, restaurar e excluir copias do banco; verificar atualizacao
 - **Impressoras** — Cadastro com conexao (Wi-Fi, Bluetooth, USB), modo (termica/jato de tinta) e largura (58mm, 80mm, A4)
 - **Configuracoes** — Cadastro da empresa (logo, nome, contatos, CNPJ), cupom, taxas, NFC-e e Zona critica
+- **Licenca** — Teste de 30 dias, IDs da maquina (BIOS / UUID / disco) e chave de mensalidade
 - **Manual** — Ajuda por modulo e assistente de duvidas no canto da tela
 
 ## Novidades
@@ -34,6 +35,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Gerenciar Backup: realizar backup completo (ZIP) ou so do banco, baixar, restaurar (com senha do admin) e excluir; verificar atualizacao do app
 - Impressoras: conexao Wi-Fi/Bluetooth/USB, modo termica ou jato de tinta, papel 58mm/80mm/A4, escala do cupom e NFC-e
 - Contador: listar NFC-e, relatorio de compras, ZIP de XMLs, extrato TXT/CSV e SPED Fiscal (EFD ICMS/IPI simplificado)
+- Licenca/mensalidade: icone de computador no cabecalho; periodo de teste de 30 dias; se vencer, o sistema bloqueia ate ativar a chave da maquina
 
 ## Produtos: importar e exportar
 
@@ -82,6 +84,19 @@ Menu **Contador** (submenu recolhivel; Administrador e Gerente).
 - **SPED Fiscal** — arquivo EFD ICMS/IPI (blocos 0, C, H e 9) do mes de apuracao
 
 Preencha CNPJ, IE e endereco em Configuracoes antes de gerar o SPED.
+
+## Licenca e mensalidade
+
+O icone de computador no cabecalho abre **Informacoes do computador**.
+
+- Periodo de **teste de 30 dias** a partir da primeira execucao
+- Status: Teste, Ativado, Vencido ou Bloqueado; tempo restante; maquina autorizada ou nao
+- Identificadores: BIOS Serial, UUID e Disco Serial (Windows via WMIC/CIM; Linux via DMI/sysfs)
+- Formato da chave: `ERPISAC-AAAAMMDD-XXXX-XXXXXXXX` (data de validade + trecho do hardware + assinatura)
+- Sem chave valida apos o teste, as APIs retornam 402 e a tela de bloqueio pede ativacao
+- Gerar chave (fornecedor): senha mestre `ERP_LICENCA_MASTER` (padrao `ISAC-LICENCA`) no proprio modal
+- Login, dados da empresa e rotas `/api/licenca*` continuam liberados com o sistema bloqueado
+- Zona critica preserva as chaves `licenca_*`
 
 ## Gerenciar Backup
 

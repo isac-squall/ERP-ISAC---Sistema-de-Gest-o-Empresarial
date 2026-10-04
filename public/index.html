@@ -5,10 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <title>ERP ISAC - Sistema de gestão empresarial</title>
-  <link rel="stylesheet" href="css/styles.css?v=15">
+  <link rel="stylesheet" href="css/styles.css?v=17">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
+  <div id="licenca-lock" class="licenca-lock hidden">
+    <div class="licenca-lock-card">
+      <div class="licenca-lock-icon"><i class="fas fa-lock"></i></div>
+      <h2>Sistema bloqueado</h2>
+      <p id="licenca-lock-msg">Periodo de teste encerrado. Ative a licenca da mensalidade para continuar.</p>
+      <button type="button" class="btn btn-primary" id="licenca-lock-open">Informacoes do computador</button>
+    </div>
+  </div>
+
+  <div id="licenca-modal" class="licenca-modal hidden">
+    <div class="licenca-modal-overlay"></div>
+    <div class="licenca-modal-box">
+      <div class="licenca-modal-head">
+        <div class="licenca-modal-brand">
+          <span class="licenca-modal-ico"><i class="fas fa-desktop"></i></span>
+          <div>
+            <strong>Informacoes do computador</strong>
+            <span>Status de ativacao e identificacao da maquina</span>
+          </div>
+        </div>
+        <button type="button" class="licenca-modal-x" id="licenca-close" title="Fechar">&times;</button>
+      </div>
+      <div class="licenca-modal-body" id="licenca-modal-body"></div>
+    </div>
+  </div>
+
   <!-- Login -->
   <div id="login-screen" class="login-screen">
     <div class="login-box">
@@ -127,6 +153,7 @@
             <span id="notif-badge" class="notif-badge hidden">0</span>
           </button>
           <div id="notif-panel" class="notif-panel hidden"></div>
+          <button class="header-btn" id="licenca-btn" title="Informacoes do computador"><i class="fas fa-desktop"></i></button>
           <button class="header-btn" id="settings-btn" title="Configurações"><i class="fas fa-cog"></i></button>
           <label class="theme-toggle" title="Modo escuro/claro">
             <input type="checkbox" id="theme-switch">
@@ -205,7 +232,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-  <script src="js/api.js?v=15"></script>
-  <script src="js/app.js?v=15"></script>
+  <script src="js/api.js?v=17"></script>
+  <script src="js/app.js?v=17"></script>
 </body>
 </html>
