@@ -114,6 +114,8 @@ function bindGlobalEvents() {
     else document.exitFullscreen();
   };
 
+  bindProdutoFotoZoom();
+
   document.getElementById('calc-btn').onclick = () =>
     document.getElementById('calculator').classList.toggle('hidden');
   document.getElementById('calc-close').onclick = () =>
@@ -639,8 +641,42 @@ async function renderProdutos() {
   document.getElementById('produtos-exportar').onclick = () => showProdutosExportar();
 }
 
+function bindProdutoFotoZoom() {
+  const tip = document.getElementById('produto-foto-tip');
+  if (!tip || tip.dataset.ready) return;
+  tip.dataset.ready = '1';
+  document.addEventListener('mouseover', (e) => {
+    const img = e.target.closest?.('.produto-foto');
+    if (!img || img.classList.contains('produto-foto-placeholder') || img.tagName !== 'IMG') return;
+    tip.src = img.src;
+    tip.classList.add('show');
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!tip.classList.contains('show')) return;
+    const pad = 16;
+    const size = 220;
+    let left = e.clientX + pad;
+    let top = e.clientY - size / 2;
+    if (left + size > window.innerWidth - 8) left = e.clientX - size - pad;
+    if (top < 8) top = 8;
+    if (top + size > window.innerHeight - 8) top = window.innerHeight - size - 8;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+  });
+  document.addEventListener('mouseout', (e) => {
+    const img = e.target.closest?.('.produto-foto');
+    if (!img) return;
+    const next = e.relatedTarget;
+    if (next && (next === img || img.contains(next))) return;
+    tip.classList.remove('show');
+  });
+}
+
 function produtoFotoHtml(p) {
-  if (p.foto) return `<img class="produto-foto" src="${escapeHtml(p.foto)}" alt="">`;
+  if (p.foto) {
+    const src = escapeHtml(p.foto);
+    return `<span class="produto-foto-wrap"><img class="produto-foto" src="${src}" alt=""></span>`;
+  }
   return `<div class="produto-foto produto-foto-placeholder"><i class="fas fa-cube"></i></div>`;
 }
 
