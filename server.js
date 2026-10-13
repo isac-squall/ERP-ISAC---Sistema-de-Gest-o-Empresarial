@@ -305,6 +305,7 @@ app.post('/api/config/apagar-banco', (req, res) => {
     perguntar_quantidade: '1',
     taxa_credito: '0',
     taxa_debito: '0',
+    taxa_pix: '0',
     nfce_habilitada: '0',
     nfce_ambiente: 'homologacao',
     nfce_uf: 'RN',
@@ -884,6 +885,150 @@ app.put('/api/perfis/:id', (req, res) => {
   res.json({ message: 'Perfil atualizado' });
 });
 
+function hojeIso() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function isFiado(forma) {
+  const f = String(forma || '').toLowerCase();
+  return f.includes('fiado') || f.includes('credi');
+}
+
+function taxaOperadora(cfg, forma, bruto) {
+  const f = String(forma || '');
+  let pct = 0;
+  if (f === 'Cartão Crédito' || f === 'Cartão') pct = parseFloat(cfg.taxa_credito || 0);
+  else if (f === 'Cartão Débito') pct = parseFloat(cfg.taxa_debito || 0);
+  else if (f.toUpperCase() === 'PIX') pct = parseFloat(cfg.taxa_pix || 0);
+  const taxa = Math.round(Math.max(0, (Number(bruto) || 0) * (pct / 100)) * 100) / 100;
+  const liquido = Math.round(Math.max(0, (Number(bruto) || 0) - taxa) * 100) / 100;
+  return { taxa, liquido, pct };
+}
+
+function clienteInadimplente(clienteId) {
+  if (!clienteId) return { qtd: 0, total: 0, titulos: [] };
+  const titulos = db.prepare(`
+    SELECT id, descricao, valor, data_vencimento FROM financeiro
+    WHERE cliente_id = ? AND tipo = 'Receita' AND status = 'Pendente'
+      AND data_vencimento IS NOT NULL AND date(data_vencimento) < date('now','localtime')
+    ORDER BY data_vencimento
+  `).all(clienteId);
+  const total = titulos.reduce((s, t) => s + (Number(t.valor) || 0), 0);
+  return { qtd: titulos.length, total, titulos };
+}
+
+function inserirFinanceiro(d) {
+  const hoje = hojeIso();
+  return db.prepare(`INSERT INTO financeiro
+    (tipo, categoria, descricao, valor, data_vencimento, data_pagamento, status, cliente_id, fornecedor_id,
+     venda_id, caixa_id, origem, valor_bruto, valor_taxa, valor_liquido, forma_pagamento, parcelas)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    d.tipo, d.categoria || '', d.descricao || '', Number(d.valor) || 0,
+    d.data_vencimento || hoje, d.data_pagamento || null, d.status || 'Pendente',
+    d.cliente_id || null, d.fornecedor_id || null, d.venda_id || null, d.caixa_id || null,
+    d.origem || null, Number(d.valor_bruto) || 0, Number(d.valor_taxa) || 0,
+    Number(d.valor_liquido != null ? d.valor_liquido : d.valor) || 0,
+    d.forma_pagamento || null, d.parcelas || 1
+  );
+}
+
+function estornarFinanceiroVenda(vendaId, motivo) {
+  const rows = db.prepare("SELECT * FROM financeiro WHERE venda_id = ? AND status != 'Cancelado'").all(vendaId);
+  for (const row of rows) {
+    if (row.status === 'Pendente') {
+      db.prepare("UPDATE financeiro SET status='Cancelado', descricao=? WHERE id=?")
+        .run(`${row.descricao || ''} (cancelado)`.trim(), row.id);
+    } else {
+      inserirFinanceiro({
+        tipo: row.tipo === 'Receita' ? 'Despesa' : 'Receita',
+        categoria: row.tipo === 'Receita' ? 'Estorno venda' : 'Estorno taxa',
+        descricao: motivo || `Estorno ${row.descricao || ''}`.trim(),
+        valor: row.valor,
+        data_vencimento: hojeIso(),
+        data_pagamento: hojeIso(),
+        status: 'Pago',
+        cliente_id: row.cliente_id,
+        venda_id: vendaId,
+        origem: 'venda-estorno',
+        valor_bruto: row.valor_bruto,
+        valor_taxa: row.valor_taxa,
+        valor_liquido: row.valor_liquido,
+        forma_pagamento: row.forma_pagamento
+      });
+    }
+  }
+}
+
+function lancarVendaNoFinanceiro({ vendaId, clienteId, clienteNome, forma, bruto, taxa, liquido, parcelas }) {
+  const hoje = hojeIso();
+  const fiado = isFiado(forma);
+  const nParcelas = Math.max(1, Number(parcelas) || 1);
+  if (fiado) {
+    const valorParcela = bruto / nParcelas;
+    for (let i = 0; i < nParcelas; i++) {
+      const venc = new Date();
+      venc.setDate(venc.getDate() + (30 * (i + 1)));
+      const p = n => String(n).padStart(2, '0');
+      const dataVenc = `${venc.getFullYear()}-${p(venc.getMonth() + 1)}-${p(venc.getDate())}`;
+      inserirFinanceiro({
+        tipo: 'Receita',
+        categoria: 'Crediario',
+        descricao: nParcelas > 1
+          ? `Venda #${vendaId} fiado ${i + 1}/${nParcelas} · ${clienteNome}`
+          : `Venda #${vendaId} fiado · ${clienteNome}`,
+        valor: Math.round(valorParcela * 100) / 100,
+        data_vencimento: dataVenc,
+        status: 'Pendente',
+        cliente_id: clienteId,
+        venda_id: vendaId,
+        origem: 'venda',
+        valor_bruto: bruto,
+        valor_taxa: 0,
+        valor_liquido: bruto,
+        forma_pagamento: forma,
+        parcelas: nParcelas
+      });
+    }
+    return;
+  }
+  inserirFinanceiro({
+    tipo: 'Receita',
+    categoria: 'Venda',
+    descricao: `Venda #${vendaId} · ${forma} · ${clienteNome}`,
+    valor: liquido,
+    data_vencimento: hoje,
+    data_pagamento: hoje,
+    status: 'Pago',
+    cliente_id: clienteId || null,
+    venda_id: vendaId,
+    origem: 'venda',
+    valor_bruto: bruto,
+    valor_taxa: taxa,
+    valor_liquido: liquido,
+    forma_pagamento: forma,
+    parcelas: nParcelas
+  });
+  if (taxa > 0) {
+    inserirFinanceiro({
+      tipo: 'Despesa',
+      categoria: 'Taxa operadora',
+      descricao: `Taxa ${forma} venda #${vendaId}`,
+      valor: taxa,
+      data_vencimento: hoje,
+      data_pagamento: hoje,
+      status: 'Pago',
+      venda_id: vendaId,
+      origem: 'taxa-operadora',
+      valor_bruto: bruto,
+      valor_taxa: taxa,
+      valor_liquido: taxa,
+      forma_pagamento: forma
+    });
+  }
+}
+
 // ============ CAIXA ============
 function caixaSessaoDesde() {
   const status = db.prepare('SELECT aberto, aberto_em FROM caixa_status WHERE id = 1').get();
@@ -992,23 +1137,58 @@ app.post('/api/caixa/movimentos', (req, res) => {
   if (!['Entrada', 'Saída'].includes(tipo)) return res.status(400).json({ error: 'Tipo inválido' });
   const status = db.prepare('SELECT aberto FROM caixa_status WHERE id = 1').get();
   if (!status?.aberto) return res.status(400).json({ error: 'Caixa fechado. Abra o caixa para registrar movimentos.' });
-  const result = db.prepare('INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, usuario_id) VALUES (?,?,?,?,?)')
-    .run(tipo, descricao || tipo, Number(valor) || 0, forma_pagamento || null, usuario_id || null);
-  res.json({ id: result.lastInsertRowid });
+  const txn = db.transaction(() => {
+    const result = db.prepare('INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, usuario_id) VALUES (?,?,?,?,?)')
+      .run(tipo, descricao || tipo, Number(valor) || 0, forma_pagamento || null, usuario_id || null);
+    const caixaId = result.lastInsertRowid;
+    const hoje = hojeIso();
+    const isEntrada = tipo === 'Entrada';
+    const fin = inserirFinanceiro({
+      tipo: isEntrada ? 'Receita' : 'Despesa',
+      categoria: isEntrada ? 'Suprimento' : 'Sangria',
+      descricao: descricao || (isEntrada ? 'Suprimento de caixa' : 'Sangria'),
+      valor: Number(valor) || 0,
+      data_vencimento: hoje,
+      data_pagamento: hoje,
+      status: 'Pago',
+      caixa_id: caixaId,
+      origem: isEntrada ? 'suprimento' : 'sangria',
+      valor_bruto: Number(valor) || 0,
+      valor_liquido: Number(valor) || 0,
+      forma_pagamento: forma_pagamento || 'Dinheiro'
+    });
+    db.prepare('UPDATE caixa SET financeiro_id=? WHERE id=?').run(fin.lastInsertRowid, caixaId);
+    return caixaId;
+  });
+  res.json({ id: txn() });
 });
 
 app.put('/api/caixa/movimentos/:id', (req, res) => {
   const movimento = db.prepare('SELECT * FROM caixa WHERE id = ?').get(req.params.id);
   if (!movimento) return res.status(404).json({ error: 'Movimento não encontrado' });
   const { descricao, valor, forma_pagamento, cliente_nome } = req.body;
-  db.prepare('UPDATE caixa SET descricao=?, valor=?, forma_pagamento=?, cliente_nome=? WHERE id=?')
-    .run(
-      descricao ?? movimento.descricao,
-      valor != null ? Number(valor) : movimento.valor,
-      forma_pagamento ?? movimento.forma_pagamento,
-      cliente_nome ?? movimento.cliente_nome,
-      req.params.id
-    );
+  const txn = db.transaction(() => {
+    db.prepare('UPDATE caixa SET descricao=?, valor=?, forma_pagamento=?, cliente_nome=? WHERE id=?')
+      .run(
+        descricao ?? movimento.descricao,
+        valor != null ? Number(valor) : movimento.valor,
+        forma_pagamento ?? movimento.forma_pagamento,
+        cliente_nome ?? movimento.cliente_nome,
+        req.params.id
+      );
+    if (movimento.financeiro_id) {
+      db.prepare('UPDATE financeiro SET descricao=?, valor=?, valor_bruto=?, valor_liquido=?, forma_pagamento=? WHERE id=?')
+        .run(
+          descricao ?? movimento.descricao,
+          valor != null ? Number(valor) : movimento.valor,
+          valor != null ? Number(valor) : movimento.valor,
+          valor != null ? Number(valor) : movimento.valor,
+          forma_pagamento ?? movimento.forma_pagamento,
+          movimento.financeiro_id
+        );
+    }
+  });
+  txn();
   res.json({ message: 'Movimento atualizado' });
 });
 
@@ -1025,6 +1205,13 @@ app.delete('/api/caixa/movimentos/:id', (req, res) => {
         }
         db.prepare("UPDATE vendas SET status='Cancelada' WHERE id=?").run(venda.id);
       }
+    }
+    if (movimento.financeiro_id) {
+      db.prepare('DELETE FROM financeiro WHERE id = ?').run(movimento.financeiro_id);
+    } else if (movimento.venda_id) {
+      estornarFinanceiroVenda(movimento.venda_id, `Estorno movimento caixa #${movimento.id}`);
+    } else {
+      db.prepare("DELETE FROM financeiro WHERE caixa_id = ? AND origem IN ('sangria','suprimento')").run(movimento.id);
     }
     db.prepare('DELETE FROM caixa WHERE id = ?').run(req.params.id);
   });
@@ -1051,6 +1238,8 @@ app.post('/api/vendas', async (req, res) => {
   const status = db.prepare('SELECT aberto FROM caixa_status WHERE id = 1').get();
   if (!status?.aberto) return res.status(400).json({ error: 'Caixa fechado. Abra o caixa para realizar vendas.' });
   if (!itens?.length) return res.status(400).json({ error: 'Adicione itens à venda' });
+  const fiado = isFiado(forma_pagamento);
+  if (fiado && !cliente_id) return res.status(400).json({ error: 'Selecione um cliente cadastrado para venda fiado.' });
 
   const cfg = Object.fromEntries(db.prepare('SELECT chave, valor FROM config').all().map(r => [r.chave, r.valor]));
   const clienteNome = cliente_id
@@ -1058,7 +1247,7 @@ app.post('/api/vendas', async (req, res) => {
     : 'Visitante';
   const insertVenda = db.prepare(`INSERT INTO vendas (cliente_id, total, desconto, forma_pagamento, usuario_id, valor_recebido, troco, parcelas, taxa_cartao)
     VALUES (?,?,?,?,?,?,?,?,?)`);
-  const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, descricao, quantidade, preco_unitario, subtotal, os_id) VALUES (?,?,?,?,?,?,?)');
+  const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, descricao, quantidade, preco_unitario, subtotal, os_id, preco_custo) VALUES (?,?,?,?,?,?,?,?)');
   const updateEstoque = db.prepare('UPDATE produtos SET estoque = estoque - ? WHERE id = ? AND estoque >= ?');
   const insertCaixa = db.prepare(`INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, cliente_nome, desconto, desconto_percent, venda_id, usuario_id)
     VALUES (?,?,?,?,?,?,?,?,?)`);
@@ -1070,24 +1259,27 @@ app.post('/api/vendas', async (req, res) => {
       subtotal += item.quantidade * item.preco_unitario;
     }
     const desc = desconto || 0;
-    let total = Math.max(0, subtotal - desc);
-    let taxa = 0;
-    if (forma_pagamento === 'Cartão Crédito') taxa = total * (parseFloat(cfg.taxa_credito || 0) / 100);
-    if (forma_pagamento === 'Cartão Débito') taxa = total * (parseFloat(cfg.taxa_debito || 0) / 100);
-    total += taxa;
-    const recebido = valor_recebido != null ? Number(valor_recebido) : total;
-    const troco = Math.max(0, recebido - total);
+    const total = Math.max(0, subtotal - desc);
+    const op = taxaOperadora(cfg, forma_pagamento, total);
+    const taxa = fiado ? 0 : op.taxa;
+    const liquido = fiado ? total : op.liquido;
+    const recebido = fiado ? 0 : (valor_recebido != null ? Number(valor_recebido) : total);
+    const troco = fiado ? 0 : Math.max(0, recebido - total);
     const qtdParcelas = parcelas || 1;
     const venda = insertVenda.run(cliente_id || null, total, desc, forma_pagamento, usuario_id, recebido, troco, qtdParcelas, taxa);
     for (const item of itens) {
       const quantidade = Number(item.quantidade) || 1;
       const preco = Number(item.preco_unitario) || 0;
+      let custo = Number(item.preco_custo);
+      if ((!custo || Number.isNaN(custo)) && item.produto_id) {
+        custo = Number(db.prepare('SELECT preco_custo FROM produtos WHERE id = ?').get(item.produto_id)?.preco_custo) || 0;
+      }
       if (item.produto_id) {
         const ok = updateEstoque.run(quantidade, item.produto_id, quantidade);
         if (ok.changes === 0) throw new Error('Estoque insuficiente');
       }
       insertItem.run(venda.lastInsertRowid, item.produto_id || null, item.descricao || null,
-        quantidade, preco, quantidade * preco, item.os_id || null);
+        quantidade, preco, quantidade * preco, item.os_id || null, custo || 0);
       if (item.os_id) {
         const os = db.prepare('SELECT id, status FROM ordens_servico WHERE id = ?').get(item.os_id);
         if (!os) throw new Error(`Ordem de serviço #${item.os_id} não encontrada`);
@@ -1097,8 +1289,20 @@ app.post('/api/vendas', async (req, res) => {
         marcarOS.run(item.os_id);
       }
     }
-    insertCaixa.run('Venda realizada', 'Venda', total, forma_pagamento, clienteNome, desc,
-      subtotal > 0 ? (desc / subtotal) * 100 : 0, venda.lastInsertRowid, usuario_id);
+    if (!fiado) {
+      insertCaixa.run('Venda realizada', 'Venda', total, forma_pagamento, clienteNome, desc,
+        subtotal > 0 ? (desc / subtotal) * 100 : 0, venda.lastInsertRowid, usuario_id);
+    }
+    lancarVendaNoFinanceiro({
+      vendaId: venda.lastInsertRowid,
+      clienteId: cliente_id || null,
+      clienteNome,
+      forma: forma_pagamento,
+      bruto: total,
+      taxa,
+      liquido,
+      parcelas: qtdParcelas
+    });
     return venda.lastInsertRowid;
   });
 
@@ -1178,8 +1382,11 @@ app.post('/api/vendas/:id/cancelar', async (req, res) => {
       }
     }
     db.prepare("UPDATE vendas SET status='Cancelada' WHERE id=?").run(req.params.id);
-    db.prepare('INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, usuario_id) VALUES (?,?,?,?,?)')
-      .run('Saída', `Cancelamento venda #${req.params.id}`, venda.total, venda.forma_pagamento, venda.usuario_id);
+    if (!isFiado(venda.forma_pagamento)) {
+      db.prepare('INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, usuario_id) VALUES (?,?,?,?,?)')
+        .run('Saída', `Cancelamento venda #${req.params.id}`, venda.total, venda.forma_pagamento, venda.usuario_id);
+    }
+    estornarFinanceiroVenda(venda.id, `Estorno venda #${venda.id}`);
   });
   txn();
   res.json({ message: 'Venda cancelada' });
@@ -1228,6 +1435,10 @@ app.delete('/api/orcamentos/:id', (req, res) => {
 });
 
 // ============ FINANCEIRO ============
+app.get('/api/financeiro/cliente/:id/inadimplencia', (req, res) => {
+  res.json(clienteInadimplente(Number(req.params.id)));
+});
+
 app.get('/api/financeiro', (req, res) => {
   const { search = '', page = 1, limit = 15, tipo } = req.query;
   let query = `SELECT f.*, c.nome as cliente_nome, fo.nome as fornecedor_nome FROM financeiro f

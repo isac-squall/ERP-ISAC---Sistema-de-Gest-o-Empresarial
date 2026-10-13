@@ -49,6 +49,7 @@ function tMed(forma) {
   if (f.includes('crédito') || f.includes('credito')) return '03';
   if (f.includes('débito') || f.includes('debito')) return '04';
   if (f.includes('pix')) return '17';
+  if (f.includes('fiado') || f.includes('credi')) return '05';
   if (f.includes('vale') || f.includes('refeição') || f.includes('refeicao')) return '10';
   return '99';
 }

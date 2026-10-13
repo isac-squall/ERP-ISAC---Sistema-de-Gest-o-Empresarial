@@ -36,6 +36,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Impressoras: conexao Wi-Fi/Bluetooth/USB, modo termica ou jato de tinta, papel 58mm/80mm/A4, escala do cupom e NFC-e
 - Contador: listar NFC-e, relatorio de compras, ZIP de XMLs, extrato TXT/CSV e SPED Fiscal (EFD ICMS/IPI simplificado)
 - Licenca/mensalidade: icone de computador no cabecalho; periodo de teste de 30 dias; se vencer, o sistema bloqueia ate ativar a chave da maquina
+- PDV + Financeiro: baixa automatica da venda, taxas liquidas de cartao/PIX, Fiado com alerta de inadimplencia, sangria/suprimento no Financeiro e margem no PDV
 
 ## Produtos: importar e exportar
 
@@ -55,7 +56,12 @@ O caixa precisa estar aberto. A venda comeca vazia (Caixa livre).
 - Lupa **BUSCAR EM**: Produto (nome, codigo, SKU, ID), Categoria ou Ordem de servico
 - OS Entregue ou Cancelada nao entra no carrinho; a mesma OS nao pode ser adicionada duas vezes
 - Ao finalizar (F7), a OS vai para **Entregue**; se a venda for cancelada, volta para **Pronta para entrega**
-- Pagamentos: Dinheiro, Cartao Debito, Cartao Credito e PIX
+- Pagamentos: Dinheiro, Cartao Debito, Cartao Credito, PIX e Fiado
+- Venda a vista (Dinheiro/PIX/cartao) lanca Receita Pago no Financeiro; Fiado gera Contas a receber (parcela a cada 30 dias)
+- Taxas de credito, debito e PIX descontam o liquido no Financeiro (despesa Taxa operadora)
+- Cliente com titulos vencidos recebe alerta no PDV; Fiado exige confirmacao
+- Painel do PDV mostra margem estimada (preco menos custo)
+- Sangria e suprimento do Caixa alimentam Despesa/Receita no Financeiro em tempo real
 - Atalhos: F7 finalizar, F8 produto/servico, F6 historico, F3 cancelar aba, Ctrl+T / Ctrl+W abas
 - Se a NFC-e estiver habilitada, o F7 pode emitir a nota automaticamente
 

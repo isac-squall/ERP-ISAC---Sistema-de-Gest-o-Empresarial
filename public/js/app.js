@@ -1339,13 +1339,32 @@ function posSubtotal(tab = posTabAtual()) {
 
 function posDesconto(tab = posTabAtual()) { return Number(tab?.desconto) || 0; }
 
+function posIsFiado(forma) {
+  const f = String(forma || '').toLowerCase();
+  return f.includes('fiado') || f.includes('credi');
+}
+
+function posTaxaPct(forma) {
+  if (forma === 'Cartão Crédito' || forma === 'Cartão') return parseFloat(erpConfig.taxa_credito || 0) || 0;
+  if (forma === 'Cartão Débito') return parseFloat(erpConfig.taxa_debito || 0) || 0;
+  if (String(forma || '').toUpperCase() === 'PIX') return parseFloat(erpConfig.taxa_pix || 0) || 0;
+  return 0;
+}
+
 function posTotalComTaxa(tab, forma) {
   const subtotal = posSubtotal(tab);
-  let total = Math.max(0, subtotal - posDesconto(tab));
-  let taxa = 0;
-  if (forma === 'Cartão Crédito') taxa = total * (parseFloat(erpConfig.taxa_credito || 0) / 100);
-  if (forma === 'Cartão Débito') taxa = total * (parseFloat(erpConfig.taxa_debito || 0) / 100);
-  return { subtotal, desconto: posDesconto(tab), taxa, total: total + taxa };
+  const desconto = posDesconto(tab);
+  const bruto = Math.max(0, subtotal - desconto);
+  const taxa = posIsFiado(forma) ? 0 : Math.round(bruto * (posTaxaPct(forma) / 100) * 100) / 100;
+  return { subtotal, desconto, taxa, total: bruto, liquido: Math.round(Math.max(0, bruto - taxa) * 100) / 100 };
+}
+
+function posLucro(tab = posTabAtual()) {
+  return (tab?.itens || []).reduce((s, i) => {
+    const preco = Number(i.preco_unitario) || 0;
+    const custo = Number(i.preco_custo) || 0;
+    return s + i.quantidade * (preco - custo);
+  }, 0);
 }
 
 function salvarPosTabs() {
@@ -1465,6 +1484,11 @@ async function renderVendas() {
           <div class="pos-side-stat"><span>Itens</span><strong id="pos-itens">0</strong></div>
           <div class="pos-side-stat pos-side-total"><span>Total</span><strong id="pos-total">${formatCurrency(0)}</strong></div>
         </div>
+        <div class="pos-side-margin">
+          <span>Margem estimada</span>
+          <strong id="pos-margem">${formatCurrency(0)}</strong>
+        </div>
+        <div id="pos-inadimplencia-banner" class="pos-inadimplencia hidden"></div>
         <div class="pos-side-btns">
           <button class="pos-action pos-f7" id="pos-f7"><span>F7 - Finalizar venda</span></button>
           <button class="pos-action pos-f8" id="pos-f8"><span>F8 - Produto / serviço</span></button>
@@ -1689,7 +1713,9 @@ function posAdicionarItem(produto, quantidade) {
     if (qtd > produto.estoque) { showToast('Estoque insuficiente', 'error'); return; }
     tab.itens.push({
       produto_id: produto.id, nome: produto.nome, codigo: produto.codigo || '',
-      preco_unitario: Number(produto.preco) || 0, quantidade: qtd, estoque: produto.estoque
+      preco_unitario: Number(produto.preco) || 0,
+      preco_custo: Number(produto.preco_custo) || 0,
+      quantidade: qtd, estoque: produto.estoque
     });
   }
   salvarPosTabs();
@@ -1738,6 +1764,15 @@ function updatePosUI() {
   if (itensEl) itensEl.textContent = tab.itens.reduce((s, i) => s + i.quantidade, 0);
   const totalEl = document.getElementById('pos-total');
   if (totalEl) totalEl.textContent = formatCurrency(Math.max(0, posSubtotal(tab) - posDesconto(tab)));
+  const margemEl = document.getElementById('pos-margem');
+  if (margemEl) {
+    const lucro = posLucro(tab);
+    const bruto = Math.max(0, posSubtotal(tab) - posDesconto(tab));
+    const pct = bruto > 0 ? ((lucro / bruto) * 100) : 0;
+    margemEl.textContent = `${formatCurrency(lucro)} (${pct.toFixed(0)}%)`;
+    margemEl.classList.toggle('neg', lucro < 0);
+  }
+  atualizarPosInadimplencia(tab);
   const clienteEl = document.getElementById('pos-cliente-nome');
   if (clienteEl) clienteEl.textContent = tab.cliente_nome || 'Visitante';
   const tabEl = document.getElementById('pos-tab-indicator');
@@ -1771,6 +1806,32 @@ function posAlterarQtd(idx, delta) {
   }
   salvarPosTabs();
   updatePosUI();
+}
+
+let posInadTimer = null;
+async function atualizarPosInadimplencia(tab) {
+  const banner = document.getElementById('pos-inadimplencia-banner');
+  if (!banner) return;
+  if (!tab?.cliente_id) {
+    banner.classList.add('hidden');
+    banner.innerHTML = '';
+    return;
+  }
+  clearTimeout(posInadTimer);
+  posInadTimer = setTimeout(async () => {
+    try {
+      const r = await API.financeiro.inadimplencia(tab.cliente_id);
+      if (!r.qtd) {
+        banner.classList.add('hidden');
+        banner.innerHTML = '';
+        return;
+      }
+      banner.classList.remove('hidden');
+      banner.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Cliente com ${r.qtd} titulo(s) vencido(s) · ${formatCurrency(r.total)}`;
+    } catch {
+      banner.classList.add('hidden');
+    }
+  }, 120);
 }
 
 function posRemoverItem(idx) {
@@ -1948,16 +2009,18 @@ function posFinalizarVenda() {
   const tab = posTabAtual();
   if (!tab.itens.length) { showToast('Adicione produtos ao carrinho', 'error'); return; }
   const subtotal = posSubtotal(tab);
+  const lucro = posLucro(tab);
   openModal('Finalizar venda', `
     <form id="pos-venda-form">
       <div class="form-group"><label>Cliente</label>
         <input value="${escapeHtml(tab.cliente_nome || 'Visitante')}" disabled></div>
+      <div id="pos-form-inad" class="pos-inadimplencia hidden"></div>
       <div class="form-row">
         <div class="form-group"><label>Desconto (R$)</label>
           <input id="pos-form-desconto" name="desconto" type="number" step="0.01" min="0" value="${posDesconto(tab)}"></div>
         <div class="form-group"><label>Pagamento</label>
           <select id="pos-form-pagamento" name="forma_pagamento">
-            <option>Dinheiro</option><option>Cartão Débito</option><option>Cartão Crédito</option><option>PIX</option>
+            <option>Dinheiro</option><option>Cartão Débito</option><option>Cartão Crédito</option><option>PIX</option><option>Fiado</option>
           </select></div>
       </div>
       <div class="form-row">
@@ -1969,9 +2032,11 @@ function posFinalizarVenda() {
       <div class="contas-resumo">
         <div><span>Subtotal</span><strong>${formatCurrency(subtotal)}</strong></div>
         <div><span>Desconto</span><strong id="pos-form-desc-view">${formatCurrency(posDesconto(tab))}</strong></div>
-        <div><span>Taxa cartão</span><strong id="pos-form-taxa">${formatCurrency(0)}</strong></div>
-        <div><span>Total</span><strong id="pos-form-total">${formatCurrency(Math.max(0, subtotal - posDesconto(tab)))}</strong></div>
+        <div><span>Taxa operadora</span><strong id="pos-form-taxa">${formatCurrency(0)}</strong></div>
+        <div><span>Liquido</span><strong id="pos-form-liquido">${formatCurrency(Math.max(0, subtotal - posDesconto(tab)))}</strong></div>
+        <div><span>Total cliente</span><strong id="pos-form-total">${formatCurrency(Math.max(0, subtotal - posDesconto(tab)))}</strong></div>
         <div><span>Troco</span><strong id="pos-form-troco">${formatCurrency(0)}</strong></div>
+        <div><span>Margem</span><strong id="pos-form-margem">${formatCurrency(lucro)}</strong></div>
       </div>
       ${erpConfig.nfce_habilitada === '1' ? `
       <div class="form-group" style="margin-top:12px">
@@ -1983,19 +2048,28 @@ function posFinalizarVenda() {
     '<button class="btn btn-success" id="pos-form-confirmar"><i class="fas fa-check"></i> Finalizar venda</button>');
   document.querySelector('.modal-close-btn').onclick = closeModal;
 
+  const aviso = document.getElementById('pos-form-inad');
+  if (tab.cliente_id && aviso) {
+    API.financeiro.inadimplencia(tab.cliente_id).then(r => {
+      if (!r.qtd) return;
+      aviso.classList.remove('hidden');
+      aviso.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${r.qtd} titulo(s) vencido(s) · ${formatCurrency(r.total)}. Fiado exige confirmacao.`;
+    }).catch(() => {});
+  }
+
   const recalcular = () => {
     const desc = parseFloat(document.getElementById('pos-form-desconto').value) || 0;
     const forma = document.getElementById('pos-form-pagamento').value;
     const recebido = parseFloat(document.getElementById('pos-form-recebido').value) || 0;
-    let total = Math.max(0, subtotal - desc);
-    let taxa = 0;
-    if (forma === 'Cartão Crédito') taxa = total * (parseFloat(erpConfig.taxa_credito || 0) / 100);
-    if (forma === 'Cartão Débito') taxa = total * (parseFloat(erpConfig.taxa_debito || 0) / 100);
-    total += taxa;
+    tab.desconto = desc;
+    const calc = posTotalComTaxa(tab, forma);
     document.getElementById('pos-form-desc-view').textContent = formatCurrency(desc);
-    document.getElementById('pos-form-taxa').textContent = formatCurrency(taxa);
-    document.getElementById('pos-form-total').textContent = formatCurrency(total);
-    document.getElementById('pos-form-troco').textContent = formatCurrency(Math.max(0, recebido - total));
+    document.getElementById('pos-form-taxa').textContent = formatCurrency(calc.taxa);
+    document.getElementById('pos-form-liquido').textContent = formatCurrency(calc.liquido);
+    document.getElementById('pos-form-total').textContent = formatCurrency(calc.total);
+    document.getElementById('pos-form-troco').textContent = formatCurrency(posIsFiado(forma) ? 0 : Math.max(0, recebido - calc.total));
+    document.getElementById('pos-form-recebido').disabled = posIsFiado(forma);
+    if (posIsFiado(forma)) document.getElementById('pos-form-recebido').value = '0';
   };
   document.getElementById('pos-form-desconto').oninput = recalcular;
   document.getElementById('pos-form-pagamento').onchange = recalcular;
@@ -2006,6 +2080,16 @@ function posFinalizarVenda() {
     const forma = document.getElementById('pos-form-pagamento').value;
     const recebido = parseFloat(document.getElementById('pos-form-recebido').value) || 0;
     const total = posTotalComTaxa(tab, forma).total;
+    if (posIsFiado(forma) && !tab.cliente_id) {
+      showToast('Selecione um cliente cadastrado para venda fiado', 'error');
+      return;
+    }
+    if (posIsFiado(forma) && tab.cliente_id) {
+      try {
+        const r = await API.financeiro.inadimplencia(tab.cliente_id);
+        if (r.qtd && !confirm(`${tab.cliente_nome} tem ${r.qtd} titulo(s) vencido(s) (${formatCurrency(r.total)}). Continuar o fiado?`)) return;
+      } catch {}
+    }
     if (forma === 'Dinheiro' && recebido > 0 && recebido < total) {
       showToast('Valor recebido menor que o total', 'error');
       return;
@@ -2016,7 +2100,8 @@ function posFinalizarVenda() {
         cliente_id: tab.cliente_id || null,
         itens: tab.itens.map(i => ({
           produto_id: i.produto_id, descricao: i.servico ? i.nome : null,
-          quantidade: i.quantidade, preco_unitario: i.preco_unitario, os_id: i.os_id || null
+          quantidade: i.quantidade, preco_unitario: i.preco_unitario,
+          preco_custo: i.preco_custo || 0, os_id: i.os_id || null
         })),
         desconto: desc,
         forma_pagamento: forma,
@@ -3006,10 +3091,12 @@ async function renderConfiguracoes() {
         <div class="form-group">
           <label class="check-label"><input type="checkbox" id="cfg-perguntar" ${cfg.perguntar_quantidade === '1' ? 'checked' : ''}> Perguntar quantidade ao adicionar produto</label>
         </div>
-        <div class="form-row">
+        <div class="form-row form-row-3">
           <div class="form-group"><label>Taxa cartão crédito (%)</label><input name="taxa_credito" type="number" step="0.01" value="${escapeHtml(cfg.taxa_credito || '0')}"></div>
           <div class="form-group"><label>Taxa cartão débito (%)</label><input name="taxa_debito" type="number" step="0.01" value="${escapeHtml(cfg.taxa_debito || '0')}"></div>
+          <div class="form-group"><label>Taxa PIX (%)</label><input name="taxa_pix" type="number" step="0.01" value="${escapeHtml(cfg.taxa_pix || '0')}"></div>
         </div>
+        <p class="muted">As taxas da operadora sao descontadas do valor liquido no Financeiro. O cliente paga o total da venda, sem acrescimo.</p>
       </div>
       <div class="card">
         <h3>NFC-e</h3>
@@ -4005,11 +4092,11 @@ async function renderManual() {
       <ol class="manual-list">
         <li><strong>Login</strong> — Acesse com email e senha. Padrão: admin@erpisac.com / admin123.</li>
         <li><strong>Dashboard</strong> — Acompanhe vendas, estoque, OS e contas. Troque o período do gráfico.</li>
-        <li><strong>Caixa</strong> — Abra o caixa com um valor inicial antes de vender. Feche ao final do dia.</li>
-        <li><strong>Vendas</strong> — Busque por nome ou código de barras, monte o carrinho e finalize o pagamento.</li>
+        <li><strong>Caixa</strong> — Abra o caixa com um valor inicial antes de vender. Sangria e suprimento lancam no Financeiro. Feche ao final do dia.</li>
+        <li><strong>Vendas</strong> — Busque por nome ou código de barras, monte o carrinho e finalize (Dinheiro, cartao, PIX ou Fiado). A margem aparece no painel.</li>
         <li><strong>Clientes / Produtos / Fornecedores</strong> — Cadastre, edite e pesquise registros com paginação.</li>
         <li><strong>Ordens de serviço</strong> — Controle status, datas e valor previsto de cada OS.</li>
-        <li><strong>Financeiro</strong> — Lance receitas e despesas, marque como pago ou pendente.</li>
+        <li><strong>Financeiro</strong> — Vendas a vista entram pagas; Fiado vira contas a receber. Taxas de cartao/PIX e sangria/suprimento lancam sozinhos.</li>
         <li><strong>Histórico</strong> — Consulte vendas, imprima cupom/DANFE, emita NFC-e ou cancele (estoque volta automaticamente).</li>
         <li><strong>Relatório</strong> — Veja faturamento mensal, produtos mais vendidos e top clientes.</li>
         <li><strong>Gerenciar Backup</strong> — Realize, baixe, restaure ou exclua copias do banco. Verifique atualizacao do aplicativo.</li>
