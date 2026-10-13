@@ -141,6 +141,7 @@ const API = {
     list: (p) => API.request(`/financeiro?${new URLSearchParams(p)}`),
     get: (id) => API.request(`/financeiro/${id}`),
     stats: () => API.request('/financeiro/stats'),
+    inadimplencia: (id) => API.request(`/financeiro/cliente/${id}/inadimplencia`),
     create: (d) => API.request('/financeiro', { method: 'POST', body: d }),
     update: (id, d) => API.request(`/financeiro/${id}`, { method: 'PUT', body: d }),
     delete: (id) => API.request(`/financeiro/${id}`, { method: 'DELETE' })

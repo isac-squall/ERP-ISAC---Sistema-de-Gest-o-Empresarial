@@ -260,6 +260,16 @@ ensureColumn('produtos', 'cfop', "TEXT DEFAULT '5102'");
 ensureColumn('produtos', 'unidade', "TEXT DEFAULT 'UN'");
 ensureColumn('produtos', 'origem', "TEXT DEFAULT '0'");
 ensureColumn('vendas', 'nfce_id', 'INTEGER');
+ensureColumn('financeiro', 'venda_id', 'INTEGER');
+ensureColumn('financeiro', 'caixa_id', 'INTEGER');
+ensureColumn('financeiro', 'origem', 'TEXT');
+ensureColumn('financeiro', 'valor_bruto', 'REAL DEFAULT 0');
+ensureColumn('financeiro', 'valor_taxa', 'REAL DEFAULT 0');
+ensureColumn('financeiro', 'valor_liquido', 'REAL DEFAULT 0');
+ensureColumn('financeiro', 'forma_pagamento', 'TEXT');
+ensureColumn('financeiro', 'parcelas', 'INTEGER DEFAULT 1');
+ensureColumn('venda_itens', 'preco_custo', 'REAL DEFAULT 0');
+ensureColumn('caixa', 'financeiro_id', 'INTEGER');
 ensureColumn('usuarios', 'celular', 'TEXT');
 ensureColumn('usuarios', 'data_nascimento', 'TEXT');
 ensureColumn('usuarios', 'cpf', 'TEXT');
@@ -359,6 +369,7 @@ const defaults = {
   perguntar_quantidade: '1',
   taxa_credito: '0',
   taxa_debito: '0',
+  taxa_pix: '0',
   nfce_habilitada: '0',
   nfce_ambiente: 'homologacao',
   nfce_uf: 'RN',

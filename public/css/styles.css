@@ -613,6 +613,18 @@ body {
 .pos-side-stat strong { color: #fff; font-size: 26px; font-weight: 600; }
 .pos-side-total { align-items: flex-end; text-align: right; }
 .pos-side-total strong { color: #4CAF50; }
+.pos-side-margin {
+  display: flex; justify-content: space-between; align-items: center;
+  background: #16224F; border-radius: 6px; padding: 10px 14px;
+  color: #B0BEC5; font-size: 12px;
+}
+.pos-side-margin strong { color: #81C784; font-size: 15px; }
+.pos-side-margin strong.neg { color: #EF9A9A; }
+.pos-inadimplencia {
+  background: #FFF3E0; color: #E65100; border-radius: 6px;
+  padding: 10px 12px; font-size: 13px; font-weight: 600;
+}
+.pos-inadimplencia i { margin-right: 6px; }
 
 .pos-side-btns { display: flex; flex-direction: column; gap: 10px; }
 .pos-action {

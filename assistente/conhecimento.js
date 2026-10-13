@@ -35,8 +35,8 @@ module.exports = [
     sessao: 'PDV e carrinho',
     pagina: 'vendas',
     titulo: 'Como vender no caixa',
-    keywords: 'venda pdv caixa livre carrinho item produto finalizar f7 f8 f3 aba cliente visitante nfce nota fiscal',
-    conteudo: `A tela Realizar vendas e o PDV. O caixa precisa estar aberto; se estiver fechado, o sistema pede para ir em Gerenciar caixa. A venda comeca vazia (Caixa livre). Busque o item, monte o carrinho, escolha o cliente (padrao Visitante) e finalize com F7. Formas de pagamento: Dinheiro, Cartao Debito, Cartao Credito e PIX. E possivel desconto, valor recebido, troco e parcelas. Se a NFC-e estiver habilitada, o F7 pode emitir a nota automaticamente. Ctrl+T abre nova aba, Ctrl+W fecha a aba, setas alternam abas.`,
+    keywords: 'venda pdv caixa livre carrinho item produto finalizar f7 f8 f3 aba cliente visitante nfce nota fiscal fiado crediario margem taxa',
+    conteudo: `A tela Realizar vendas e o PDV. O caixa precisa estar aberto; se estiver fechado, o sistema pede para ir em Gerenciar caixa. A venda comeca vazia (Caixa livre). Busque o item, monte o carrinho, escolha o cliente (padrao Visitante) e finalize com F7. Formas de pagamento: Dinheiro, Cartao Debito, Cartao Credito, PIX e Fiado. Venda a vista lanca Receita Pago no Financeiro; Fiado exige cliente cadastrado e gera Contas a receber. Taxas de cartao/PIX descontam o liquido. Cliente inadimplente recebe alerta. O painel mostra margem estimada (preco menos custo). Se a NFC-e estiver habilitada, o F7 pode emitir a nota automaticamente.`,
     passos: [
       'Abra o caixa em Gerenciar caixa.',
       'Entre em Realizar vendas.',
@@ -101,8 +101,8 @@ module.exports = [
     sessao: 'Abertura e fechamento',
     pagina: 'caixa',
     titulo: 'Abrir, movimentar e fechar o caixa',
-    keywords: 'caixa abrir fechar entrada saida suprimento sangria movimento historico saldo',
-    conteudo: `Em Gerenciar caixa voce abre o caixa com valor inicial antes de vender. Com o caixa aberto aparecem total do caixa, vendas, cartao/PIX e venda liquida. Use Entrada (suprimento) e Saida (sangria). Historico mostra sessoes anteriores. Fechar caixa encerra o dia. Sem caixa aberto o PDV nao vende.`,
+    keywords: 'caixa abrir fechar entrada saida suprimento sangria movimento historico saldo financeiro',
+    conteudo: `Em Gerenciar caixa voce abre o caixa com valor inicial antes de vender. Com o caixa aberto aparecem total do caixa, vendas, cartao/PIX e venda liquida. Use Entrada (suprimento) e Saida (sangria): esses lancamentos alimentam Receita/Despesa no Financeiro em tempo real. Historico mostra sessoes anteriores. Fechar caixa encerra o dia. Sem caixa aberto o PDV nao vende.`,
     passos: [
       'Abra Gerenciar caixa.',
       'Clique em Abrir caixa e informe o valor inicial.',
@@ -117,8 +117,8 @@ module.exports = [
     sessao: 'Contas a pagar e receber',
     pagina: 'financeiro',
     titulo: 'Contas a pagar, receber e previsao',
-    keywords: 'financeiro pagar receber conta vencido saldo previsao despesa receita',
-    conteudo: `O Financeiro tem abas Contas a pagar e Contas a receber. Os cards mostram a receber, receber vencido, a pagar, pagar vencido e saldo previsto, alem de previsao em 7, 15 e 30 dias. Cadastre descricao, cliente ou fornecedor, categoria, valor, vencimento e status. Marque como pago ou pendente. Lancamentos vencidos entram nas notificacoes.`,
+    keywords: 'financeiro pagar receber conta vencido saldo previsao despesa receita pdv fiado taxa sangria',
+    conteudo: `O Financeiro tem abas Contas a pagar e Contas a receber. Os cards mostram a receber, receber vencido, a pagar, pagar vencido e saldo previsto, alem de previsao em 7, 15 e 30 dias. Vendas a vista do PDV entram como Receita Pago; Fiado entra como Contas a receber. Taxas de cartao/PIX geram Despesa Taxa operadora. Sangria e suprimento do Caixa tambem lancam sozinhos. Cadastre descricao, cliente ou fornecedor, categoria, valor, vencimento e status. Marque como pago ou pendente. Lancamentos vencidos entram nas notificacoes e no alerta do PDV.`,
     passos: [
       'Abra Financeiro no menu.',
       'Escolha Contas a pagar ou Contas a receber.',
