@@ -99,8 +99,9 @@ O icone de computador no cabecalho abre **Informacoes do computador**.
 - Status: Teste, Ativado, Vencido ou Bloqueado; tempo restante; maquina autorizada ou nao
 - Identificadores: BIOS Serial, UUID e Disco Serial (Windows via WMIC/CIM; Linux via DMI/sysfs)
 - Formato da chave: `ERPISAC-AAAAMMDD-XXXX-XXXXXXXX` (data de validade + trecho do hardware + assinatura)
+- **Validar neste PC**: confere a chave contra o hardware atual (chave invalida, de outra maquina ou vencida) antes de ativar
 - Sem chave valida apos o teste, as APIs retornam 402 e a tela de bloqueio pede ativacao
-- Gerar chave (fornecedor): senha mestre `ERP_LICENCA_MASTER` (padrao `ISAC-LICENCA`) no proprio modal
+- Gerar chave (fornecedor): senha mestre `ERP_LICENCA_MASTER` (padrao `ISAC-LICENCA`) no proprio modal, com opcao de mostrar/ocultar a senha
 - Login, dados da empresa e rotas `/api/licenca*` continuam liberados com o sistema bloqueado
 - Zona critica preserva as chaves `licenca_*`
 

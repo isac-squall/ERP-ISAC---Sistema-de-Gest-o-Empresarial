@@ -4222,12 +4222,18 @@ function renderLicencaBody(st) {
     ${s.motivo ? `<p class="licenca-motivo">${escapeHtml(s.motivo)}</p>` : ''}
     <div class="licenca-activate">
       <label>Chave de ativacao (mensalidade)</label>
-      <input id="licenca-chave" placeholder="ERPISAC-AAAAMMDD-XXXX-XXXXXXXX" autocomplete="off">
+      <input id="licenca-chave" name="licenca_ativacao_chave" placeholder="ERPISAC-AAAAMMDD-XXXX-XXXXXXXX" autocomplete="off" autocapitalize="characters" spellcheck="false" readonly>
     </div>
     <details class="licenca-gerar">
       <summary>Gerar chave (fornecedor)</summary>
       <div class="form-row" style="margin-top:10px">
-        <div class="form-group"><label>Senha mestre</label><input type="password" id="licenca-master" autocomplete="off"></div>
+        <div class="form-group">
+          <label>Senha mestre</label>
+          <div class="senha-wrap">
+            <input type="password" id="licenca-master" name="licenca_senha_mestre" autocomplete="new-password" spellcheck="false" readonly>
+            <button type="button" class="senha-toggle" id="licenca-master-eye" title="Mostrar senha" aria-label="Mostrar senha"><i class="fas fa-eye"></i></button>
+          </div>
+        </div>
         <div class="form-group"><label>Dias</label><input type="number" id="licenca-dias" min="1" max="3660" value="30"></div>
       </div>
       <button type="button" class="btn btn-outline" id="licenca-gerar">Gerar chave desta maquina</button>
@@ -4235,6 +4241,7 @@ function renderLicencaBody(st) {
     </details>
     <div class="licenca-modal-actions">
       <button type="button" class="btn btn-outline" id="licenca-verificar"><i class="fas fa-sync"></i> Verificar novamente</button>
+      <button type="button" class="btn btn-outline" id="licenca-validar"><i class="fas fa-shield-alt"></i> Validar neste PC</button>
       ${s.bloqueada ? '' : '<button type="button" class="btn btn-outline" id="licenca-fechar-btn">Fechar</button>'}
       <button type="button" class="btn btn-primary" id="licenca-ativar">Ativar</button>
     </div>`;
@@ -4284,6 +4291,43 @@ async function abrirLicencaModal(st) {
   document.getElementById('licenca-fechar-btn')?.addEventListener('click', fecharLicencaModal);
   document.getElementById('licenca-ativar')?.addEventListener('click', ativarLicencaAgora);
   document.getElementById('licenca-gerar')?.addEventListener('click', gerarChaveLicenca);
+  document.getElementById('licenca-validar')?.addEventListener('click', validarChaveLicencaAgora);
+  document.getElementById('licenca-master-eye')?.addEventListener('click', alternarSenhaMestre);
+  prepararCamposLicenca();
+}
+
+function prepararCamposLicenca() {
+  const campos = [
+    document.getElementById('licenca-chave'),
+    document.getElementById('licenca-master')
+  ].filter(Boolean);
+  for (const el of campos) {
+    el.addEventListener('focus', () => el.removeAttribute('readonly'), { once: true });
+    el.addEventListener('click', () => el.removeAttribute('readonly'));
+  }
+  limparAutofillLicenca();
+}
+
+function limparAutofillLicenca() {
+  const limpar = () => {
+    const chave = document.getElementById('licenca-chave');
+    if (chave && chave.value && !/^ERPISAC/i.test(chave.value.trim())) chave.value = '';
+    const master = document.getElementById('licenca-master');
+    if (master && master.value.length > 40) master.value = '';
+  };
+  setTimeout(limpar, 120);
+  setTimeout(limpar, 600);
+}
+
+function alternarSenhaMestre() {
+  const input = document.getElementById('licenca-master');
+  const btn = document.getElementById('licenca-master-eye');
+  if (!input) return;
+  const mostrar = input.type === 'password';
+  input.type = mostrar ? 'text' : 'password';
+  const ico = btn?.querySelector('i');
+  if (ico) ico.className = mostrar ? 'fas fa-eye-slash' : 'fas fa-eye';
+  if (btn) btn.title = mostrar ? 'Ocultar senha' : 'Mostrar senha';
 }
 
 async function gerarChaveLicenca() {
@@ -4312,9 +4356,32 @@ function fecharLicencaModal() {
   document.getElementById('licenca-modal')?.classList.add('hidden');
 }
 
+async function validarChaveLicencaAgora() {
+  const chave = document.getElementById('licenca-chave')?.value || '';
+  if (!chave.trim()) { showToast('Informe a chave de ativacao', 'error'); return; }
+  if (!/^ERPISAC-/i.test(chave.trim())) {
+    showToast('Chave invalida. Formato: ERPISAC-AAAAMMDD-XXXX-XXXXXXXX', 'error');
+    return;
+  }
+  try {
+    const r = await API.licenca.validar(chave.trim());
+    if (r.valida) {
+      showToast(r.master ? 'Chave mestra valida' : 'Chave valida para este PC', 'success');
+    } else {
+      showToast(r.motivo || 'Chave invalida', 'error');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
 async function ativarLicencaAgora() {
   const chave = document.getElementById('licenca-chave')?.value || '';
   if (!chave.trim()) { showToast('Informe a chave de ativacao', 'error'); return; }
+  if (!/^ERPISAC-/i.test(chave.trim())) {
+    showToast('Chave invalida. Formato: ERPISAC-AAAAMMDD-XXXX-XXXXXXXX', 'error');
+    return;
+  }
   try {
     const st = await API.licenca.ativar(chave.trim());
     licencaCache = st;
