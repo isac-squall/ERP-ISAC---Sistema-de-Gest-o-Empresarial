@@ -418,11 +418,12 @@ module.exports = [
     pagina: 'dashboard',
     titulo: 'Ativar a licenca da mensalidade',
     keywords: 'licenca mensalidade teste ativar chave computador bios uuid disco bloqueado vencido erpISAC',
-    conteudo: `O ERP inicia em teste de 30 dias. O icone de computador no cabecalho abre Informacoes do computador: status (Teste/Ativado/Vencido), tempo restante, BIOS Serial, UUID e Disco Serial. A chave de ativacao tem o formato ERPISAC-AAAAMMDD-XXXX-XXXXXXXX e vale so para esta maquina. Se o teste ou a mensalidade vencer, o sistema bloqueia as telas e as APIs (HTTP 402) ate ativar. Login e o modal de licenca continuam liberados. O fornecedor gera a chave no proprio modal com a senha mestre. A Zona critica preserva a licenca.`,
+    conteudo: `O ERP inicia em teste de 30 dias. O icone de computador no cabecalho abre Informacoes do computador: status (Teste/Ativado/Vencido), tempo restante, BIOS Serial, UUID e Disco Serial. A chave de ativacao tem o formato ERPISAC-AAAAMMDD-XXXX-XXXXXXXX e vale so para esta maquina. Use Validar neste PC para conferir se a chave pertence a esta maquina antes de ativar; a mensagem informa Chave invalida, Chave de outra maquina ou Chave vencida. Se o teste ou a mensalidade vencer, o sistema bloqueia as telas e as APIs (HTTP 402) ate ativar. Login e o modal de licenca continuam liberados. O fornecedor gera a chave no proprio modal com a senha mestre (use o icone de olho para mostrar ou ocultar a senha). A Zona critica preserva a licenca.`,
     passos: [
       'Clique no icone de computador no cabecalho.',
       'Confira status, tempo restante e os tres IDs da maquina.',
-      'Cole a chave de ativacao e clique em Ativar.',
+      'Cole a chave de ativacao (formato ERPISAC-...) e clique em Validar neste PC.',
+      'Se a chave for valida para esta maquina, clique em Ativar.',
       'Se o sistema estiver bloqueado, use Informacoes do computador na tela de bloqueio.'
     ]
   },

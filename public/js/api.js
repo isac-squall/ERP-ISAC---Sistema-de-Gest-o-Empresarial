@@ -25,6 +25,7 @@ const API = {
   licenca: {
     get: () => API.request('/licenca'),
     ativar: (chave) => API.request('/licenca/ativar', { method: 'POST', body: { chave } }),
+    validar: (chave) => API.request('/licenca/validar', { method: 'POST', body: { chave } }),
     gerar: (d) => API.request('/licenca/gerar', { method: 'POST', body: d || {} })
   },
   dashboard: () => API.request('/dashboard'),

@@ -291,6 +291,18 @@ function ativar(chave) {
   return publico();
 }
 
+function validar(chave) {
+  const ids = hardware();
+  const v = validarChave(chave, ids);
+  return {
+    valida: v.ok,
+    master: !!v.master,
+    motivo: v.ok ? '' : (v.motivo || 'Chave invalida'),
+    mesma_maquina: v.ok || v.motivo !== 'Chave de outra maquina',
+    expira_em: v.parsed && v.parsed.expira ? v.parsed.expira.toISOString() : ''
+  };
+}
+
 function gerar({ master, bios, uuid, disco, dias, tipo } = {}) {
   if (!timingSafe(String(master || ''), MASTER_PIN)) {
     const err = new Error('Senha mestre invalida');
@@ -320,6 +332,7 @@ module.exports = {
   status,
   publico,
   ativar,
+  validar,
   gerar,
   rotaLivre,
   TRIAL_DIAS,

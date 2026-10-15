@@ -35,6 +35,14 @@ app.post('/api/licenca/ativar', (req, res) => {
   }
 });
 
+app.post('/api/licenca/validar', (req, res) => {
+  try {
+    res.json(licenca.validar(req.body?.chave));
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao validar chave' });
+  }
+});
+
 app.post('/api/licenca/gerar', (req, res) => {
   try {
     const r = licenca.gerar(req.body || {});

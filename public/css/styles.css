@@ -1224,6 +1224,15 @@ body {
 .licenca-gerar summary { cursor: pointer; font-size: 13px; color: #64748b; }
 .licenca-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .licenca-motivo { font-size: 13px; color: #b91c1c; margin: 8px 0 0; }
+.senha-wrap { position: relative; }
+.senha-wrap input { width: 100%; padding-right: 40px; }
+.senha-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: #64748b; cursor: pointer; font-size: 14px;
+}
+.senha-toggle:hover { background: #f1f5f9; color: #1e293b; }
 @media (max-width: 768px) {
   .licenca-stats { grid-template-columns: 1fr; }
 }
