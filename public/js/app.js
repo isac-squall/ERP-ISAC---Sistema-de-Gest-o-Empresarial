@@ -2579,6 +2579,7 @@ function finPrevisaoCard(titulo, dados) {
 async function renderFinanceiro() {
   const st = pageState.financeiro;
   st.tab = st.tab || 'pagar';
+  if (st.tab === 'dre') return renderFinanceiroDre();
   const tipo = finTabTipo();
   const [stats, result] = await Promise.all([
     API.financeiro.stats(),
@@ -2624,6 +2625,9 @@ async function renderFinanceiro() {
         <i class="fas fa-hand-holding-usd"></i> Contas a receber
         <span class="fin-tab-count">${stats.qtd_receber || 0}</span>
       </button>
+      <button class="fin-tab" id="fin-tab-dre">
+        <i class="fas fa-chart-pie"></i> DRE
+      </button>
     </div>
     <div class="toolbar">
       <div class="search-box">
@@ -2655,6 +2659,139 @@ async function renderFinanceiro() {
   document.getElementById('fin-tab-receber').onclick = () => {
     st.tab = 'receber'; st.page = 1; st.search = ''; renderFinanceiro();
   };
+  document.getElementById('fin-tab-dre').onclick = () => {
+    st.tab = 'dre'; renderFinanceiro();
+  };
+}
+
+function drePeriodoParams(st) {
+  st.periodo = st.periodo || 'mes';
+  if (!st.de || !st.ate) {
+    const range = relatorioDefaultRange(st.periodo);
+    st.de = range.de;
+    st.ate = range.ate;
+  }
+  return { periodo: st.periodo, de: st.de, ate: st.ate };
+}
+
+function dreLinha(l) {
+  const cls = l.total ? 'dre-total' : '';
+  const neg = Number(l.valor) < 0 ? 'neg' : '';
+  return `<tr class="${cls}">
+    <td>${escapeHtml(l.label)}</td>
+    <td class="dre-valor ${neg}">${formatCurrency(l.valor)}</td>
+  </tr>`;
+}
+
+function dreBucketTag(bucket) {
+  return `<span class="dre-bucket dre-b-${bucket}">${escapeHtml(bucketLabelPt(bucket))}</span>`;
+}
+
+function bucketLabelPt(b) {
+  const map = {
+    cmv: 'CMV', imposto: 'Imposto', comercial: 'Comercial', administrativa: 'Administrativa',
+    financeira: 'Financeiro', estorno_venda: 'Estorno venda', estorno_taxa: 'Estorno taxa',
+    ignorar: 'Fora do DRE', receita: 'Receita'
+  };
+  return map[b] || b;
+}
+
+async function renderFinanceiroDre() {
+  const st = pageState.financeiro;
+  const params = drePeriodoParams(st);
+  let d;
+  try { d = await API.dre.get(params); }
+  catch (err) {
+    document.getElementById('content').innerHTML = `<div class="card"><p style="color:red">Erro: ${escapeHtml(err.message)}</p></div>`;
+    return;
+  }
+  const s = d.resumo || {};
+  const presets = [['hoje', 'Hoje'], ['7dias', '7 dias'], ['30dias', '30 dias'], ['mes', 'Mes'], ['ano', 'Ano']];
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Financeiro', 'Dashboard / <a href="#" onclick="navigate(\'financeiro\');return false">Financeiro</a> / DRE')}
+    <div class="fin-tabs">
+      <button class="fin-tab" id="fin-tab-pagar"><i class="fas fa-file-invoice-dollar"></i> Contas a pagar</button>
+      <button class="fin-tab" id="fin-tab-receber"><i class="fas fa-hand-holding-usd"></i> Contas a receber</button>
+      <button class="fin-tab active" id="fin-tab-dre"><i class="fas fa-chart-pie"></i> DRE</button>
+    </div>
+    <div class="contador-filters">
+      <div class="rep-presets">
+        ${presets.map(([k, lab]) => `<button type="button" class="rep-preset ${st.periodo === k ? 'active' : ''}" data-periodo="${k}">${lab}</button>`).join('')}
+      </div>
+      <div class="form-group"><label>De</label><input type="date" id="dre-de" value="${st.de || ''}"></div>
+      <div class="form-group"><label>Ate</label><input type="date" id="dre-ate" value="${st.ate || ''}"></div>
+      <button type="button" class="btn btn-primary" id="dre-atualizar">Atualizar</button>
+    </div>
+    ${contadorKpis([
+      { label: 'Receita Bruta', value: formatCurrency(s.receita_bruta) },
+      { label: 'Receita Liquida', value: formatCurrency(s.receita_liquida) },
+      { label: 'Lucro Bruto', value: formatCurrency(s.lucro_bruto) },
+      { label: 'Resultado Operacional', value: formatCurrency(s.resultado_operacional) },
+      { label: 'Lucro Liquido', value: formatCurrency(s.lucro_liquido) },
+      { label: 'Margem Liquida', value: `${(s.margem_liquida || 0).toFixed(1)}%` }
+    ])}
+    <div class="dre-note">
+      <i class="fas fa-info-circle"></i> Regime de <strong>competencia</strong>: faturamento pela data da venda e despesas pela data de vencimento (nao pelo pagamento).
+      Compras de estoque ficam fora do DRE (ativo). CMV calculado pelo custo dos itens vendidos.
+    </div>
+    <div class="dre-layout">
+      <div class="dre-panel">
+        <h3>Demonstracao do Resultado (${escapeHtml(d.de)} a ${escapeHtml(d.ate)})</h3>
+        <table class="dre-table">
+          <tbody>
+            ${(d.linhas || []).map(dreLinha).join('')}
+          </tbody>
+        </table>
+        <div class="contador-actions">
+          <button class="btn btn-primary" id="dre-txt"><i class="fas fa-file-alt"></i> Baixar TXT</button>
+          <button class="btn btn-success" id="dre-csv"><i class="fas fa-file-csv"></i> Baixar CSV</button>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Tipo</th><th>Descricao</th><th>Classificacao</th><th>Pessoa</th><th>Valor</th><th>Data</th></tr></thead>
+        <tbody>${renderDreDetalhes(d.detalhes)}</tbody>
+      </table>
+    </div>
+    ${(d.ignorados || []).length ? `
+      <div class="card dre-ignorados">
+        <h4><i class="fas fa-box-open"></i> Fora do DRE (estoque / transitorio): ${formatCurrency((d.ignorados || []).reduce((a, x) => a + Number(x.valor || 0), 0))}</h4>
+        <ul>${(d.ignorados || []).map(x => `<li>${escapeHtml(x.tipo)} · ${escapeHtml(x.descricao)} · ${formatCurrency(x.valor)}</li>`).join('')}</ul>
+      </div>` : ''}`;
+
+  document.getElementById('fin-tab-pagar').onclick = () => { st.tab = 'pagar'; st.page = 1; renderFinanceiro(); };
+  document.getElementById('fin-tab-receber').onclick = () => { st.tab = 'receber'; st.page = 1; renderFinanceiro(); };
+  document.getElementById('fin-tab-dre').onclick = () => renderFinanceiro();
+  document.querySelectorAll('.rep-preset').forEach(btn => {
+    btn.onclick = () => {
+      st.periodo = btn.dataset.periodo;
+      const range = relatorioDefaultRange(st.periodo);
+      st.de = range.de; st.ate = range.ate;
+      renderFinanceiro();
+    };
+  });
+  document.getElementById('dre-atualizar').onclick = () => {
+    st.de = document.getElementById('dre-de').value;
+    st.ate = document.getElementById('dre-ate').value;
+    st.periodo = 'custom';
+    renderFinanceiro();
+  };
+  document.getElementById('dre-txt').onclick = () => baixarContadorUrl(API.dre.txtUrl(drePeriodoParams(st)));
+  document.getElementById('dre-csv').onclick = () => baixarContadorUrl(API.dre.csvUrl(drePeriodoParams(st)));
+}
+
+function renderDreDetalhes(data) {
+  if (!data || !data.length) return '<tr class="empty-row"><td colspan="7">Nenhum lancamento no periodo</td></tr>';
+  return data.map(f => `<tr>
+    <td>${f.id}</td>
+    <td>${escapeHtml(f.tipo)}</td>
+    <td>${escapeHtml(f.descricao || '-')}</td>
+    <td>${dreBucketTag(f.bucket)}</td>
+    <td>${escapeHtml(f.pessoa || '-')}</td>
+    <td class="${Number(f.valor) < 0 ? 'text-danger' : ''}">${formatCurrency(f.valor)}</td>
+    <td>${formatDate(f.data)}</td>
+  </tr>`).join('');
 }
 
 function renderFinanceiroRows(data, isPagar) {
@@ -4096,7 +4233,7 @@ async function renderManual() {
         <li><strong>Vendas</strong> — Busque por nome ou código de barras, monte o carrinho e finalize (Dinheiro, cartao, PIX ou Fiado). A margem aparece no painel.</li>
         <li><strong>Clientes / Produtos / Fornecedores</strong> — Cadastre, edite e pesquise registros com paginação.</li>
         <li><strong>Ordens de serviço</strong> — Controle status, datas e valor previsto de cada OS.</li>
-        <li><strong>Financeiro</strong> — Vendas a vista entram pagas; Fiado vira contas a receber. Taxas de cartao/PIX e sangria/suprimento lancam sozinhos.</li>
+        <li><strong>Financeiro</strong> — Vendas a vista entram pagas; Fiado vira contas a receber. Taxas de cartao/PIX e sangria/suprimento lancam sozinhos. A aba DRE mostra o resultado por competencia (Receita, CMV, despesas e Lucro), com export TXT/CSV.</li>
         <li><strong>Histórico</strong> — Consulte vendas, imprima cupom/DANFE, emita NFC-e ou cancele (estoque volta automaticamente).</li>
         <li><strong>Relatório</strong> — Veja faturamento mensal, produtos mais vendidos e top clientes.</li>
         <li><strong>Gerenciar Backup</strong> — Realize, baixe, restaure ou exclua copias do banco. Verifique atualizacao do aplicativo.</li>

@@ -150,6 +150,12 @@ const API = {
 
   relatorio: (p) => API.request(`/relatorio?${new URLSearchParams(p || {})}`),
 
+  dre: {
+    get: (p) => API.request(`/dre?${new URLSearchParams(p || {})}`),
+    txtUrl: (p) => `/api/dre.txt?${new URLSearchParams(p || {})}`,
+    csvUrl: (p) => `/api/dre.csv?${new URLSearchParams(p || {})}`
+  },
+
   contador: {
     nfe: (p) => API.request(`/contador/nfe?${new URLSearchParams(p || {})}`),
     xmlZipUrl: (p) => `/api/contador/nfe/xml.zip?${new URLSearchParams(p || {})}`,
