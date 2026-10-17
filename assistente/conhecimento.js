@@ -117,14 +117,30 @@ module.exports = [
     sessao: 'Contas a pagar e receber',
     pagina: 'financeiro',
     titulo: 'Contas a pagar, receber e previsao',
-    keywords: 'financeiro pagar receber conta vencido saldo previsao despesa receita pdv fiado taxa sangria',
-    conteudo: `O Financeiro tem abas Contas a pagar e Contas a receber. Os cards mostram a receber, receber vencido, a pagar, pagar vencido e saldo previsto, alem de previsao em 7, 15 e 30 dias. Vendas a vista do PDV entram como Receita Pago; Fiado entra como Contas a receber. Taxas de cartao/PIX geram Despesa Taxa operadora. Sangria e suprimento do Caixa tambem lancam sozinhos. Cadastre descricao, cliente ou fornecedor, categoria, valor, vencimento e status. Marque como pago ou pendente. Lancamentos vencidos entram nas notificacoes e no alerta do PDV.`,
+    keywords: 'financeiro pagar receber conta vencido saldo previsao despesa receita pdv fiado taxa sangria dre resultado',
+    conteudo: `O Financeiro tem abas Contas a pagar, Contas a receber e DRE. Os cards mostram a receber, receber vencido, a pagar, pagar vencido e saldo previsto, alem de previsao em 7, 15 e 30 dias. Vendas a vista do PDV entram como Receita Pago; Fiado entra como Contas a receber. Taxas de cartao/PIX geram Despesa Taxa operadora. Sangria e suprimento do Caixa tambem lancam sozinhos. Cadastre descricao, cliente ou fornecedor, categoria, valor, vencimento e status. Marque como pago ou pendente. Lancamentos vencidos entram nas notificacoes e no alerta do PDV.`,
     passos: [
       'Abra Financeiro no menu.',
-      'Escolha Contas a pagar ou Contas a receber.',
+      'Escolha Contas a pagar, Contas a receber ou a aba DRE.',
       'Clique em Nova conta e preencha os dados.',
       'Altere o status quando pagar ou receber.',
       'Acompanhe as previsoes e os valores vencidos.'
+    ]
+  },
+  {
+    id: 'dre',
+    modulo: 'Financeiro',
+    sessao: 'DRE - Demonstracao do Resultado',
+    pagina: 'financeiro',
+    titulo: 'Resultado do exercicio (DRE) por competencia',
+    keywords: 'dre demonstracao resultado exercicio lucro prejuizo receita bruta liquida cmv lucro bruto despesa operacional lajir margem competencia',
+    conteudo: `A aba DRE no Financeiro monta a Demonstracao do Resultado no regime de competencia: o faturamento entra pela data da venda e as despesas pela data de vencimento, independentemente do pagamento (diferente do extrato, que e de caixa). Receita Bruta = vendas de produtos + servicos (OS) + outras receitas; Deducoes = descontos, impostos sobre vendas e estornos; depois CMV (custo dos itens vendidos), Despesas administrativas e comerciais (inclui taxas de operadora), Resultado Operacional (LAJIR), Resultado Financeiro e Lucro/Prejuizo Liquido. Compras de estoque ficam fora do DRE (vao para o ativo) e aparecem na secao Fora do DRE. A classificacao usa a categoria do lancamento (imposto, aluguel, energia, taxa, juros, estoque, etc.). Filtre por periodo e baixe TXT ou CSV para o contador.`,
+    passos: [
+      'Abra Financeiro e clique na aba DRE.',
+      'Escolha o periodo (Hoje, 7 dias, 30 dias, Mes, Ano) ou informe De e Ate.',
+      'Confira as linhas da DRE e os cards de margem.',
+      'Veja o detalhamento por categoria e os itens Fora do DRE.',
+      'Baixe TXT ou CSV para enviar ao contador.'
     ]
   },
   {

@@ -37,6 +37,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Contador: listar NFC-e, relatorio de compras, ZIP de XMLs, extrato TXT/CSV e SPED Fiscal (EFD ICMS/IPI simplificado)
 - Licenca/mensalidade: icone de computador no cabecalho; periodo de teste de 30 dias; se vencer, o sistema bloqueia ate ativar a chave da maquina
 - PDV + Financeiro: baixa automatica da venda, taxas liquidas de cartao/PIX, Fiado com alerta de inadimplencia, sangria/suprimento no Financeiro e margem no PDV
+- DRE no Financeiro: resultado do exercicio por competencia (Receita Bruta, CMV, despesas, LAJIR e Lucro Liquido) com export TXT/CSV
 
 ## Produtos: importar e exportar
 
@@ -64,6 +65,19 @@ O caixa precisa estar aberto. A venda comeca vazia (Caixa livre).
 - Sangria e suprimento do Caixa alimentam Despesa/Receita no Financeiro em tempo real
 - Atalhos: F7 finalizar, F8 produto/servico, F6 historico, F3 cancelar aba, Ctrl+T / Ctrl+W abas
 - Se a NFC-e estiver habilitada, o F7 pode emitir a nota automaticamente
+
+## DRE (Demonstracao do Resultado)
+
+No **Financeiro**, a aba **DRE** monta o resultado do periodo no regime de **competencia** (faturamento pela data da venda e despesas pela data de vencimento, nao pelo pagamento).
+
+- Receita Bruta = vendas de produtos + servicos (OS) + outras receitas
+- Deducoes = descontos concedidos, impostos sobre vendas e estornos/devolucoes
+- CMV = custo dos itens efetivamente vendidos (compra de estoque fica fora do DRE, no ativo)
+- Despesas operacionais = administrativas + comerciais (inclui taxas de operadora)
+- Resultado Operacional (LAJIR), Resultado Financeiro e Lucro/Prejuizo Liquido, com margens bruta e liquida
+- A classificacao usa a categoria do lancamento; o detalhamento por categoria e a secao **Fora do DRE** ficam visiveis
+- Exporta TXT e CSV; endpoint `GET /api/dre` (parametros `de`, `ate` ou `periodo`)
+- Teste: `npm run test:dre` (roda em transacao com rollback, nao altera o banco)
 
 ## NFC-e
 

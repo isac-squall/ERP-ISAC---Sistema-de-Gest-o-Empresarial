@@ -6,6 +6,7 @@ const nfce = require('./nfce');
 const produtosIo = require('./produtos/io');
 const backupMod = require('./backup');
 const contador = require('./contador');
+const dre = require('./dre');
 const licenca = require('./licenca');
 
 const app = express();
@@ -1897,6 +1898,26 @@ function sendAnexo(res, nome, body, tipo) {
   res.setHeader('Content-Disposition', `attachment; filename="${nome}"`);
   res.send(body);
 }
+
+// ============ DRE ============
+app.get('/api/dre', (req, res) => {
+  try { res.json(dre.gerarDre(req.query)); }
+  catch (err) { res.status(400).json({ error: err.message || 'Falha ao gerar DRE' }); }
+});
+
+app.get('/api/dre.txt', (req, res) => {
+  try {
+    const d = dre.dreTxt(req.query);
+    sendAnexo(res, d.nome, d.texto, 'text/plain; charset=utf-8');
+  } catch (err) { res.status(400).json({ error: err.message || 'Falha ao gerar DRE' }); }
+});
+
+app.get('/api/dre.csv', (req, res) => {
+  try {
+    const d = dre.dreCsv(req.query);
+    sendAnexo(res, d.nome, d.texto, 'text/csv; charset=utf-8');
+  } catch (err) { res.status(400).json({ error: err.message || 'Falha ao gerar DRE CSV' }); }
+});
 
 app.get('/api/contador/nfe', (req, res) => {
   try { res.json(contador.listarNfe(req.query)); }
