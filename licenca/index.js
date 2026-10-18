@@ -5,8 +5,11 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const db = require('../database');
 
-const SECRET = 'ERP-ISAC-LICENCA-2026-SCRUNDAI';
-const MASTER_PIN = process.env.ERP_LICENCA_MASTER || 'ISAC-LICENCA';
+const SECRET_PADRAO = 'ERP-ISAC-LICENCA-2026-SCRUNDAI';
+const SECRET = process.env.ERP_LICENCA_SECRETO || SECRET_PADRAO;
+const SEGREDO_CONFIGURADO = Boolean(process.env.ERP_LICENCA_SECRETO);
+const MASTER_PIN = process.env.ERP_LICENCA_MASTER || '';
+const PIN_CONFIGURADO = Boolean(process.env.ERP_LICENCA_MASTER);
 const TRIAL_DIAS = 30;
 const PREFIX = 'ERPISAC';
 
@@ -304,6 +307,11 @@ function validar(chave) {
 }
 
 function gerar({ master, bios, uuid, disco, dias, tipo } = {}) {
+  if (!PIN_CONFIGURADO) {
+    const err = new Error('Senha mestre nao configurada. Defina ERP_LICENCA_MASTER no ambiente.');
+    err.status = 503;
+    throw err;
+  }
   if (!timingSafe(String(master || ''), MASTER_PIN)) {
     const err = new Error('Senha mestre invalida');
     err.status = 401;
@@ -322,8 +330,10 @@ function gerar({ master, bios, uuid, disco, dias, tipo } = {}) {
 function rotaLivre(req) {
   const p = req.path || '';
   if (req.method === 'GET' && (p === '/api/licenca' || p === '/empresa' || p === '/api/empresa')) return true;
-  if (p.startsWith('/api/licenca')) return true;
-  if (p === '/api/auth/login') return true;
+  if (req.method === 'POST' && (p === '/api/licenca/ativar' || p === '/api/licenca/validar')) return true;
+  if (req.method === 'POST' && p === '/api/auth/login') return true;
+  if (req.method === 'GET' && p === '/api/auth/me') return true;
+  if (req.method === 'POST' && p === '/api/auth/logout') return true;
   return false;
 }
 
@@ -336,5 +346,6 @@ module.exports = {
   gerar,
   rotaLivre,
   TRIAL_DIAS,
-  MASTER_PIN: undefined
+  PIN_CONFIGURADO,
+  SEGREDO_CONFIGURADO
 };

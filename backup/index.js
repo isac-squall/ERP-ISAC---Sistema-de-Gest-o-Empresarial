@@ -107,8 +107,13 @@ function zipStore(files) {
   return Buffer.concat([...local, centralBuf, end]);
 }
 
+const MAX_ARQUIVO_BACKUP = 512 * 1024 * 1024;
+const MAX_ENTRADA_ZIP = 256 * 1024 * 1024;
+const MAX_TOTAL_ZIP = 512 * 1024 * 1024;
+
 function unzipBuffers(buf) {
   const files = {};
+  let total = 0;
   let i = 0;
   const data = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
   while (i + 30 <= data.length) {
@@ -116,6 +121,7 @@ function unzipBuffers(buf) {
     if (sig !== 0x04034b50) break;
     const method = data.readUInt16LE(i + 8);
     const flags = data.readUInt16LE(i + 6);
+    const tamanhoDeclarado = data.readUInt32LE(i + 22);
     let comp = data.readUInt32LE(i + 18);
     const nlen = data.readUInt16LE(i + 26);
     const elen = data.readUInt16LE(i + 28);
@@ -128,9 +134,20 @@ function unzipBuffers(buf) {
       const cut = [next, localNext].filter(n => n >= 0).sort((a, b) => a - b)[0];
       comp = cut != null ? cut : packedGuess.length;
     }
+    if (comp > data.length || start + comp > data.length) throw new Error('ZIP corrompido');
     const packed = data.slice(start, start + comp);
     let out = packed;
-    if (method === 8) out = zlib.inflateRawSync(packed);
+    if (method === 8) {
+      out = zlib.inflateRawSync(packed, { maxOutputLength: MAX_ENTRADA_ZIP });
+    } else if (method !== 0) {
+      throw new Error('Metodo de compressao nao suportado');
+    }
+    if (out.length > MAX_ENTRADA_ZIP) throw new Error('Arquivo do ZIP excede o limite permitido');
+    total += out.length;
+    if (total > MAX_TOTAL_ZIP) throw new Error('Conteudo do ZIP excede o limite permitido');
+    if (tamanhoDeclarado && out.length !== tamanhoDeclarado && !(flags & 0x08)) {
+      throw new Error('Tamanho declarado do ZIP nao confere');
+    }
     files[name.replace(/\\/g, '/')] = out;
     i = start + packed.length;
   }
@@ -241,6 +258,8 @@ async function criar(tipo) {
 }
 
 function extrairDb(buf, nomeArquivo) {
+  if (!Buffer.isBuffer(buf) || !buf.length) throw new Error('Arquivo vazio');
+  if (buf.length > MAX_ARQUIVO_BACKUP) throw new Error('Arquivo de backup excede o limite de 512 MB');
   const name = String(nomeArquivo || '').toLowerCase();
   if (isSqlite(buf)) return buf;
   const zip = buf.length > 4 && buf.readUInt32LE(0) === 0x04034b50;

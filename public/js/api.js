@@ -3,6 +3,7 @@ const API = {
     let res;
     try {
       res = await fetch(`/api${url}`, {
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         ...options,
         body: options.body ? JSON.stringify(options.body) : undefined
@@ -17,11 +18,16 @@ const API = {
     if (res.status === 402 && typeof window.mostrarBloqueioLicenca === 'function') {
       window.mostrarBloqueioLicenca(data.licenca || data);
     }
+    if (res.status === 401 && url !== '/auth/login' && typeof window.erpSessaoExpirada === 'function') {
+      window.erpSessaoExpirada();
+    }
     if (!res.ok) throw new Error(data.error || 'Erro na requisição');
     return data;
   },
 
   login: (email, senha) => API.request('/auth/login', { method: 'POST', body: { email, senha } }),
+  me: () => API.request('/auth/me'),
+  logout: () => API.request('/auth/logout', { method: 'POST', body: {} }),
   licenca: {
     get: () => API.request('/licenca'),
     ativar: (chave) => API.request('/licenca/ativar', { method: 'POST', body: { chave } }),
@@ -216,6 +222,12 @@ function formatDateTime(d) {
   const dt = parseDate(d);
   if (!dt) return d || '-';
   return dt.toLocaleString('pt-BR');
+}
+
+function hojeLocalIso() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 function escapeHtml(v) {

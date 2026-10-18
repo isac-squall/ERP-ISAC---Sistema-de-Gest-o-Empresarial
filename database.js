@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const { hashSenha, precisaAtualizar } = require('./senha');
 
 const db = new Database(path.join(__dirname, 'erp.db'));
 
@@ -234,6 +235,15 @@ db.exec(`
     tamanho INTEGER DEFAULT 0,
     criado_em TEXT DEFAULT (datetime('now','localtime'))
   );
+
+  CREATE TABLE IF NOT EXISTS sessoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT UNIQUE NOT NULL,
+    usuario_id INTEGER NOT NULL,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    expira_em TEXT NOT NULL,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+  );
 `);
 
 function ensureColumn(table, column, def) {
@@ -274,6 +284,27 @@ ensureColumn('usuarios', 'celular', 'TEXT');
 ensureColumn('usuarios', 'data_nascimento', 'TEXT');
 ensureColumn('usuarios', 'cpf', 'TEXT');
 ensureColumn('usuarios', 'tipo_pessoa', "TEXT DEFAULT 'PF'");
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_vendas_criado_em ON vendas(criado_em);
+  CREATE INDEX IF NOT EXISTS idx_vendas_cliente ON vendas(cliente_id);
+  CREATE INDEX IF NOT EXISTS idx_vendas_status ON vendas(status);
+  CREATE INDEX IF NOT EXISTS idx_venda_itens_venda ON venda_itens(venda_id);
+  CREATE INDEX IF NOT EXISTS idx_venda_itens_produto ON venda_itens(produto_id);
+  CREATE INDEX IF NOT EXISTS idx_financeiro_vencimento ON financeiro(data_vencimento);
+  CREATE INDEX IF NOT EXISTS idx_financeiro_tipo_status ON financeiro(tipo, status);
+  CREATE INDEX IF NOT EXISTS idx_financeiro_cliente ON financeiro(cliente_id);
+  CREATE INDEX IF NOT EXISTS idx_financeiro_venda ON financeiro(venda_id);
+  CREATE INDEX IF NOT EXISTS idx_financeiro_caixa ON financeiro(caixa_id);
+  CREATE INDEX IF NOT EXISTS idx_caixa_criado_em ON caixa(criado_em);
+  CREATE INDEX IF NOT EXISTS idx_caixa_venda ON caixa(venda_id);
+  CREATE INDEX IF NOT EXISTS idx_estoque_mov_produto ON estoque_movimentos(produto_id, criado_em);
+  CREATE INDEX IF NOT EXISTS idx_ordens_servico_status ON ordens_servico(status);
+  CREATE INDEX IF NOT EXISTS idx_nfce_venda ON nfce(venda_id);
+  CREATE INDEX IF NOT EXISTS idx_produtos_codigo ON produtos(codigo);
+  CREATE INDEX IF NOT EXISTS idx_sessoes_token ON sessoes(token_hash);
+  CREATE INDEX IF NOT EXISTS idx_sessoes_expira ON sessoes(expira_em);
+`);
 
 const PAGINAS_CONTADOR = [
   'contador-nfe', 'contador-compras', 'contador-xml', 'contador-extrato', 'contador-sped'
@@ -414,8 +445,13 @@ for (const [chave, valor] of Object.entries(defaults)) {
 const adminExists = db.prepare('SELECT id FROM usuarios WHERE email = ?').get('admin@erpisac.com');
 if (!adminExists) {
   db.prepare('INSERT INTO usuarios (nome, email, senha, cargo) VALUES (?, ?, ?, ?)').run(
-    'Administrador', 'admin@erpisac.com', 'admin123', 'Administrador'
+    'Administrador', 'admin@erpisac.com', hashSenha('admin123'), 'Administrador'
   );
+}
+
+const migrarSenhas = db.prepare('UPDATE usuarios SET senha = ? WHERE id = ?');
+for (const user of db.prepare('SELECT id, senha FROM usuarios').all()) {
+  if (precisaAtualizar(user.senha)) migrarSenhas.run(hashSenha(user.senha), user.id);
 }
 
 const caixaStatus = db.prepare('SELECT id FROM caixa_status WHERE id = 1').get();
@@ -467,3 +503,4 @@ if (!db.prepare("SELECT id FROM ordens_servico WHERE equipamento LIKE '%celular%
 }
 
 module.exports = db;
+module.exports.CONFIG_DEFAULTS = defaults;

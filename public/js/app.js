@@ -25,16 +25,38 @@ const PAGES = {
   manual: { title: 'Manual', breadcrumb: 'Dashboard / Manual' }
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+function irParaLogin() {
+  currentUser = null;
+  localStorage.removeItem('erp_user');
+  document.getElementById('app')?.classList.add('hidden');
+  document.getElementById('login-screen')?.classList.remove('hidden');
+  document.getElementById('ai-chat')?.classList.add('hidden');
+  document.getElementById('ai-chat-panel')?.classList.add('hidden');
+}
+
+window.erpSessaoExpirada = () => {
+  if (!currentUser) return;
+  irParaLogin();
+  if (typeof showToast === 'function') showToast('Sessão expirada. Faça login novamente.', 'error');
+};
+
+document.addEventListener('DOMContentLoaded', async () => {
   try {
     const saved = localStorage.getItem('erp_user');
     if (saved) {
-      currentUser = JSON.parse(saved);
-      if (currentUser && currentUser.id) showApp();
-      else currentUser = null;
+      const salvo = JSON.parse(saved);
+      if (salvo && salvo.id) {
+        try {
+          currentUser = await API.me();
+          localStorage.setItem('erp_user', JSON.stringify(currentUser));
+          showApp();
+        } catch {
+          irParaLogin();
+        }
+      } else currentUser = null;
     }
   } catch {
-    localStorage.removeItem('erp_user');
+    irParaLogin();
   }
   bindGlobalEvents();
   aplicarEmpresa();
@@ -49,19 +71,17 @@ function bindGlobalEvents() {
         document.getElementById('login-email').value,
         document.getElementById('login-senha').value
       );
+      delete currentUser.token;
+      delete currentUser.expira_em;
       localStorage.setItem('erp_user', JSON.stringify(currentUser));
       showApp();
     } catch (err) { showToast(err.message, 'error'); }
   };
 
-  document.getElementById('logout-btn').onclick = (e) => {
+  document.getElementById('logout-btn').onclick = async (e) => {
     e.preventDefault();
-    currentUser = null;
-    localStorage.removeItem('erp_user');
-    document.getElementById('app').classList.add('hidden');
-    document.getElementById('login-screen').classList.remove('hidden');
-    document.getElementById('ai-chat')?.classList.add('hidden');
-    document.getElementById('ai-chat-panel')?.classList.add('hidden');
+    try { await API.logout(); } catch {}
+    irParaLogin();
   };
 
   document.getElementById('sidebar-toggle').onclick = () =>
@@ -324,7 +344,7 @@ async function renderPage() {
     return;
   }
   try { await renderer(); }
-  catch (err) { content.innerHTML = `<div class="card"><p style="color:red">Erro: ${err.message}</p></div>`; }
+  catch (err) { content.innerHTML = `<div class="card"><p style="color:red">Erro: ${escapeHtml(err.message)}</p></div>`; }
 }
 
 function pageHeader(title, breadcrumb) {
@@ -2799,7 +2819,7 @@ function renderFinanceiroRows(data, isPagar) {
   if (!data.length) return '<tr class="empty-row"><td colspan="8">Nenhum registro encontrado</td></tr>';
   return data.map(f => {
     const pessoa = pagar ? (f.fornecedor_nome || '-') : (f.cliente_nome || '-');
-    const vencido = f.status === 'Pendente' && f.data_vencimento && String(f.data_vencimento).slice(0, 10) < new Date().toISOString().slice(0, 10);
+    const vencido = f.status === 'Pendente' && f.data_vencimento && String(f.data_vencimento).slice(0, 10) < hojeLocalIso();
     return `<tr>
       <td>${f.id}</td>
       <td>${escapeHtml(f.descricao || '-')}</td>
@@ -2872,7 +2892,7 @@ async function showFinanceiroForm(id) {
     body.cliente_id = body.cliente_id || null;
     body.fornecedor_id = body.fornecedor_id || null;
     if (body.status === 'Pago' && !body.data_pagamento) {
-      body.data_pagamento = new Date().toISOString().slice(0, 10);
+      body.data_pagamento = hojeLocalIso();
     }
   });
 }
@@ -2882,7 +2902,7 @@ async function pagarFinanceiro(id) {
   try {
     const data = await API.financeiro.get(id);
     data.status = 'Pago';
-    data.data_pagamento = data.data_pagamento || new Date().toISOString().slice(0, 10);
+    data.data_pagamento = data.data_pagamento || hojeLocalIso();
     await API.financeiro.update(id, data);
     showToast('Lançamento marcado como pago', 'success');
     renderFinanceiro();
@@ -3280,7 +3300,7 @@ async function renderConfiguracoes() {
               <option value="3" ${cfg.nfce_crt === '3' ? 'selected' : ''}>3 - Regime normal</option>
             </select></div>
           <div class="form-group"><label>Serie NFC-e</label><input name="nfce_serie" type="number" min="1" value="${escapeHtml(cfg.nfce_serie || '1')}"></div>
-          <div class="form-group"><label>Ultimo numero</label><input name="nfce_numero_atual" type="number" min="0" value="${escapeHtml(cfg.nfce_numero_atual || '0')}"></div>
+          <div class="form-group"><label>Ultimo numero</label><input name="nfce_numero_atual" type="number" min="0" value="${escapeHtml(cfg.nfce_numero_atual || '0')}" readonly title="Controlado pelo sistema"></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label>CSC ID</label><input name="nfce_csc_id" value="${escapeHtml(cfg.nfce_csc_id || '')}" placeholder="ID do token SEFAZ"></div>
@@ -3689,7 +3709,7 @@ async function renderContadorExtrato() {
 
 async function renderContadorSped() {
   const st = pageState['contador-sped'];
-  if (!st.mes) st.mes = new Date().toISOString().slice(0, 7);
+  if (!st.mes) st.mes = hojeLocalIso().slice(0, 7);
   let result;
   try { result = await API.contador.sped({ mes: st.mes }); }
   catch (err) {

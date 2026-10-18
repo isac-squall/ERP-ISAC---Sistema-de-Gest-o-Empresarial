@@ -115,8 +115,9 @@ O icone de computador no cabecalho abre **Informacoes do computador**.
 - Formato da chave: `ERPISAC-AAAAMMDD-XXXX-XXXXXXXX` (data de validade + trecho do hardware + assinatura)
 - **Validar neste PC**: confere a chave contra o hardware atual (chave invalida, de outra maquina ou vencida) antes de ativar
 - Sem chave valida apos o teste, as APIs retornam 402 e a tela de bloqueio pede ativacao
-- Gerar chave (fornecedor): senha mestre `ERP_LICENCA_MASTER` (padrao `ISAC-LICENCA`) no proprio modal, com opcao de mostrar/ocultar a senha
-- Login, dados da empresa e rotas `/api/licenca*` continuam liberados com o sistema bloqueado
+- Gerar chave (fornecedor): a senha mestre precisa ser definida em `ERP_LICENCA_MASTER` no ambiente; sem essa variavel a geracao fica desabilitada
+- A assinatura das chaves usa `ERP_LICENCA_SECRETO` quando definido; mantenha o mesmo segredo no emissor e no cliente
+- Login, dados da empresa e rotas `/api/licenca` (GET, ativar e validar) continuam liberados com o sistema bloqueado
 - Zona critica preserva as chaves `licenca_*`
 
 ## Gerenciar Backup
@@ -216,7 +217,29 @@ npm install
 npm start
 ```
 
-Acesse **http://localhost:3000**. O servidor escuta em `0.0.0.0:3000`.
+Acesse **http://localhost:3000**. Por padrao o servidor escuta em `0.0.0.0:3000` para permitir acesso de outros computadores da loja. Para restringir a esta maquina, use `HOST=127.0.0.1 npm start`.
+
+Variaveis de ambiente relevantes:
+
+| Variavel | Uso |
+| --- | --- |
+| `PORT` | Porta HTTP (padrao `3000`) |
+| `HOST` | Interface de escuta (padrao `0.0.0.0`) |
+| `ERP_LICENCA_MASTER` | Senha mestre para gerar chaves de licenca |
+| `ERP_LICENCA_SECRETO` | Segredo HMAC das chaves de licenca |
+| `USER_LLM_API_KEY` / `USER_LLM_BASE_URL` / `USER_LLM_MODEL` | Assistente com IA (opcional) |
+
+## Seguranca
+
+- Login por sessao com token aleatorio em cookie `HttpOnly` (`SameSite=Lax`) e expiracao de 7 dias
+- Senhas armazenadas com `scrypt` + salt; bancos antigos sao migrados automaticamente no primeiro start
+- Autorizacao no servidor por perfil (Administrador, Gerente, Vendedor, Caixa); a interface apenas reflete as permissoes
+- CORS desabilitado; chamadas externas ao navegador nao acessam a API
+- Limite de tentativas de login e de acoes criticas
+- Validacao de valores, tipos, status e datas no Financeiro
+- Uploads limitados a 25 MB por requisicao; ZIP de backup com limite de expansao e de tamanho (protecao contra zip bomb)
+- Indices criados automaticamente para vendas, financeiro, caixa e estoque
+- `PUT /api/config` aceita apenas chaves conhecidas; campos de licenca, backup e versao nao podem ser sobrescritos pela tela
 
 ## Recursos extras
 
