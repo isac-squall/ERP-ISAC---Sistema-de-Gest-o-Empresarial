@@ -1,5 +1,5 @@
 const express = require('express');
-const cors = require('cors');
+const crypto = require('crypto');
 const path = require('path');
 const db = require('./database');
 const nfce = require('./nfce');
@@ -8,12 +8,24 @@ const backupMod = require('./backup');
 const contador = require('./contador');
 const dre = require('./dre');
 const licenca = require('./licenca');
+const { hashSenha, verificarSenha, precisaAtualizar } = require('./senha');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
+const SESSAO_DIAS = 7;
+const COOKIE_SESSAO = 'erp_sid';
 
-app.use(cors());
-app.use(express.json({ limit: '100mb' }));
+app.disable('x-powered-by');
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  next();
+});
+
+app.use(express.json({ limit: '25mb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: false,
   lastModified: false,
@@ -21,6 +33,168 @@ app.use(express.static(path.join(__dirname, 'public'), {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   }
 }));
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+function limparSessoesExpiradas() {
+  db.prepare('DELETE FROM sessoes WHERE expira_em <= ?').run(new Date().toISOString());
+}
+
+function criarSessao(usuarioId) {
+  limparSessoesExpiradas();
+  const token = crypto.randomBytes(32).toString('base64url');
+  const expira = new Date(Date.now() + SESSAO_DIAS * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare('INSERT INTO sessoes (token_hash, usuario_id, expira_em) VALUES (?,?,?)')
+    .run(hashToken(token), usuarioId, expira);
+  return { token, expira };
+}
+
+function lerCookie(req, nome) {
+  const bruto = String(req.headers.cookie || '');
+  for (const parte of bruto.split(';')) {
+    const [chave, ...resto] = parte.trim().split('=');
+    if (chave === nome) return decodeURIComponent(resto.join('='));
+  }
+  return '';
+}
+
+function tokenDaRequisicao(req) {
+  const auth = String(req.headers.authorization || '');
+  if (auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  return lerCookie(req, COOKIE_SESSAO);
+}
+
+function definirCookieSessao(req, res, token) {
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const secure = proto === 'https' ? '; Secure' : '';
+  res.setHeader('Set-Cookie',
+    `${COOKIE_SESSAO}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSAO_DIAS * 86400}${secure}`);
+}
+
+function limparCookieSessao(res) {
+  res.setHeader('Set-Cookie', `${COOKIE_SESSAO}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+
+function usuarioDaSessao(req) {
+  const token = tokenDaRequisicao(req);
+  if (!token) return null;
+  const row = db.prepare(`
+    SELECT u.id, u.nome, u.email, u.cargo, s.expira_em
+    FROM sessoes s JOIN usuarios u ON u.id = s.usuario_id
+    WHERE s.token_hash = ? AND u.ativo = 1
+  `).get(hashToken(token));
+  if (!row) return null;
+  if (new Date(row.expira_em).getTime() <= Date.now()) {
+    db.prepare('DELETE FROM sessoes WHERE token_hash = ?').run(hashToken(token));
+    return null;
+  }
+  const { expira_em, ...usuario } = row;
+  usuario.permissoes = permissoesDoCargo(usuario.cargo);
+  return usuario;
+}
+
+function autenticar(email, senha) {
+  const row = db.prepare('SELECT * FROM usuarios WHERE email = ? AND ativo = 1').get(String(email || '').trim());
+  if (!row || !verificarSenha(senha, row.senha)) return null;
+  if (precisaAtualizar(row.senha)) {
+    db.prepare('UPDATE usuarios SET senha = ? WHERE id = ?').run(hashSenha(senha), row.id);
+  }
+  const { senha: _ignorada, ...usuario } = row;
+  usuario.permissoes = permissoesDoCargo(usuario.cargo);
+  return usuario;
+}
+
+function criarLimitador({ janelaMs, max, mensagem }) {
+  const tentativas = new Map();
+  return (req, res, next) => {
+    const agora = Date.now();
+    const chave = req.ip || req.socket.remoteAddress || 'anon';
+    let item = tentativas.get(chave);
+    if (!item || item.reset <= agora) {
+      item = { total: 0, reset: agora + janelaMs };
+      tentativas.set(chave, item);
+    }
+    item.total += 1;
+    if (tentativas.size > 2000) {
+      for (const [k, v] of tentativas) if (v.reset <= agora) tentativas.delete(k);
+    }
+    if (item.total > max) {
+      res.setHeader('Retry-After', String(Math.ceil((item.reset - agora) / 1000)));
+      return res.status(429).json({ error: mensagem });
+    }
+    next();
+  };
+}
+
+const limitarLogin = criarLimitador({
+  janelaMs: 5 * 60 * 1000,
+  max: 20,
+  mensagem: 'Muitas tentativas de login. Aguarde alguns minutos e tente novamente.'
+});
+const limitarLicenca = criarLimitador({
+  janelaMs: 60 * 1000,
+  max: 30,
+  mensagem: 'Muitas tentativas. Aguarde um minuto e tente novamente.'
+});
+const limitarAcaoCritica = criarLimitador({
+  janelaMs: 5 * 60 * 1000,
+  max: 10,
+  mensagem: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.'
+});
+
+function rotaPublica(req) {
+  const p = req.path;
+  const m = req.method;
+  if (p === '/api/auth/login' && m === 'POST') return true;
+  if (p === '/api/licenca' && m === 'GET') return true;
+  if ((p === '/api/licenca/ativar' || p === '/api/licenca/validar') && m === 'POST') return true;
+  if (p === '/api/empresa' && m === 'GET') return true;
+  return false;
+}
+
+function permissoesDaRota(req) {
+  const p = req.path;
+  const m = req.method;
+  if (p === '/api/config') return m === 'GET' ? null : ['configuracoes'];
+  if (p === '/api/empresa') return ['configuracoes'];
+  if (p.startsWith('/api/config/apagar-banco')) return ['configuracoes'];
+  if (p.startsWith('/api/usuarios') || p.startsWith('/api/perfis')) return ['usuarios'];
+  if (p.startsWith('/api/caixa/status')) return null;
+  if (p.startsWith('/api/caixa')) return ['caixa'];
+  if (p.startsWith('/api/vendas') || p.startsWith('/api/orcamentos')) return ['vendas', 'historico-vendas'];
+  if (p.startsWith('/api/financeiro/cliente/')) return ['financeiro', 'vendas', 'caixa'];
+  if (p.startsWith('/api/financeiro')) return ['financeiro'];
+  if (p.startsWith('/api/dre')) return ['financeiro'];
+  if (p.startsWith('/api/relatorio')) return ['relatorio'];
+  if (p.startsWith('/api/produtos/export') || p.startsWith('/api/produtos/modelo') || p.startsWith('/api/produtos/import')) {
+    return ['produtos'];
+  }
+  if (p.startsWith('/api/produtos') || p.startsWith('/api/promocoes')) {
+    return m === 'GET' ? ['produtos', 'vendas'] : ['produtos'];
+  }
+  if (p.startsWith('/api/clientes')) return ['clientes', 'vendas', 'caixa'];
+  if (p.startsWith('/api/fornecedores')) return ['fornecedores', 'produtos'];
+  if (p.startsWith('/api/ordens-servico')) return ['ordens-servico'];
+  if (p.startsWith('/api/impressoras')) return m === 'GET' ? null : ['impressoras'];
+  if (p.startsWith('/api/backups')) return ['backup'];
+  if (p.startsWith('/api/contador/nfe/xml.zip')) return ['contador-xml', 'contador-nfe'];
+  if (p.startsWith('/api/contador/nfe')) return ['contador-nfe'];
+  if (p.startsWith('/api/contador/compras')) return ['contador-compras'];
+  if (p.startsWith('/api/contador/extrato')) return ['contador-extrato'];
+  if (p.startsWith('/api/contador/sped')) return ['contador-sped'];
+  if (p.startsWith('/api/contador')) return null;
+  if (p.startsWith('/api/licenca')) return ['configuracoes'];
+  return null;
+}
+
+function exigirAdmin(req, res, next) {
+  if (req.usuario?.cargo !== 'Administrador') {
+    return res.status(403).json({ error: 'Somente o administrador pode executar esta acao' });
+  }
+  next();
+}
 
 app.get('/api/licenca', (req, res) => {
   try { res.json(licenca.publico()); }
@@ -44,15 +218,6 @@ app.post('/api/licenca/validar', (req, res) => {
   }
 });
 
-app.post('/api/licenca/gerar', (req, res) => {
-  try {
-    const r = licenca.gerar(req.body || {});
-    res.json({ message: 'Chave gerada', ...r });
-  } catch (err) {
-    res.status(err.status || 400).json({ error: err.message || 'Falha ao gerar chave' });
-  }
-});
-
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api')) return next();
   if (licenca.rotaLivre(req)) return next();
@@ -66,16 +231,44 @@ app.use((req, res, next) => {
   next();
 });
 
-function paginate(query, params, page = 1, limit = 15, search = '') {
-  const offset = (page - 1) * limit;
-  let countQuery = query.replace(/SELECT[\s\S]*?FROM/i, 'SELECT COUNT(*) as total FROM');
-  const countParams = [...params];
-  if (search) {
-    // count uses same params minus limit/offset
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api')) return next();
+  if (rotaPublica(req)) return next();
+  const usuario = usuarioDaSessao(req);
+  if (!usuario) {
+    return res.status(401).json({ error: 'Sessao expirada. Faca login novamente.' });
   }
-  const total = db.prepare(countQuery).get(...countParams)?.total || 0;
-  const rows = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, limit, offset);
-  return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) || 1 };
+  req.usuario = usuario;
+  next();
+});
+
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api')) return next();
+  if (rotaPublica(req)) return next();
+  const exigidas = permissoesDaRota(req);
+  if (!exigidas) return next();
+  if (req.usuario?.cargo === 'Administrador') return next();
+  const possui = new Set(req.usuario?.permissoes || []);
+  if (exigidas.some(p => possui.has(p))) return next();
+  return res.status(403).json({ error: 'Voce nao tem permissao para executar esta acao.' });
+});
+
+app.post('/api/licenca/gerar', exigirAdmin, limitarLicenca, (req, res) => {
+  try {
+    const r = licenca.gerar(req.body || {});
+    res.json({ message: 'Chave gerada', ...r });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao gerar chave' });
+  }
+});
+
+function paginate(query, params, page = 1, limit = 15, search = '') {
+  const limite = Math.min(Math.max(Number(limit) || 15, 1), 200);
+  const pagina = Math.max(Number(page) || 1, 1);
+  const offset = (pagina - 1) * limite;
+  const total = db.prepare(`SELECT COUNT(*) as total FROM (${query})`).get(...params)?.total || 0;
+  const rows = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, limite, offset);
+  return { data: rows, total, page: pagina, limit: limite, totalPages: Math.ceil(total / limite) || 1 };
 }
 
 function safeParseJson(value) {
@@ -108,12 +301,25 @@ function permissoesDoCargo(cargo) {
   return ['dashboard', 'manual'];
 }
 
-app.post('/api/auth/login', (req, res) => {
-  const { email, senha } = req.body;
-  const user = db.prepare('SELECT id, nome, email, cargo FROM usuarios WHERE email = ? AND senha = ? AND ativo = 1').get(email, senha);
+app.post('/api/auth/login', limitarLogin, (req, res) => {
+  const { email, senha } = req.body || {};
+  if (!email || !senha) return res.status(400).json({ error: 'Informe email e senha' });
+  const user = autenticar(email, senha);
   if (!user) return res.status(401).json({ error: 'Credenciais inválidas' });
-  user.permissoes = permissoesDoCargo(user.cargo);
-  res.json(user);
+  const sessao = criarSessao(user.id);
+  definirCookieSessao(req, res, sessao.token);
+  res.json({ ...user, token: sessao.token, expira_em: sessao.expira });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  res.json(req.usuario);
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const token = tokenDaRequisicao(req);
+  if (token) db.prepare('DELETE FROM sessoes WHERE token_hash = ?').run(hashToken(token));
+  limparCookieSessao(res);
+  res.json({ message: 'Sessão encerrada' });
 });
 
 // ============ DASHBOARD ============
@@ -209,25 +415,40 @@ app.get('/api/config', (req, res) => {
   res.json(nfce.sanitizar(nfce.loadConfig()));
 });
 
+const CONFIG_PERMITIDAS = new Set([
+  ...Object.keys(db.CONFIG_DEFAULTS || {}),
+  'nfce_certificado_nome',
+  'nfce_certificado_validade'
+]);
+const CONFIG_PROTEGIDAS = new Set(['nfce_numero_atual', 'app_versao_instalada']);
+
 app.put('/api/config', (req, res) => {
   const body = req.body || {};
-  const stmt = db.prepare('INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor');
-  const txn = db.transaction((data) => {
-    for (const [chave, valor] of Object.entries(data)) {
-      if (nfce.SECRET_KEYS.includes(chave) && (valor === '1' || valor === '' || valor == null)) continue;
-      stmt.run(chave, String(valor ?? ''));
-    }
-  });
-  txn(body);
-  if (body.nfce_certificado_pfx && body.nfce_certificado_senha && body.nfce_certificado_pfx !== '1') {
+  const limpo = {};
+  for (const [chave, valor] of Object.entries(body)) {
+    if (!CONFIG_PERMITIDAS.has(chave) || CONFIG_PROTEGIDAS.has(chave)) continue;
+    if (nfce.SECRET_KEYS.includes(chave) && (valor === '1' || valor === '' || valor == null)) continue;
+    limpo[chave] = String(valor ?? '');
+  }
+
+  let infoCert = null;
+  if (limpo.nfce_certificado_pfx && limpo.nfce_certificado_pfx !== '1' && limpo.nfce_certificado_senha) {
     try {
-      const info = nfce.infoPfx(body.nfce_certificado_pfx, body.nfce_certificado_senha);
-      stmt.run('nfce_certificado_nome', info.nome || '');
-      stmt.run('nfce_certificado_validade', info.validade || '');
+      infoCert = nfce.infoPfx(limpo.nfce_certificado_pfx, limpo.nfce_certificado_senha);
     } catch (err) {
       return res.status(400).json({ error: err.message || 'Certificado A1 invalido' });
     }
   }
+
+  const stmt = db.prepare('INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor');
+  const txn = db.transaction(() => {
+    for (const [chave, valor] of Object.entries(limpo)) stmt.run(chave, valor);
+    if (infoCert) {
+      stmt.run('nfce_certificado_nome', infoCert.nome || '');
+      stmt.run('nfce_certificado_validade', infoCert.validade || '');
+    }
+  });
+  txn();
   res.json({ message: 'Configuração salva', ...nfce.sanitizar(nfce.loadConfig()) });
 });
 
@@ -291,20 +512,18 @@ app.put('/api/empresa', (req, res) => {
   res.json({ message: 'Empresa salva', ...empresaPublica(nfce.loadConfig()) });
 });
 
-app.post('/api/config/apagar-banco', (req, res) => {
-  const { confirmar, senha, usuario_id } = req.body || {};
+app.post('/api/config/apagar-banco', limitarAcaoCritica, (req, res) => {
+  const { confirmar, senha } = req.body || {};
   if (String(confirmar || '').trim().toUpperCase() !== 'APAGAR') {
     return res.status(400).json({ error: 'Digite APAGAR para confirmar' });
   }
-  const admin = usuario_id
-    ? db.prepare('SELECT * FROM usuarios WHERE id = ? AND ativo = 1').get(usuario_id)
-    : db.prepare("SELECT * FROM usuarios WHERE cargo = 'Administrador' AND ativo = 1 ORDER BY id LIMIT 1").get();
+  const admin = db.prepare('SELECT * FROM usuarios WHERE id = ? AND ativo = 1').get(req.usuario.id);
   if (!admin) return res.status(400).json({ error: 'Administrador nao encontrado' });
   if (admin.cargo !== 'Administrador') {
     return res.status(403).json({ error: 'Somente o administrador pode apagar o banco' });
   }
   if (!senha) return res.status(400).json({ error: 'Informe a senha do administrador' });
-  if (admin.senha !== senha) return res.status(401).json({ error: 'Senha invalida' });
+  if (!verificarSenha(senha, admin.senha)) return res.status(401).json({ error: 'Senha invalida' });
 
   const licencas = db.prepare('SELECT chave, valor FROM config').all().filter(r => isPreservedConfigKey(r.chave));
   const defaults = {
@@ -355,7 +574,7 @@ app.post('/api/config/apagar-banco', (req, res) => {
     db.pragma('foreign_keys = OFF');
     const tx = db.transaction(() => {
       const tabelas = [
-        'venda_itens', 'nfce', 'vendas', 'orcamentos', 'estoque_movimentos',
+        'sessoes', 'venda_itens', 'nfce', 'vendas', 'orcamentos', 'estoque_movimentos',
         'promocoes', 'produtos', 'ordens_servico', 'financeiro', 'caixa',
         'clientes', 'fornecedores', 'usuarios', 'impressoras'
       ];
@@ -367,7 +586,7 @@ app.post('/api/config/apagar-banco', (req, res) => {
         if (!isPreservedConfigKey(row.chave)) delCfg.run(row.chave);
       }
       try {
-        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produtos','ordens_servico','financeiro','caixa','clientes','fornecedores','usuarios','impressoras')");
+        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('sessoes','venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produtos','ordens_servico','financeiro','caixa','clientes','fornecedores','usuarios','impressoras')");
       } catch {}
       db.prepare(`INSERT INTO usuarios (nome, email, senha, cargo, celular, data_nascimento, cpf, tipo_pessoa, ativo)
         VALUES (?,?,?,?,?,?,?,?,1)`).run(
@@ -635,12 +854,12 @@ app.post('/api/produtos/import', (req, res) => {
           const anterior = getEstoque.get(row.id)?.estoque || 0;
           upd.run(...vals, row.id);
           if (anterior !== p.estoque) {
-            mov.run(row.id, 'inventario', p.estoque, anterior, p.estoque, 'Importacao de produtos', req.body.usuario_id || null);
+            mov.run(row.id, 'inventario', p.estoque, anterior, p.estoque, 'Importacao de produtos', req.usuario.id);
           }
           atualizados++;
         } else {
           const result = ins.run(...vals);
-          mov.run(result.lastInsertRowid, 'entrada', p.estoque, 0, p.estoque, 'Importacao de produtos', req.body.usuario_id || null);
+          mov.run(result.lastInsertRowid, 'entrada', p.estoque, 0, p.estoque, 'Importacao de produtos', req.usuario.id);
           criados++;
         }
       });
@@ -679,7 +898,8 @@ app.delete('/api/produtos/:id', (req, res) => {
 app.post('/api/produtos/:id/estoque', (req, res) => {
   const produto = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) return res.status(404).json({ error: 'Produto não encontrado' });
-  const { tipo, quantidade, observacao, usuario_id } = req.body;
+  const { tipo, quantidade, observacao } = req.body;
+  const usuario_id = req.usuario.id;
   const qtd = parseInt(quantidade, 10);
   if (!tipo || !['entrada', 'ajuste', 'inventario'].includes(tipo)) {
     return res.status(400).json({ error: 'Tipo inválido' });
@@ -814,31 +1034,40 @@ app.get('/api/usuarios/:id', (req, res) => {
   res.json(row);
 });
 
-app.post('/api/usuarios', (req, res) => {
+app.post('/api/usuarios', exigirAdmin, (req, res) => {
   const { nome, email, senha, cargo, celular, data_nascimento, cpf, tipo_pessoa } = req.body;
   if (!nome || !email || !senha) return res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
+  if (String(senha).length < 4 || String(senha).length > 200) {
+    return res.status(400).json({ error: 'A senha deve ter entre 4 e 200 caracteres' });
+  }
   try {
     const result = db.prepare('INSERT INTO usuarios (nome, email, senha, cargo, celular, data_nascimento, cpf, tipo_pessoa) VALUES (?,?,?,?,?,?,?,?)')
-      .run(nome, email, senha, cargo || 'Vendedor', celular || null, data_nascimento || null, cpf || null, tipo_pessoa || 'PF');
+      .run(nome, String(email).trim().toLowerCase(), hashSenha(senha), cargo || 'Vendedor', celular || null, data_nascimento || null, cpf || null, tipo_pessoa || 'PF');
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
     res.status(400).json({ error: 'Email já cadastrado' });
   }
 });
 
-app.put('/api/usuarios/:id', (req, res) => {
+app.put('/api/usuarios/:id', exigirAdmin, (req, res) => {
   const { nome, email, senha, cargo, ativo, celular, data_nascimento, cpf, tipo_pessoa } = req.body;
+  const alvo = db.prepare('SELECT id FROM usuarios WHERE id = ?').get(req.params.id);
+  if (!alvo) return res.status(404).json({ error: 'Usuário não encontrado' });
+  if (senha && (String(senha).length < 4 || String(senha).length > 200)) {
+    return res.status(400).json({ error: 'A senha deve ter entre 4 e 200 caracteres' });
+  }
+  const emailNormalizado = String(email || '').trim().toLowerCase();
   if (senha) {
     db.prepare('UPDATE usuarios SET nome=?, email=?, senha=?, cargo=?, ativo=?, celular=?, data_nascimento=?, cpf=?, tipo_pessoa=? WHERE id=?')
-      .run(nome, email, senha, cargo, ativo ?? 1, celular || null, data_nascimento || null, cpf || null, tipo_pessoa || 'PF', req.params.id);
+      .run(nome, emailNormalizado, hashSenha(senha), cargo, ativo ?? 1, celular || null, data_nascimento || null, cpf || null, tipo_pessoa || 'PF', req.params.id);
   } else {
     db.prepare('UPDATE usuarios SET nome=?, email=?, cargo=?, ativo=?, celular=?, data_nascimento=?, cpf=?, tipo_pessoa=? WHERE id=?')
-      .run(nome, email, cargo, ativo ?? 1, celular || null, data_nascimento || null, cpf || null, tipo_pessoa || 'PF', req.params.id);
+      .run(nome, emailNormalizado, cargo, ativo ?? 1, celular || null, data_nascimento || null, cpf || null, tipo_pessoa || 'PF', req.params.id);
   }
   res.json({ message: 'Usuário atualizado' });
 });
 
-app.delete('/api/usuarios/:id', (req, res) => {
+app.delete('/api/usuarios/:id', exigirAdmin, (req, res) => {
   db.prepare('UPDATE usuarios SET ativo = 0 WHERE id = ?').run(req.params.id);
   res.json({ message: 'Usuário desativado' });
 });
@@ -881,7 +1110,7 @@ app.get('/api/perfis/:id', (req, res) => {
   res.json(row);
 });
 
-app.put('/api/perfis/:id', (req, res) => {
+app.put('/api/perfis/:id', exigirAdmin, (req, res) => {
   const { nome, descricao, permissoes } = req.body;
   const atual = db.prepare('SELECT nome FROM perfis WHERE id = ?').get(req.params.id);
   if (!atual) return res.status(404).json({ error: 'Perfil não encontrado' });
@@ -941,6 +1170,34 @@ function inserirFinanceiro(d) {
     Number(d.valor_liquido != null ? d.valor_liquido : d.valor) || 0,
     d.forma_pagamento || null, d.parcelas || 1
   );
+}
+
+function registrarMovimentoEstoque({ produtoId, tipo, quantidade, anterior, novo, observacao, usuarioId }) {
+  if (!produtoId) return;
+  db.prepare(`INSERT INTO estoque_movimentos
+    (produto_id, tipo, quantidade, estoque_anterior, estoque_novo, observacao, usuario_id)
+    VALUES (?,?,?,?,?,?,?)`).run(
+    produtoId, tipo, Number(quantidade) || 0, Number(anterior) || 0, Number(novo) || 0,
+    observacao || null, usuarioId || null
+  );
+}
+
+function devolverEstoqueVenda(itens, usuarioId, observacao) {
+  for (const item of itens) {
+    if (!item.produto_id) continue;
+    const prod = db.prepare('SELECT estoque FROM produtos WHERE id = ?').get(item.produto_id);
+    const anterior = Number(prod?.estoque) || 0;
+    db.prepare('UPDATE produtos SET estoque = estoque + ? WHERE id = ?').run(item.quantidade, item.produto_id);
+    registrarMovimentoEstoque({
+      produtoId: item.produto_id,
+      tipo: 'Entrada',
+      quantidade: item.quantidade,
+      anterior,
+      novo: anterior + (Number(item.quantidade) || 0),
+      observacao,
+      usuarioId
+    });
+  }
 }
 
 function estornarFinanceiroVenda(vendaId, motivo) {
@@ -1081,7 +1338,8 @@ app.get('/api/caixa/status', (req, res) => {
 });
 
 app.post('/api/caixa/abrir', (req, res) => {
-  const { valor_inicial, usuario_id } = req.body;
+  const { valor_inicial } = req.body;
+  const usuario_id = req.usuario.id;
   const valor = Number(valor_inicial) || 0;
   const txn = db.transaction(() => {
     const n = db.prepare("SELECT COUNT(*) AS c FROM caixa WHERE tipo = 'Abertura'").get().c + 1;
@@ -1142,7 +1400,8 @@ app.get('/api/caixa/movimentos/:id', (req, res) => {
 });
 
 app.post('/api/caixa/movimentos', (req, res) => {
-  const { tipo, descricao, valor, forma_pagamento, usuario_id } = req.body;
+  const { tipo, descricao, valor, forma_pagamento } = req.body;
+  const usuario_id = req.usuario.id;
   if (!['Entrada', 'Saída'].includes(tipo)) return res.status(400).json({ error: 'Tipo inválido' });
   const status = db.prepare('SELECT aberto FROM caixa_status WHERE id = 1').get();
   if (!status?.aberto) return res.status(400).json({ error: 'Caixa fechado. Abra o caixa para registrar movimentos.' });
@@ -1209,9 +1468,7 @@ app.delete('/api/caixa/movimentos/:id', (req, res) => {
       const venda = db.prepare('SELECT * FROM vendas WHERE id = ?').get(movimento.venda_id);
       if (venda && venda.status !== 'Cancelada') {
         const itens = db.prepare('SELECT * FROM venda_itens WHERE venda_id = ?').all(venda.id);
-        for (const item of itens) {
-          db.prepare('UPDATE produtos SET estoque = estoque + ? WHERE id = ?').run(item.quantidade, item.produto_id);
-        }
+        devolverEstoqueVenda(itens, req.usuario.id, `Cancelamento venda #${venda.id} (movimento caixa #${movimento.id})`);
         db.prepare("UPDATE vendas SET status='Cancelada' WHERE id=?").run(venda.id);
       }
     }
@@ -1243,7 +1500,8 @@ app.get('/api/caixa/historico', (req, res) => {
 
 // ============ VENDAS ============
 app.post('/api/vendas', async (req, res) => {
-  const { cliente_id, itens, desconto, forma_pagamento, usuario_id, valor_recebido, parcelas, emitir_nfce } = req.body;
+  const { cliente_id, itens, desconto, forma_pagamento, valor_recebido, parcelas, emitir_nfce } = req.body;
+  const usuario_id = req.usuario.id;
   const status = db.prepare('SELECT aberto FROM caixa_status WHERE id = 1').get();
   if (!status?.aberto) return res.status(400).json({ error: 'Caixa fechado. Abra o caixa para realizar vendas.' });
   if (!itens?.length) return res.status(400).json({ error: 'Adicione itens à venda' });
@@ -1284,8 +1542,19 @@ app.post('/api/vendas', async (req, res) => {
         custo = Number(db.prepare('SELECT preco_custo FROM produtos WHERE id = ?').get(item.produto_id)?.preco_custo) || 0;
       }
       if (item.produto_id) {
+        const prod = db.prepare('SELECT estoque FROM produtos WHERE id = ?').get(item.produto_id);
+        const anterior = Number(prod?.estoque) || 0;
         const ok = updateEstoque.run(quantidade, item.produto_id, quantidade);
         if (ok.changes === 0) throw new Error('Estoque insuficiente');
+        registrarMovimentoEstoque({
+          produtoId: item.produto_id,
+          tipo: 'Saída',
+          quantidade,
+          anterior,
+          novo: anterior - quantidade,
+          observacao: `Venda #${venda.lastInsertRowid}`,
+          usuarioId: usuario_id
+        });
       }
       insertItem.run(venda.lastInsertRowid, item.produto_id || null, item.descricao || null,
         quantidade, preco, quantidade * preco, item.os_id || null, custo || 0);
@@ -1384,8 +1653,8 @@ app.post('/api/vendas/:id/cancelar', async (req, res) => {
     }
   }
   const txn = db.transaction(() => {
+    devolverEstoqueVenda(itens, req.usuario.id, `Cancelamento venda #${req.params.id}`);
     for (const item of itens) {
-      if (item.produto_id) db.prepare('UPDATE produtos SET estoque = estoque + ? WHERE id = ?').run(item.quantidade, item.produto_id);
       if (item.os_id) {
         db.prepare("UPDATE ordens_servico SET status='Pronta para entrega', data_entrega=NULL WHERE id=? AND status='Entregue'").run(item.os_id);
       }
@@ -1428,7 +1697,8 @@ app.get('/api/orcamentos/:id', (req, res) => {
 });
 
 app.post('/api/orcamentos', (req, res) => {
-  const { cliente_id, cliente_nome, itens, subtotal, desconto, total, observacao, usuario_id } = req.body;
+  const { cliente_id, cliente_nome, itens, subtotal, desconto, total, observacao } = req.body;
+  const usuario_id = req.usuario.id;
   if (!itens?.length) return res.status(400).json({ error: 'Adicione itens ao orçamento' });
   const result = db.prepare(`INSERT INTO orcamentos (cliente_id, cliente_nome, itens, subtotal, desconto, total, observacao, usuario_id)
     VALUES (?,?,?,?,?,?,?,?)`).run(
@@ -1522,16 +1792,101 @@ app.get('/api/financeiro/:id', (req, res) => {
   res.json(row);
 });
 
+const TIPOS_FINANCEIRO = new Set(['Receita', 'Despesa']);
+const STATUS_FINANCEIRO = new Set(['Pendente', 'Pago', 'Cancelado']);
+
+function dataValida(valor) {
+  if (!valor) return null;
+  const s = String(valor).slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  if (d.getUTCFullYear() !== Number(m[1]) || d.getUTCMonth() !== Number(m[2]) - 1 || d.getUTCDate() !== Number(m[3])) {
+    return null;
+  }
+  return s;
+}
+
+function inteiroOuNulo(valor) {
+  if (valor === null || valor === undefined || valor === '') return null;
+  const n = Number(valor);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function validarLancamentoFinanceiro(body = {}) {
+  const tipo = String(body.tipo || '').trim();
+  if (!TIPOS_FINANCEIRO.has(tipo)) {
+    const err = new Error('Tipo deve ser Receita ou Despesa');
+    err.status = 400;
+    throw err;
+  }
+  const valor = Number(body.valor);
+  if (!Number.isFinite(valor) || valor < 0) {
+    const err = new Error('Valor invalido');
+    err.status = 400;
+    throw err;
+  }
+  const status = String(body.status || 'Pendente').trim();
+  if (!STATUS_FINANCEIRO.has(status)) {
+    const err = new Error('Status invalido');
+    err.status = 400;
+    throw err;
+  }
+  if (body.data_vencimento && !dataValida(body.data_vencimento)) {
+    const err = new Error('Data de vencimento invalida');
+    err.status = 400;
+    throw err;
+  }
+  if (body.data_pagamento && !dataValida(body.data_pagamento)) {
+    const err = new Error('Data de pagamento invalida');
+    err.status = 400;
+    throw err;
+  }
+  const vencimento = dataValida(body.data_vencimento) || hojeIso();
+  let pagamento = dataValida(body.data_pagamento);
+  if (status === 'Pago' && !pagamento) pagamento = hojeIso();
+  return {
+    tipo,
+    categoria: String(body.categoria || '').slice(0, 100),
+    descricao: String(body.descricao || '').slice(0, 500),
+    valor: Math.round(valor * 100) / 100,
+    data_vencimento: vencimento,
+    data_pagamento: pagamento,
+    status,
+    cliente_id: inteiroOuNulo(body.cliente_id),
+    fornecedor_id: inteiroOuNulo(body.fornecedor_id)
+  };
+}
+
 app.post('/api/financeiro', (req, res) => {
-  const { tipo, categoria, descricao, valor, data_vencimento, data_pagamento, status, cliente_id, fornecedor_id } = req.body;
-  const result = db.prepare('INSERT INTO financeiro (tipo, categoria, descricao, valor, data_vencimento, data_pagamento, status, cliente_id, fornecedor_id) VALUES (?,?,?,?,?,?,?,?,?)').run(tipo, categoria, descricao, valor, data_vencimento, data_pagamento, status || 'Pendente', cliente_id || null, fornecedor_id || null);
-  res.json({ id: result.lastInsertRowid });
+  try {
+    const d = validarLancamentoFinanceiro(req.body || {});
+    const result = db.prepare(`INSERT INTO financeiro
+      (tipo, categoria, descricao, valor, data_vencimento, data_pagamento, status, cliente_id, fornecedor_id)
+      VALUES (?,?,?,?,?,?,?,?,?)`).run(
+      d.tipo, d.categoria, d.descricao, d.valor, d.data_vencimento, d.data_pagamento,
+      d.status, d.cliente_id, d.fornecedor_id
+    );
+    res.json({ id: result.lastInsertRowid });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao salvar lancamento' });
+  }
 });
 
 app.put('/api/financeiro/:id', (req, res) => {
-  const { tipo, categoria, descricao, valor, data_vencimento, data_pagamento, status, cliente_id, fornecedor_id } = req.body;
-  db.prepare('UPDATE financeiro SET tipo=?, categoria=?, descricao=?, valor=?, data_vencimento=?, data_pagamento=?, status=?, cliente_id=?, fornecedor_id=? WHERE id=?').run(tipo, categoria, descricao, valor, data_vencimento, data_pagamento, status, cliente_id || null, fornecedor_id || null, req.params.id);
-  res.json({ message: 'Lançamento atualizado' });
+  try {
+    const existe = db.prepare('SELECT id FROM financeiro WHERE id = ?').get(req.params.id);
+    if (!existe) return res.status(404).json({ error: 'Lançamento não encontrado' });
+    const d = validarLancamentoFinanceiro(req.body || {});
+    db.prepare(`UPDATE financeiro SET tipo=?, categoria=?, descricao=?, valor=?, data_vencimento=?,
+      data_pagamento=?, status=?, cliente_id=?, fornecedor_id=? WHERE id=?`).run(
+      d.tipo, d.categoria, d.descricao, d.valor, d.data_vencimento, d.data_pagamento,
+      d.status, d.cliente_id, d.fornecedor_id, req.params.id
+    );
+    res.json({ message: 'Lançamento atualizado' });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao atualizar lancamento' });
+  }
 });
 
 app.delete('/api/financeiro/:id', (req, res) => {
@@ -1592,11 +1947,14 @@ app.get('/api/relatorio', (req, res) => {
   const crediarioAberto = db.prepare(`
     SELECT COALESCE(SUM(valor),0) as total FROM financeiro
     WHERE tipo='Receita' AND status='Pendente'
-  `).get().total;
+      AND date(data_vencimento) >= date(?) AND date(data_vencimento) <= date(?)
+  `).get(from, to).total;
   const crediarioVencido = db.prepare(`
     SELECT COALESCE(SUM(valor),0) as total FROM financeiro
-    WHERE tipo='Receita' AND status='Pendente' AND date(data_vencimento) < date('now','localtime')
-  `).get().total;
+    WHERE tipo='Receita' AND status='Pendente'
+      AND date(data_vencimento) >= date(?) AND date(data_vencimento) <= date(?)
+      AND date(data_vencimento) < date('now','localtime')
+  `).get(from, to).total;
 
   const estoque = db.prepare(`
     SELECT COALESCE(SUM(estoque * COALESCE(preco,0)),0) as valor,
@@ -1834,15 +2192,13 @@ app.post('/api/backups/verificar-atualizacao', async (req, res) => {
 
 app.post('/api/backups/restaurar-arquivo', async (req, res) => {
   try {
-    const { senha, usuario_id, conteudo, nome, encoding } = req.body || {};
-    const admin = usuario_id
-      ? db.prepare('SELECT * FROM usuarios WHERE id = ? AND ativo = 1').get(usuario_id)
-      : db.prepare("SELECT * FROM usuarios WHERE cargo = 'Administrador' AND ativo = 1 ORDER BY id LIMIT 1").get();
+    const { senha, conteudo, nome, encoding } = req.body || {};
+    const admin = db.prepare('SELECT * FROM usuarios WHERE id = ? AND ativo = 1').get(req.usuario.id);
     if (!admin || admin.cargo !== 'Administrador') {
       return res.status(403).json({ error: 'Somente o administrador pode restaurar backup' });
     }
     if (!senha) return res.status(400).json({ error: 'Informe a senha do administrador' });
-    if (admin.senha !== senha) return res.status(401).json({ error: 'Senha invalida' });
+    if (!verificarSenha(senha, admin.senha)) return res.status(401).json({ error: 'Senha invalida' });
     if (!conteudo) return res.status(400).json({ error: 'Envie um arquivo .zip ou .db' });
     const raw = encoding === 'base64' ? Buffer.from(conteudo, 'base64') : Buffer.from(conteudo);
     await backupMod.restaurar(raw, nome);
@@ -1867,15 +2223,13 @@ app.get('/api/backups/:id/download', (req, res) => {
 
 app.post('/api/backups/:id/restaurar', async (req, res) => {
   try {
-    const { senha, usuario_id } = req.body || {};
-    const admin = usuario_id
-      ? db.prepare('SELECT * FROM usuarios WHERE id = ? AND ativo = 1').get(usuario_id)
-      : db.prepare("SELECT * FROM usuarios WHERE cargo = 'Administrador' AND ativo = 1 ORDER BY id LIMIT 1").get();
+    const { senha } = req.body || {};
+    const admin = db.prepare('SELECT * FROM usuarios WHERE id = ? AND ativo = 1').get(req.usuario.id);
     if (!admin || admin.cargo !== 'Administrador') {
       return res.status(403).json({ error: 'Somente o administrador pode restaurar backup' });
     }
     if (!senha) return res.status(400).json({ error: 'Informe a senha do administrador' });
-    if (admin.senha !== senha) return res.status(401).json({ error: 'Senha invalida' });
+    if (!verificarSenha(senha, admin.senha)) return res.status(401).json({ error: 'Senha invalida' });
     await backupMod.restaurarPorId(req.params.id);
     res.json({ message: 'Backup restaurado. Recarregue o sistema.' });
   } catch (err) {
