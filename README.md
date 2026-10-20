@@ -12,6 +12,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Loja digital** — Vitrine publica em `/loja` com produtos, categorias, carrinho e pedido pelo WhatsApp da loja
 - **Produtos** — Tipos Produto/Servico/Kit/Pesavel, estoque, precos, codigo de barras, promocao, foto, NCM/CFOP, importacao/exportacao e dose (baixa da garrafa)
 - **Categorias** — Cadastro de categorias de estoque (CRUD); vinculo no produto e filtro na lista
+- **Estoque** — Busca de itens (nome, codigo, marca, local), filtros por categoria/situacao/tipo, saldo, minimo, valor a custo e movimento (entrada, ajuste, inventario)
 - **Ordens de servico** — Status, cliente, Servicos/Equipamentos, valor previsto; cobranca no PDV
 - **Usuarios** — Acessos e niveis (Administrador, Gerente, Vendedor, Caixa)
 - **Fornecedores** — Cadastro vinculado a produtos e contas a pagar
@@ -44,6 +45,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Bebidas por dose: cadastre a dose vinculada a garrafa e o consumo (ex.: 0,05 = 20 doses). A venda baixa o estoque da garrafa; o cancelamento devolve
 - Cadastro de itens: tipo Produto, Servico (sem estoque), Kit (baixa a composicao) e Pesavel (quantidade decimal, unidade KG)
 - Categorias de estoque: tela propria (nome, descricao, produtos vinculados); no cadastro do produto a categoria e um select; a lista de produtos filtra por categoria. Nomes ja usados sao migrados. Ao renomear, os produtos acompanham; so exclui se nenhum produto ativo usar.
+- Aba Estoque: pesquisa de itens no estilo SimpleDot (stock_items/search), com cards de quantidade, valor a custo, estoque baixo e zerado; filtros de categoria, situacao e tipo; acoes de compra, ajuste e inventario.
 
 ## Produtos: importar e exportar
 

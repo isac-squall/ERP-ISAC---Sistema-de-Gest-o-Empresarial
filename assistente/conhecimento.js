@@ -198,6 +198,21 @@ module.exports = [
     ]
   },
   {
+    id: 'estoque',
+    modulo: 'Estoque',
+    sessao: 'Busca de itens',
+    pagina: 'estoque',
+    titulo: 'Consultar e ajustar o estoque',
+    keywords: 'estoque busca saldo minimo situacao zerado baixo inventario ajuste entrada localizacao marca categoria',
+    conteudo: `A aba Estoque lista os itens com saldo, minimo, local, custo e valor (quantidade x custo). Cards no topo: quantidade de itens, valor a custo, estoque baixo e sem estoque. A pesquisa cobre nome, codigo, marca, referencia, categoria e localizacao. Filtros: categoria, situacao (Em estoque, Estoque baixo, Sem estoque, Nao controla) e tipo (Produto, Pesavel, Kit, Servico). Servico nao controla estoque; Kit mostra o saldo pela composicao; dose mostra as doses restantes da garrafa. No menu de acoes: editar, compra/entrada, ajustar estoque e inventario. O valor de estoque usa o preco de custo (nao o de venda).`,
+    passos: [
+      'Abra Estoque no menu ou o botao Estoque em Produtos.',
+      'Use a busca (nome, codigo, marca ou local).',
+      'Filtre por categoria, situacao ou tipo.',
+      'No menu do item, registre entrada, ajuste ou inventario.'
+    ]
+  },
+  {
     id: 'loja',
     modulo: 'Loja digital',
     sessao: 'Catalogo e WhatsApp',
@@ -488,7 +503,7 @@ module.exports = [
     pagina: 'usuarios',
     titulo: 'O que cada nivel pode ver',
     keywords: 'permissao menu escondido cargo nivel acesso sem permissao',
-    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo, inclusive Contador, Gerenciar Backup e Impressoras. Gerente nao acessa Usuarios, Backup nem Configuracoes (acessa Contador e Impressoras). Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio, Contador, Backup, Impressoras nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Sem permissao a tela avisa Sem permissao para esta pagina.`,
+    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo, inclusive Contador, Gerenciar Backup e Impressoras. Gerente nao acessa Usuarios, Backup nem Configuracoes (acessa Contador e Impressoras). Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio, Contador, Backup, Impressoras nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Admin, Gerente e Vendedor acessam Categorias e Estoque. Sem permissao a tela avisa Sem permissao para esta pagina.`,
     passos: [
       'Faca login com o usuario do cargo desejado.',
       'Confira o menu lateral filtrado.',

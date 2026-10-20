@@ -89,6 +89,39 @@ const tx = db.transaction(() => {
   assert.ok(usados >= 1, 'categoria em uso nao deve ser excluida');
   console.log('CATEGORIAS OK: cadastro e rename nos produtos');
 
+  const estoqueMod = require('./estoque');
+  assert.strictEqual(estoqueMod.situacaoDe({ tipo: 'servico' }), 'nao_controla');
+  assert.strictEqual(estoqueMod.situacaoDe({ tipo: 'produto', controla_estoque: 1, estoque: 10, estoque_minimo: 2 }), 'ok');
+  assert.strictEqual(estoqueMod.situacaoDe({ tipo: 'produto', controla_estoque: 1, estoque: 2, estoque_minimo: 2 }), 'baixo');
+  assert.strictEqual(estoqueMod.situacaoDe({ tipo: 'produto', controla_estoque: 1, estoque: 0, estoque_minimo: 2 }), 'zerado');
+  perto(estoqueMod.valorEstoque({ tipo: 'produto', estoque: 4, preco_custo: 2.5 }), 10, 'valor estoque');
+  assert.strictEqual(estoqueMod.valorEstoque({ tipo: 'servico', estoque: 4, preco_custo: 2.5 }), 0);
+  const resumo = estoqueMod.resumir([
+    { situacao: 'ok', valor_estoque: 10 },
+    { situacao: 'baixo', valor_estoque: 4 },
+    { situacao: 'zerado', valor_estoque: 0 },
+    { situacao: 'nao_controla', valor_estoque: 0 }
+  ]);
+  assert.strictEqual(resumo.itens, 4);
+  assert.strictEqual(resumo.ok, 1);
+  assert.strictEqual(resumo.baixo, 1);
+  assert.strictEqual(resumo.zerado, 1);
+  perto(resumo.valor, 14, 'resumo valor');
+  const EST = 'EST-TESTE';
+  const estOk = ins.run(`${EST} Ok`, 'EST-OK', '', 20, 5, 8, 2, `${CAT} Drinks`, 'produto', 1, 0, 'UN').lastInsertRowid;
+  const estBaixo = ins.run(`${EST} Baixo`, 'EST-BAIXO', '', 20, 5, 1, 2, `${CAT} Drinks`, 'produto', 1, 0, 'UN').lastInsertRowid;
+  const estZero = ins.run(`${EST} Zero`, 'EST-ZERO', '', 20, 5, 0, 2, `${CAT} Drinks`, 'produto', 1, 0, 'UN').lastInsertRowid;
+  db.prepare('UPDATE produtos SET marca=?, localizacao=? WHERE id=?').run('MarcaX', 'Prateleira Z', estOk);
+  const rowOk = db.prepare('SELECT * FROM produtos WHERE id = ?').get(estOk);
+  const rowBaixo = db.prepare('SELECT * FROM produtos WHERE id = ?').get(estBaixo);
+  const rowZero = db.prepare('SELECT * FROM produtos WHERE id = ?').get(estZero);
+  assert.strictEqual(estoqueMod.situacaoDe(rowOk), 'ok');
+  assert.strictEqual(estoqueMod.situacaoDe(rowBaixo), 'baixo');
+  assert.strictEqual(estoqueMod.situacaoDe(rowZero), 'zerado');
+  const buscaLocal = db.prepare("SELECT id FROM produtos WHERE ativo = 1 AND IFNULL(localizacao,'') LIKE ?").all('%Prateleira Z%');
+  assert.ok(buscaLocal.some(r => r.id === estOk), 'busca por localizacao');
+  console.log('ESTOQUE OK: situacao, valor, busca por local');
+
   throw new Error('__ROLLBACK__');
 });
 

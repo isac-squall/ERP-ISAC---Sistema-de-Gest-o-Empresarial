@@ -362,7 +362,7 @@ const PAGINAS_CONTADOR = [
   'contador-nfe', 'contador-compras', 'contador-xml', 'contador-extrato', 'contador-sped'
 ];
 const PAGINAS_TODAS = [
-  'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias',
+  'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
   'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
   'relatorio', ...PAGINAS_CONTADOR, 'backup', 'impressoras', 'configuracoes', 'manual'
 ];
@@ -376,7 +376,7 @@ const PERFIS_PADRAO = [
     nome: 'Gerente',
     descricao: 'Gestao operacional sem usuarios e configuracoes',
     permissoes: [
-      'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias',
+      'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
       'ordens-servico', 'fornecedores', 'historico-vendas', 'relatorio',
       ...PAGINAS_CONTADOR, 'impressoras', 'manual'
     ]
@@ -385,7 +385,7 @@ const PERFIS_PADRAO = [
     nome: 'Vendedor',
     descricao: 'Vendas, clientes, produtos e ordens de servico',
     permissoes: [
-      'dashboard', 'vendas', 'clientes', 'produtos', 'categorias', 'ordens-servico',
+      'dashboard', 'vendas', 'clientes', 'produtos', 'categorias', 'estoque', 'ordens-servico',
       'historico-vendas', 'manual'
     ]
   },
@@ -425,6 +425,11 @@ if (adminPerfil) {
     if (i >= 0) perms.splice(i + 1, 0, 'categorias');
     else perms.push('categorias');
   }
+  if (!perms.includes('estoque')) {
+    const i = perms.indexOf('categorias');
+    if (i >= 0) perms.splice(i + 1, 0, 'estoque');
+    else perms.push('estoque');
+  }
   db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), adminPerfil.id);
 }
 const gerentePerfil = db.prepare("SELECT id, permissoes FROM perfis WHERE nome = 'Gerente'").get();
@@ -452,17 +457,30 @@ if (gerentePerfil) {
     else perms.push('categorias');
     dirty = true;
   }
+  if (!perms.includes('estoque')) {
+    const i = perms.indexOf('categorias');
+    if (i >= 0) perms.splice(i + 1, 0, 'estoque');
+    else perms.push('estoque');
+    dirty = true;
+  }
   if (dirty) db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), gerentePerfil.id);
 }
 const vendedorPerfil = db.prepare("SELECT id, permissoes FROM perfis WHERE nome = 'Vendedor'").get();
 if (vendedorPerfil) {
   let perms = [];
   try { perms = JSON.parse(vendedorPerfil.permissoes || '[]'); } catch {}
+  let vendedorDirty = false;
   if (!perms.includes('categorias') && perms.includes('produtos')) {
     const i = perms.indexOf('produtos');
     perms.splice(i + 1, 0, 'categorias');
-    db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), vendedorPerfil.id);
+    vendedorDirty = true;
   }
+  if (!perms.includes('estoque') && (perms.includes('produtos') || perms.includes('categorias'))) {
+    const i = perms.includes('categorias') ? perms.indexOf('categorias') : perms.indexOf('produtos');
+    perms.splice(i + 1, 0, 'estoque');
+    vendedorDirty = true;
+  }
+  if (vendedorDirty) db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), vendedorPerfil.id);
 }
 db.prepare("UPDATE usuarios SET cargo = 'Caixa' WHERE cargo IN ('Operador','Funcionario')").run();
 

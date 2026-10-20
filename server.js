@@ -6,6 +6,7 @@ const db = require('./database');
 const nfce = require('./nfce');
 const produtosIo = require('./produtos/io');
 const produtosTipos = require('./produtos/tipos');
+const produtosEstoque = require('./produtos/estoque');
 const backupMod = require('./backup');
 const contador = require('./contador');
 const dre = require('./dre');
@@ -174,6 +175,7 @@ function permissoesDaRota(req) {
   if (p.startsWith('/api/produtos/export') || p.startsWith('/api/produtos/modelo') || p.startsWith('/api/produtos/import')) {
     return ['produtos'];
   }
+  if (p.startsWith('/api/estoque')) return ['estoque', 'produtos', 'vendas'];
   if (p.startsWith('/api/produtos') || p.startsWith('/api/promocoes') || p.startsWith('/api/categorias')) {
     return m === 'GET' ? ['produtos', 'vendas'] : ['produtos'];
   }
@@ -295,7 +297,7 @@ function permissoesDoCargo(cargo) {
   }
   if (cargo === 'Administrador') {
     return [
-      'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias',
+      'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
       'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
       'relatorio', 'contador-nfe', 'contador-compras', 'contador-xml',
       'contador-extrato', 'contador-sped', 'backup', 'impressoras', 'configuracoes', 'manual'
@@ -959,6 +961,54 @@ app.delete('/api/categorias/:id', (req, res) => {
   res.json({ message: 'Categoria removida' });
 });
 
+// ============ ESTOQUE (busca de itens) ============
+app.get('/api/estoque', (req, res) => {
+  const { search = '', page = 1, limit = 15, categoria, situacao, tipo } = req.query;
+  let query = `SELECT p.*, f.nome as fornecedor_nome, o.nome as estoque_origem_nome, o.estoque as estoque_origem_qtd
+    FROM produtos p
+    LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+    LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE p.ativo = 1`;
+  const params = [];
+  if (search) {
+    query += ' AND (p.nome LIKE ? OR p.codigo LIKE ? OR IFNULL(p.categoria,\'\') LIKE ? OR IFNULL(p.marca,\'\') LIKE ? OR IFNULL(p.referencia,\'\') LIKE ? OR IFNULL(p.localizacao,\'\') LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s, s, s, s);
+  }
+  if (categoria) {
+    query += ' AND lower(IFNULL(p.categoria,\'\')) = lower(?)';
+    params.push(String(categoria).trim());
+  }
+  if (tipo) {
+    query += ' AND lower(IFNULL(p.tipo,\'produto\')) = lower(?)';
+    params.push(String(tipo).trim());
+  }
+  query += ' ORDER BY p.nome ASC';
+  const rows = db.prepare(query).all(...params).map(p => {
+    const row = enriquecerProduto(p);
+    row.situacao = produtosEstoque.situacaoDe(row);
+    row.situacao_label = produtosEstoque.rotuloSituacao(row.situacao);
+    row.valor_estoque = produtosEstoque.valorEstoque(row);
+    return row;
+  });
+  const filtrados = situacao
+    ? rows.filter(p => p.situacao === String(situacao).trim())
+    : rows;
+  const resumo = produtosEstoque.resumir(filtrados);
+  const pg = Math.max(1, parseInt(page, 10) || 1);
+  const lim = Math.max(1, Math.min(100, parseInt(limit, 10) || 15));
+  const total = filtrados.length;
+  const offset = (pg - 1) * lim;
+  res.json({
+    data: filtrados.slice(offset, offset + lim),
+    total,
+    page: pg,
+    limit: lim,
+    totalPages: Math.ceil(total / lim) || 1,
+    resumo
+  });
+});
+
 // ============ PRODUTOS ============
 app.get('/api/produtos', (req, res) => {
   const { search = '', page = 1, limit = 15, categoria } = req.query;
@@ -1483,6 +1533,7 @@ const PERMISSOES_DISPONIVEIS = [
   { key: 'clientes', label: 'Clientes' },
   { key: 'produtos', label: 'Produtos' },
   { key: 'categorias', label: 'Categorias de estoque' },
+  { key: 'estoque', label: 'Estoque' },
   { key: 'ordens-servico', label: 'Ordens de servico' },
   { key: 'usuarios', label: 'Usuarios' },
   { key: 'fornecedores', label: 'Fornecedores' },

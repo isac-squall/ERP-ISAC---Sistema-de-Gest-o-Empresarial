@@ -82,6 +82,10 @@ const API = {
     delete: (id) => API.request(`/categorias/${id}`, { method: 'DELETE' })
   },
 
+  estoque: {
+    list: (p) => API.request(`/estoque?${new URLSearchParams(p)}`)
+  },
+
   produtos: {
     list: (p) => API.request(`/produtos?${new URLSearchParams(p)}`),
     all: () => API.request('/produtos/all'),

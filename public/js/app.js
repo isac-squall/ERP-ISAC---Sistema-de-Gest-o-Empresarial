@@ -10,6 +10,7 @@ const PAGES = {
   clientes: { title: 'Clientes', breadcrumb: 'Dashboard / Clientes' },
   produtos: { title: 'Produtos', breadcrumb: 'Dashboard / Produtos' },
   categorias: { title: 'Categorias de estoque', breadcrumb: 'Dashboard / Categorias' },
+  estoque: { title: 'Estoque', breadcrumb: 'Dashboard / Estoque' },
   'ordens-servico': { title: 'Ordens de serviço', breadcrumb: 'Dashboard / Ordens de serviço' },
   usuarios: { title: 'Usuários', breadcrumb: 'Dashboard / Usuários' },
   fornecedores: { title: 'Fornecedores', breadcrumb: 'Dashboard / Fornecedores' },
@@ -175,7 +176,7 @@ function userPermissoes() {
   let allowed;
   if (Array.isArray(list) && list.length) allowed = [...list];
   else if (currentUser?.cargo === 'Administrador') {
-    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
+    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
   } else {
     allowed = ['dashboard', 'manual'];
   }
@@ -320,6 +321,7 @@ async function renderPage() {
     clientes: renderClientes,
     produtos: renderProdutos,
     categorias: renderCategorias,
+    estoque: renderEstoque,
     'ordens-servico': renderOrdensServico,
     usuarios: renderUsuarios,
     fornecedores: renderFornecedores,
@@ -660,6 +662,7 @@ async function renderProdutos() {
       <div class="toolbar-spacer"></div>
       <button class="btn-icon-square" id="produtos-settings" title="Opções"><i class="fas fa-cog"></i></button>
       <button class="btn btn-outline" id="produtos-categorias" title="Categorias de estoque"><i class="fas fa-tags"></i> Categorias</button>
+      <button class="btn btn-outline" id="produtos-estoque" title="Busca de estoque"><i class="fas fa-warehouse"></i> Estoque</button>
       <a class="btn btn-outline" href="/loja" target="_blank" title="Vitrine digital"><i class="fas fa-store"></i> Loja</a>
       <button class="btn btn-outline" id="produtos-importar" title="Importar produtos"><i class="fas fa-file-import"></i> Importar</button>
       <button class="btn btn-outline" id="produtos-exportar" title="Exportar produtos"><i class="fas fa-file-export"></i> Exportar</button>
@@ -688,6 +691,7 @@ async function renderProdutos() {
   document.getElementById('produtos-promocoes').onclick = () => showPromocoesLista();
   document.getElementById('produtos-settings').onclick = () => showProdutosOpcoes();
   document.getElementById('produtos-categorias').onclick = () => navigate('categorias');
+  document.getElementById('produtos-estoque').onclick = () => navigate('estoque');
   document.getElementById('produtos-importar').onclick = () => showProdutosImportar();
   document.getElementById('produtos-exportar').onclick = () => showProdutosExportar();
   document.getElementById('produtos-filtro-categoria').onchange = () => {
@@ -1127,7 +1131,9 @@ function bindProdutoSave(id) {
     try {
       if (id) await API.produtos.update(id, body);
       else await API.produtos.create(body);
-      closeModal(); showToast('Salvo com sucesso!', 'success'); renderProdutos();
+      closeModal(); showToast('Salvo com sucesso!', 'success');
+      if (currentPage === 'estoque') renderEstoque();
+      else renderProdutos();
     } catch (err) { showToast(err.message, 'error'); }
   };
 }
@@ -1405,7 +1411,9 @@ async function showEstoqueMovimento(id, tipo) {
         observacao: fd.get('observacao'),
         usuario_id: currentUser && currentUser.id
       });
-      closeModal(); showToast('Estoque atualizado', 'success'); renderProdutos();
+      closeModal(); showToast('Estoque atualizado', 'success');
+      if (currentPage === 'estoque') renderEstoque();
+      else renderProdutos();
     } catch (err) { showToast(err.message, 'error'); }
   };
 }
@@ -1469,6 +1477,149 @@ async function deleteCategoria(id) {
     await API.categorias.delete(id);
     showToast('Categoria excluída', 'success'); renderCategorias();
   } catch (err) { showToast(err.message, 'error'); }
+}
+
+// ===================== ESTOQUE =====================
+async function renderEstoque() {
+  const st = pageState.estoque;
+  st.categoria = st.categoria || '';
+  st.situacao = st.situacao || '';
+  st.tipo = st.tipo || '';
+  const [result, categorias] = await Promise.all([
+    API.estoque.list({ search: st.search, page: st.page, limit: st.limit, categoria: st.categoria, situacao: st.situacao, tipo: st.tipo }),
+    API.categorias.all().catch(() => [])
+  ]);
+  const r = result.resumo || { itens: 0, valor: 0, ok: 0, baixo: 0, zerado: 0 };
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Estoque', 'Dashboard / Estoque')}
+    <div class="stats-row stats-row-4">
+      <div class="stat-card teal"><h4>Itens</h4><div class="stat-value">${r.itens || 0}</div></div>
+      <div class="stat-card green"><h4>Valor (custo)</h4><div class="stat-value">${formatCurrency(r.valor || 0)}</div></div>
+      <div class="stat-card orange"><h4>Estoque baixo</h4><div class="stat-value">${r.baixo || 0}</div></div>
+      <div class="stat-card red"><h4>Sem estoque</h4><div class="stat-value">${r.zerado || 0}</div></div>
+    </div>
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Nome, codigo, marca, local..." value="${escapeHtml(st.search || '')}" id="table-search">
+      </div>
+      <select id="estoque-filtro-categoria" class="toolbar-select" title="Categoria">
+        <option value="">Todas as categorias</option>
+        ${categorias.map(c => `<option value="${escapeHtml(c.nome)}" ${st.categoria === c.nome ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
+      </select>
+      <select id="estoque-filtro-situacao" class="toolbar-select" title="Situacao">
+        <option value="">Todas as situacoes</option>
+        <option value="ok" ${st.situacao === 'ok' ? 'selected' : ''}>Em estoque</option>
+        <option value="baixo" ${st.situacao === 'baixo' ? 'selected' : ''}>Estoque baixo</option>
+        <option value="zerado" ${st.situacao === 'zerado' ? 'selected' : ''}>Sem estoque</option>
+        <option value="nao_controla" ${st.situacao === 'nao_controla' ? 'selected' : ''}>Nao controla</option>
+      </select>
+      <select id="estoque-filtro-tipo" class="toolbar-select" title="Tipo">
+        <option value="">Todos os tipos</option>
+        <option value="produto" ${st.tipo === 'produto' ? 'selected' : ''}>Produto</option>
+        <option value="pesavel" ${st.tipo === 'pesavel' ? 'selected' : ''}>Pesavel</option>
+        <option value="kit" ${st.tipo === 'kit' ? 'selected' : ''}>Kit</option>
+        <option value="servico" ${st.tipo === 'servico' ? 'selected' : ''}>Servico</option>
+      </select>
+      <span class="toolbar-info">Total de itens: ${result.total}</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-outline" id="estoque-categorias" title="Categorias"><i class="fas fa-tags"></i> Categorias</button>
+      <button class="btn btn-outline" id="estoque-produtos" title="Cadastro de produtos"><i class="fas fa-box"></i> Produtos</button>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table estoque-table">
+        <thead><tr>
+          <th>#</th>
+          <th>Foto</th>
+          <th>Item</th>
+          <th>Codigo</th>
+          <th>Categoria</th>
+          <th>Local</th>
+          <th>Saldo</th>
+          <th>Minimo</th>
+          <th>Custo</th>
+          <th>Valor</th>
+          <th>Situacao</th>
+          <th>Acoes</th>
+        </tr></thead>
+        <tbody id="table-body">${renderEstoqueRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('estoque', result, loadEstoque);
+  document.getElementById('estoque-categorias').onclick = () => navigate('categorias');
+  document.getElementById('estoque-produtos').onclick = () => navigate('produtos');
+  document.getElementById('estoque-filtro-categoria').onchange = () => {
+    st.categoria = document.getElementById('estoque-filtro-categoria').value;
+    st.page = 1;
+    loadEstoque();
+  };
+  document.getElementById('estoque-filtro-situacao').onchange = () => {
+    st.situacao = document.getElementById('estoque-filtro-situacao').value;
+    st.page = 1;
+    loadEstoque();
+  };
+  document.getElementById('estoque-filtro-tipo').onchange = () => {
+    st.tipo = document.getElementById('estoque-filtro-tipo').value;
+    st.page = 1;
+    loadEstoque();
+  };
+}
+
+function estoqueSituacaoBadge(p) {
+  const s = p.situacao || 'ok';
+  const label = p.situacao_label || (s === 'zerado' ? 'Sem estoque' : s === 'baixo' ? 'Estoque baixo' : s === 'nao_controla' ? 'Nao controla' : 'Em estoque');
+  return `<span class="status-badge estoque-${s}">${escapeHtml(label)}</span>`;
+}
+
+function renderEstoqueRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="12">Nenhum item encontrado</td></tr>';
+  return data.map((p, i) => `<tr>
+    <td>${i + 1}</td>
+    <td>${produtoFotoHtml(p)}</td>
+    <td>${escapeHtml(p.nome)}${produtoTipoTag(p)}</td>
+    <td>${escapeHtml(p.codigo || '-')}</td>
+    <td>${escapeHtml(p.categoria || '-')}</td>
+    <td>${escapeHtml(p.localizacao || '-')}</td>
+    <td>${formatEstoqueLista(p)}</td>
+    <td>${p.estoque_minimo || 0}</td>
+    <td>${formatCurrency(p.preco_custo)}</td>
+    <td>${formatCurrency(p.valor_estoque || 0)}</td>
+    <td>${estoqueSituacaoBadge(p)}</td>
+    <td class="actions-cell">
+      <div class="action-menu-wrap">
+        <button class="btn-icon-square btn-menu" onclick="toggleProdutoMenu(event, ${p.id})" title="Acoes">
+          <i class="fas fa-ellipsis-v"></i>
+        </button>
+        <div class="action-dropdown" id="produto-menu-${p.id}">
+          <button type="button" onclick="showProdutoForm(${p.id})"><i class="fas fa-edit menu-edit"></i> Editar produto</button>
+          ${produtoTipo(p) !== 'servico' && produtoTipo(p) !== 'kit' ? `
+          <div class="action-sep"></div>
+          <button type="button" onclick="showEstoqueMovimento(${p.id}, 'entrada')"><i class="fas fa-cart-plus menu-in"></i> Compra/entrada</button>
+          <button type="button" onclick="showEstoqueMovimento(${p.id}, 'ajuste')"><i class="fas fa-sync-alt menu-ajuste"></i> Ajustar estoque</button>
+          <button type="button" onclick="showEstoqueMovimento(${p.id}, 'inventario')"><i class="fas fa-clipboard-check menu-inv"></i> Inventario</button>` : ''}
+        </div>
+      </div>
+    </td></tr>`).join('');
+}
+
+async function loadEstoque() {
+  const st = pageState.estoque;
+  const result = await API.estoque.list({
+    search: st.search, page: st.page, limit: st.limit,
+    categoria: st.categoria || '', situacao: st.situacao || '', tipo: st.tipo || ''
+  });
+  document.getElementById('table-body').innerHTML = renderEstoqueRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadEstoque();
+  });
+  document.querySelector('.toolbar-info').textContent = `Total de itens: ${result.total}`;
+  const r = result.resumo || {};
+  const cards = document.querySelectorAll('#content .stat-card .stat-value');
+  if (cards[0]) cards[0].textContent = r.itens || 0;
+  if (cards[1]) cards[1].textContent = formatCurrency(r.valor || 0);
+  if (cards[2]) cards[2].textContent = r.baixo || 0;
+  if (cards[3]) cards[3].textContent = r.zerado || 0;
 }
 
 function showCategoriaRapida() {
@@ -4692,6 +4843,7 @@ async function renderManual() {
         <li><strong>Caixa</strong> — Abra o caixa com um valor inicial antes de vender. Sangria e suprimento lancam no Financeiro. Feche ao final do dia.</li>
         <li><strong>Vendas</strong> — Busque por nome ou código de barras, monte o carrinho e finalize (Dinheiro, cartao, PIX ou Fiado). A margem aparece no painel.</li>
         <li><strong>Clientes / Produtos / Fornecedores</strong> — Cadastre, edite e pesquise registros com paginação.</li>
+        <li><strong>Estoque</strong> — Pesquise itens por nome, codigo, marca ou local; filtre por categoria, situacao e tipo; registre entrada, ajuste ou inventario.</li>
         <li><strong>Ordens de serviço</strong> — Controle status, datas e valor previsto de cada OS.</li>
         <li><strong>Financeiro</strong> — Vendas a vista entram pagas; Fiado vira contas a receber. Taxas de cartao/PIX e sangria/suprimento lancam sozinhos. A aba DRE mostra o resultado por competencia (Receita, CMV, despesas e Lucro), com export TXT/CSV.</li>
         <li><strong>Histórico</strong> — Consulte vendas, imprima cupom/DANFE, emita NFC-e ou cancele (estoque volta automaticamente).</li>
