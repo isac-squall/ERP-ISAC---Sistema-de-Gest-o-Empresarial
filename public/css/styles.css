@@ -268,6 +268,13 @@ body {
 .search-box input:focus { outline: none; border-color: var(--primary); }
 .toolbar-info { font-size: 13px; color: var(--text-muted); white-space: nowrap; }
 .toolbar-spacer { flex: 1; }
+.toolbar-select {
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px;
+  font-size: 13px; background: var(--bg-card); color: var(--text); max-width: 220px;
+}
+.input-with-action { display: flex; gap: 8px; align-items: stretch; }
+.input-with-action select { flex: 1; }
+.input-with-action .btn-icon-square { flex-shrink: 0; }
 
 /* Buttons */
 .btn {

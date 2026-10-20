@@ -73,6 +73,15 @@ const API = {
     delete: (id) => API.request(`/fornecedores/${id}`, { method: 'DELETE' })
   },
 
+  categorias: {
+    list: (p) => API.request(`/categorias?${new URLSearchParams(p)}`),
+    all: () => API.request('/categorias/all'),
+    get: (id) => API.request(`/categorias/${id}`),
+    create: (d) => API.request('/categorias', { method: 'POST', body: d }),
+    update: (id, d) => API.request(`/categorias/${id}`, { method: 'PUT', body: d }),
+    delete: (id) => API.request(`/categorias/${id}`, { method: 'DELETE' })
+  },
+
   produtos: {
     list: (p) => API.request(`/produtos?${new URLSearchParams(p)}`),
     all: () => API.request('/produtos/all'),

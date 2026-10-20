@@ -165,18 +165,35 @@ module.exports = [
     sessao: 'Estoque e cadastro',
     pagina: 'produtos',
     titulo: 'Produtos, estoque, codigo e promocao',
-    keywords: 'produto estoque preco codigo barras sku categoria promocao foto minimo importar exportar csv excel xlsx xml json sql dose garrafa bebida consumo servico kit pesavel composicao fracionado',
-    conteudo: `Produtos controla nome, codigo de barras, descricao, preco de venda, preco de custo, estoque, estoque minimo, categoria, fornecedor, foto e promocao. No cadastro escolha o tipo: Produto (estoque proprio), Servico (nao controla estoque), Kit (composicao; a venda baixa cada item) ou Pesavel (quantidade decimal, unidade KG). Estoque baixo gera alerta no sino. Ajuste de estoque registra movimento. No PDV o estoque e baixado na venda e devolvido se a venda for cancelada. Para bebidas por dose, cadastre a garrafa com estoque em unidades e a dose com Produzido a partir de = garrafa e Consumo por unidade = 1/doses (ex.: 20 doses = 0,05). A venda da dose baixa a fração da garrafa. Importar e Exportar na toolbar (e em Opcoes) aceitam Excel, CSV, TXT, JSON, XML, SQL, HTML e Markdown. Na importacao, produto com o mesmo codigo de barras ou o mesmo nome e atualizado; os demais sao cadastrados. Campos obrigatorios: nome, codigo, preco e estoque. Use Exportar > Baixar modelo para o layout.`,
+    keywords: 'produto estoque preco codigo barras sku categoria categorias cadastro promocao foto minimo importar exportar csv excel xlsx xml json sql dose garrafa bebida consumo servico kit pesavel composicao fracionado',
+    conteudo: `Produtos controla nome, codigo de barras, descricao, preco de venda, preco de custo, estoque, estoque minimo, categoria, fornecedor, foto e promocao. A categoria vem do cadastro em Categorias (menu lateral ou botao na toolbar de Produtos): nome, descricao e quantidade de produtos. No formulario do produto escolha a categoria no select (botao + cria na hora). A lista de produtos filtra por categoria. Renomear a categoria atualiza os produtos; so e possivel excluir se nenhum produto ativo estiver nela. No cadastro escolha o tipo: Produto (estoque proprio), Servico (nao controla estoque), Kit (composicao; a venda baixa cada item) ou Pesavel (quantidade decimal, unidade KG). Estoque baixo gera alerta no sino. Ajuste de estoque registra movimento. No PDV o estoque e baixado na venda e devolvido se a venda for cancelada. Para bebidas por dose, cadastre a garrafa com estoque em unidades e a dose com Produzido a partir de = garrafa e Consumo por unidade = 1/doses (ex.: 20 doses = 0,05). A venda da dose baixa a fração da garrafa. Importar e Exportar na toolbar (e em Opcoes) aceitam Excel, CSV, TXT, JSON, XML, SQL, HTML e Markdown. Na importacao, produto com o mesmo codigo de barras ou o mesmo nome e atualizado; os demais sao cadastrados. Campos obrigatorios: nome, codigo, preco e estoque. Use Exportar > Baixar modelo para o layout.`,
     passos: [
+      'Abra Categorias para cadastrar os grupos de estoque, ou use o botao Categorias em Produtos.',
       'Abra Produtos e clique em Adicionar ou use Importar.',
       'Escolha o tipo: Produto, Servico, Kit ou Pesavel.',
-      'Informe nome, preco, estoque e categoria.',
+      'Informe nome, preco, estoque e escolha a categoria no select.',
       'Para dose: escolha a garrafa em Produzido a partir de e o consumo (ex.: 0,05).',
       'Para kit: adicione os itens da composicao com a quantidade de cada um.',
       'Se quiser, cadastre codigo de barras para a lupa do PDV.',
       'Use Importar/Exportar para planilha, CSV, JSON, XML ou SQL.',
       'Use o menu de acoes para estoque, promocao ou edicao.',
-      'Mantenha o estoque minimo para receber alertas.'
+      'Mantenha o estoque minimo para receber alertas.',
+      'Use o filtro Todas as categorias na lista de produtos.'
+    ]
+  },
+  {
+    id: 'categorias',
+    modulo: 'Categorias',
+    sessao: 'Estoque e cadastro',
+    pagina: 'categorias',
+    titulo: 'Categorias de estoque',
+    keywords: 'categoria categorias estoque grupo classificacao produto filtro cadastro',
+    conteudo: `Categorias de estoque organiza os produtos em grupos (ex.: Bebidas, Informatica, Pecas). Cada categoria tem nome e descricao opcional. O cadastro do produto usa um select com essas categorias. A lista de produtos filtra por categoria. Ao renomear, os produtos vinculados acompanham. Nao e possivel excluir uma categoria que ainda tenha produtos ativos. Nomes ja usados no campo texto antigo sao migrados automaticamente.`,
+    passos: [
+      'Abra Categorias no menu ou o botao Categorias em Produtos.',
+      'Clique em Nova categoria e informe o nome.',
+      'No cadastro do produto, escolha a categoria no select.',
+      'Na lista de produtos, use o filtro Todas as categorias.'
     ]
   },
   {

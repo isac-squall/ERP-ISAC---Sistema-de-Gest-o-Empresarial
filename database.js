@@ -297,6 +297,29 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_produto_composicao_produto ON produto_composicao(produto_id);
 `);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS produto_categorias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    descricao TEXT,
+    ativo INTEGER DEFAULT 1,
+    criado_em TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_produto_categorias_nome ON produto_categorias(nome);
+`);
+
+(function seedCategorias() {
+  const nomes = db.prepare(`
+    SELECT DISTINCT TRIM(categoria) as nome FROM produtos
+    WHERE ativo = 1 AND categoria IS NOT NULL AND TRIM(categoria) != ''
+  `).all();
+  const find = db.prepare('SELECT id FROM produto_categorias WHERE lower(nome) = lower(?)');
+  const ins = db.prepare('INSERT INTO produto_categorias (nome, ativo) VALUES (?, 1)');
+  for (const row of nomes) {
+    if (!find.get(row.nome)) ins.run(row.nome);
+  }
+})();
 ensureColumn('vendas', 'nfce_id', 'INTEGER');
 ensureColumn('financeiro', 'venda_id', 'INTEGER');
 ensureColumn('financeiro', 'caixa_id', 'INTEGER');
@@ -339,7 +362,7 @@ const PAGINAS_CONTADOR = [
   'contador-nfe', 'contador-compras', 'contador-xml', 'contador-extrato', 'contador-sped'
 ];
 const PAGINAS_TODAS = [
-  'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
+  'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias',
   'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
   'relatorio', ...PAGINAS_CONTADOR, 'backup', 'impressoras', 'configuracoes', 'manual'
 ];
@@ -353,7 +376,7 @@ const PERFIS_PADRAO = [
     nome: 'Gerente',
     descricao: 'Gestao operacional sem usuarios e configuracoes',
     permissoes: [
-      'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
+      'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias',
       'ordens-servico', 'fornecedores', 'historico-vendas', 'relatorio',
       ...PAGINAS_CONTADOR, 'impressoras', 'manual'
     ]
@@ -362,7 +385,7 @@ const PERFIS_PADRAO = [
     nome: 'Vendedor',
     descricao: 'Vendas, clientes, produtos e ordens de servico',
     permissoes: [
-      'dashboard', 'vendas', 'clientes', 'produtos', 'ordens-servico',
+      'dashboard', 'vendas', 'clientes', 'produtos', 'categorias', 'ordens-servico',
       'historico-vendas', 'manual'
     ]
   },
@@ -397,6 +420,11 @@ if (adminPerfil) {
       else perms.push(k);
     }
   }
+  if (!perms.includes('categorias')) {
+    const i = perms.indexOf('produtos');
+    if (i >= 0) perms.splice(i + 1, 0, 'categorias');
+    else perms.push('categorias');
+  }
   db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), adminPerfil.id);
 }
 const gerentePerfil = db.prepare("SELECT id, permissoes FROM perfis WHERE nome = 'Gerente'").get();
@@ -418,7 +446,23 @@ if (gerentePerfil) {
       dirty = true;
     }
   }
+  if (!perms.includes('categorias')) {
+    const i = perms.indexOf('produtos');
+    if (i >= 0) perms.splice(i + 1, 0, 'categorias');
+    else perms.push('categorias');
+    dirty = true;
+  }
   if (dirty) db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), gerentePerfil.id);
+}
+const vendedorPerfil = db.prepare("SELECT id, permissoes FROM perfis WHERE nome = 'Vendedor'").get();
+if (vendedorPerfil) {
+  let perms = [];
+  try { perms = JSON.parse(vendedorPerfil.permissoes || '[]'); } catch {}
+  if (!perms.includes('categorias') && perms.includes('produtos')) {
+    const i = perms.indexOf('produtos');
+    perms.splice(i + 1, 0, 'categorias');
+    db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), vendedorPerfil.id);
+  }
 }
 db.prepare("UPDATE usuarios SET cargo = 'Caixa' WHERE cargo IN ('Operador','Funcionario')").run();
 

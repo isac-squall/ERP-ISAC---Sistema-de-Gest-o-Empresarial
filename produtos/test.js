@@ -72,6 +72,23 @@ const tx = db.transaction(() => {
   perto(estoqueDe(garrafa), 2, 'garrafa intacta no teste de kit');
 
   console.log('TIPOS OK: servico/kit/pesavel');
+
+  const CAT = 'CAT-TESTE';
+  const catIns = db.prepare('INSERT INTO produto_categorias (nome, descricao, ativo) VALUES (?,?,1)');
+  const catId = catIns.run(`${CAT} Bebidas`, 'Grupo de teste').lastInsertRowid;
+  const catRow = db.prepare('SELECT * FROM produto_categorias WHERE id = ?').get(catId);
+  assert.strictEqual(catRow.nome, `${CAT} Bebidas`);
+  const dup = db.prepare('SELECT id FROM produto_categorias WHERE lower(nome) = lower(?) AND ativo = 1').get(`${CAT} Bebidas`);
+  assert.ok(dup);
+  const prodCat = ins.run(`${CAT} Prod`, 'CAT-P1', '', 10, 4, 1, 0, `${CAT} Bebidas`, 'produto', 1, 0, 'UN').lastInsertRowid;
+  db.prepare('UPDATE produto_categorias SET nome=? WHERE id=?').run(`${CAT} Drinks`, catId);
+  db.prepare('UPDATE produtos SET categoria = ? WHERE lower(IFNULL(categoria,\'\')) = lower(?)').run(`${CAT} Drinks`, `${CAT} Bebidas`);
+  const prodAfter = db.prepare('SELECT categoria FROM produtos WHERE id = ?').get(prodCat);
+  assert.strictEqual(prodAfter.categoria, `${CAT} Drinks`);
+  const usados = db.prepare('SELECT COUNT(*) as c FROM produtos WHERE ativo = 1 AND lower(IFNULL(categoria,\'\')) = lower(?)').get(`${CAT} Drinks`).c;
+  assert.ok(usados >= 1, 'categoria em uso nao deve ser excluida');
+  console.log('CATEGORIAS OK: cadastro e rename nos produtos');
+
   throw new Error('__ROLLBACK__');
 });
 
