@@ -9,6 +9,7 @@ const PAGES = {
   financeiro: { title: 'Financeiro', breadcrumb: 'Dashboard / Financeiro' },
   clientes: { title: 'Clientes', breadcrumb: 'Dashboard / Clientes' },
   produtos: { title: 'Produtos', breadcrumb: 'Dashboard / Produtos' },
+  categorias: { title: 'Categorias de estoque', breadcrumb: 'Dashboard / Categorias' },
   'ordens-servico': { title: 'Ordens de serviço', breadcrumb: 'Dashboard / Ordens de serviço' },
   usuarios: { title: 'Usuários', breadcrumb: 'Dashboard / Usuários' },
   fornecedores: { title: 'Fornecedores', breadcrumb: 'Dashboard / Fornecedores' },
@@ -174,7 +175,7 @@ function userPermissoes() {
   let allowed;
   if (Array.isArray(list) && list.length) allowed = [...list];
   else if (currentUser?.cargo === 'Administrador') {
-    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
+    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
   } else {
     allowed = ['dashboard', 'manual'];
   }
@@ -318,6 +319,7 @@ async function renderPage() {
     financeiro: () => { pageState.financeiro.tab = pageState.financeiro.tab || 'pagar'; return renderFinanceiro(); },
     clientes: renderClientes,
     produtos: renderProdutos,
+    categorias: renderCategorias,
     'ordens-servico': renderOrdensServico,
     usuarios: renderUsuarios,
     fornecedores: renderFornecedores,
@@ -619,7 +621,11 @@ async function deleteCliente(id) {
 // ===================== PRODUTOS =====================
 async function renderProdutos() {
   const st = pageState.produtos;
-  const result = await API.produtos.list({ search: st.search, page: st.page, limit: st.limit });
+  st.categoria = st.categoria || '';
+  const [result, categorias] = await Promise.all([
+    API.produtos.list({ search: st.search, page: st.page, limit: st.limit, categoria: st.categoria }),
+    API.categorias.all().catch(() => [])
+  ]);
   document.getElementById('content').innerHTML = `
     ${pageHeader('Produtos', 'Dashboard / Produtos')}
     <div class="toolbar">
@@ -627,9 +633,14 @@ async function renderProdutos() {
         <i class="fas fa-search"></i>
         <input type="text" placeholder="Pesquisar..." value="${escapeHtml(st.search || '')}" id="table-search">
       </div>
+      <select id="produtos-filtro-categoria" class="toolbar-select" title="Filtrar por categoria">
+        <option value="">Todas as categorias</option>
+        ${categorias.map(c => `<option value="${escapeHtml(c.nome)}" ${st.categoria === c.nome ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
+      </select>
       <span class="toolbar-info">Total de produtos: ${result.total}</span>
       <div class="toolbar-spacer"></div>
       <button class="btn-icon-square" id="produtos-settings" title="Opções"><i class="fas fa-cog"></i></button>
+      <button class="btn btn-outline" id="produtos-categorias" title="Categorias de estoque"><i class="fas fa-tags"></i> Categorias</button>
       <button class="btn btn-outline" id="produtos-importar" title="Importar produtos"><i class="fas fa-file-import"></i> Importar</button>
       <button class="btn btn-outline" id="produtos-exportar" title="Exportar produtos"><i class="fas fa-file-export"></i> Exportar</button>
       <button class="btn btn-success" id="produtos-promocoes"><i class="fas fa-percent"></i> Promocoes</button>
@@ -656,8 +667,14 @@ async function renderProdutos() {
   document.getElementById('table-new').onclick = () => showProdutoForm();
   document.getElementById('produtos-promocoes').onclick = () => showPromocoesLista();
   document.getElementById('produtos-settings').onclick = () => showProdutosOpcoes();
+  document.getElementById('produtos-categorias').onclick = () => navigate('categorias');
   document.getElementById('produtos-importar').onclick = () => showProdutosImportar();
   document.getElementById('produtos-exportar').onclick = () => showProdutosExportar();
+  document.getElementById('produtos-filtro-categoria').onchange = () => {
+    st.categoria = document.getElementById('produtos-filtro-categoria').value;
+    st.page = 1;
+    loadProdutos();
+  };
 }
 
 function bindProdutoFotoZoom() {
@@ -753,7 +770,7 @@ function toggleProdutoMenu(e, id) {
 
 async function loadProdutos() {
   const st = pageState.produtos;
-  const result = await API.produtos.list({ search: st.search, page: st.page, limit: st.limit });
+  const result = await API.produtos.list({ search: st.search, page: st.page, limit: st.limit, categoria: st.categoria || '' });
   document.getElementById('table-body').innerHTML = renderProdutosRows(result.data);
   renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
     st.page = p; st.limit = l; loadProdutos();
@@ -848,8 +865,11 @@ async function showProdutoForm(id) {
   closeProdutoMenus();
   let data = {};
   if (id) data = await API.produtos.get(id);
-  const fornecedores = await API.fornecedores.all();
-  const todos = await API.produtos.all();
+  const [fornecedores, todos, categorias] = await Promise.all([
+    API.fornecedores.all(),
+    API.produtos.all(),
+    API.categorias.all().catch(() => [])
+  ]);
   const origens = todos.filter(p => !p.estoque_origem_id && produtoTipo(p) !== 'kit' && produtoTipo(p) !== 'servico' && (!id || p.id !== id));
   const kitItensDisp = todos.filter(p => produtoTipo(p) !== 'kit' && (!id || p.id !== id));
   const foto = data.foto || '';
@@ -885,7 +905,15 @@ async function showProdutoForm(id) {
       <div class="form-group"><label>Nome *</label><input name="nome" value="${escapeHtml(data.nome || '')}" required></div>
       <div class="form-row">
         <div class="form-group"><label>Código de barras</label><input name="codigo" value="${escapeHtml(data.codigo || '')}"></div>
-        <div class="form-group"><label>Categoria</label><input name="categoria" value="${escapeHtml(data.categoria || '')}"></div>
+        <div class="form-group"><label>Categoria</label>
+          <div class="input-with-action">
+            <select name="categoria" id="produto-categoria">
+              <option value="">Sem categoria</option>
+              ${categorias.map(c => `<option value="${escapeHtml(c.nome)}" ${data.categoria === c.nome ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
+            </select>
+            <button type="button" class="btn-icon-square" id="produto-nova-categoria" title="Nova categoria"><i class="fas fa-plus"></i></button>
+          </div>
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>Marca</label><input name="marca" value="${escapeHtml(data.marca || '')}"></div>
@@ -965,6 +993,7 @@ async function showProdutoForm(id) {
   bindProdutoFoto();
   bindProdutoTipoForm(composicao, kitItensDisp);
   bindProdutoSave(id);
+  document.getElementById('produto-nova-categoria').onclick = () => showCategoriaRapida();
 }
 
 function bindProdutoTipoForm(composicaoInicial, kitItensDisp) {
@@ -1359,6 +1388,85 @@ async function showEstoqueMovimento(id, tipo) {
       closeModal(); showToast('Estoque atualizado', 'success'); renderProdutos();
     } catch (err) { showToast(err.message, 'error'); }
   };
+}
+
+// ===================== CATEGORIAS =====================
+async function renderCategorias() {
+  const st = pageState.categorias;
+  const result = await API.categorias.list({ search: st.search, page: st.page, limit: st.limit });
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Categorias de estoque', 'Dashboard / Categorias')}
+    ${renderTableToolbar(st.search, `Total de categorias: ${result.total}`, 'Nova categoria')}
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Nome</th><th>Descricao</th><th>Produtos</th><th>Acoes</th></tr></thead>
+        <tbody id="table-body">${renderCategoriasRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('categorias', result, loadCategorias);
+  document.getElementById('table-new').onclick = () => showCategoriaForm();
+}
+
+function renderCategoriasRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="5">Nenhuma categoria cadastrada</td></tr>';
+  return data.map(c => `<tr>
+    <td>${c.id}</td>
+    <td>${escapeHtml(c.nome)}</td>
+    <td>${escapeHtml(c.descricao || '-')}</td>
+    <td>${c.produtos || 0}</td>
+    <td class="actions-cell">
+      <button class="btn-icon edit" onclick="showCategoriaForm(${c.id})"><i class="fas fa-edit"></i></button>
+      <button class="btn-icon delete" onclick="deleteCategoria(${c.id})"><i class="fas fa-trash"></i></button>
+    </td></tr>`).join('');
+}
+
+async function loadCategorias() {
+  const st = pageState.categorias;
+  const result = await API.categorias.list({ search: st.search, page: st.page, limit: st.limit });
+  document.getElementById('table-body').innerHTML = renderCategoriasRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadCategorias();
+  });
+  document.querySelector('.toolbar-info').textContent = `Total de categorias: ${result.total}`;
+}
+
+async function showCategoriaForm(id) {
+  let data = {};
+  if (id) data = await API.categorias.get(id);
+  openModal(id ? 'Editar categoria' : 'Nova categoria', `
+    <form id="entity-form">
+      <div class="form-group"><label>Nome *</label><input name="nome" value="${escapeHtml(data.nome || '')}" required maxlength="80"></div>
+      <div class="form-group"><label>Descricao</label><textarea name="descricao" rows="2">${escapeHtml(data.descricao || '')}</textarea></div>
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
+  bindEntitySave(id, 'categorias', renderCategorias);
+}
+
+async function deleteCategoria(id) {
+  if (!confirm('Deseja excluir esta categoria?')) return;
+  try {
+    await API.categorias.delete(id);
+    showToast('Categoria excluída', 'success'); renderCategorias();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+function showCategoriaRapida() {
+  const nome = prompt('Nome da nova categoria:');
+  if (nome == null) return;
+  const n = String(nome).trim();
+  if (!n) { showToast('Informe o nome', 'error'); return; }
+  API.categorias.create({ nome: n }).then(() => {
+    const sel = document.getElementById('produto-categoria');
+    if (sel) {
+      const opt = document.createElement('option');
+      opt.value = n;
+      opt.textContent = n;
+      opt.selected = true;
+      sel.appendChild(opt);
+    }
+    showToast('Categoria criada', 'success');
+  }).catch(err => showToast(err.message, 'error'));
 }
 
 // ===================== FORNECEDORES =====================

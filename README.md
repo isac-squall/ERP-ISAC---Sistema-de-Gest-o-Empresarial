@@ -10,6 +10,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Financeiro** — Contas a pagar e receber, vencidos, saldo previsto e previsao em 7/15/30 dias
 - **Clientes** — Cadastro com busca e paginacao; vinculo no PDV (Visitante)
 - **Produtos** — Tipos Produto/Servico/Kit/Pesavel, estoque, precos, codigo de barras, promocao, foto, NCM/CFOP, importacao/exportacao e dose (baixa da garrafa)
+- **Categorias** — Cadastro de categorias de estoque (CRUD); vinculo no produto e filtro na lista
 - **Ordens de servico** — Status, cliente, Servicos/Equipamentos, valor previsto; cobranca no PDV
 - **Usuarios** — Acessos e niveis (Administrador, Gerente, Vendedor, Caixa)
 - **Fornecedores** — Cadastro vinculado a produtos e contas a pagar
@@ -40,6 +41,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - DRE no Financeiro: resultado do exercicio por competencia (Receita Bruta, CMV, despesas, LAJIR e Lucro Liquido) com export TXT/CSV; fiado a receber no dia da venda (valor a cobrar)
 - Bebidas por dose: cadastre a dose vinculada a garrafa e o consumo (ex.: 0,05 = 20 doses). A venda baixa o estoque da garrafa; o cancelamento devolve
 - Cadastro de itens: tipo Produto, Servico (sem estoque), Kit (baixa a composicao) e Pesavel (quantidade decimal, unidade KG)
+- Categorias de estoque: tela propria (nome, descricao, produtos vinculados); no cadastro do produto a categoria e um select; a lista de produtos filtra por categoria. Nomes ja usados sao migrados. Ao renomear, os produtos acompanham; so exclui se nenhum produto ativo usar.
 
 ## Produtos: importar e exportar
 

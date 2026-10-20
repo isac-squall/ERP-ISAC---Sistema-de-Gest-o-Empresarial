@@ -173,7 +173,7 @@ function permissoesDaRota(req) {
   if (p.startsWith('/api/produtos/export') || p.startsWith('/api/produtos/modelo') || p.startsWith('/api/produtos/import')) {
     return ['produtos'];
   }
-  if (p.startsWith('/api/produtos') || p.startsWith('/api/promocoes')) {
+  if (p.startsWith('/api/produtos') || p.startsWith('/api/promocoes') || p.startsWith('/api/categorias')) {
     return m === 'GET' ? ['produtos', 'vendas'] : ['produtos'];
   }
   if (p.startsWith('/api/clientes')) return ['clientes', 'vendas', 'caixa'];
@@ -294,7 +294,7 @@ function permissoesDoCargo(cargo) {
   }
   if (cargo === 'Administrador') {
     return [
-      'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos',
+      'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias',
       'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
       'relatorio', 'contador-nfe', 'contador-compras', 'contador-xml',
       'contador-extrato', 'contador-sped', 'backup', 'impressoras', 'configuracoes', 'manual'
@@ -605,7 +605,7 @@ app.post('/api/config/apagar-banco', limitarAcaoCritica, (req, res) => {
     const tx = db.transaction(() => {
       const tabelas = [
         'sessoes', 'venda_itens', 'nfce', 'vendas', 'orcamentos', 'estoque_movimentos',
-        'promocoes', 'produtos', 'ordens_servico', 'financeiro', 'caixa',
+        'promocoes', 'produto_composicao', 'produto_categorias', 'produtos', 'ordens_servico', 'financeiro', 'caixa',
         'clientes', 'fornecedores', 'usuarios', 'impressoras'
       ];
       for (const t of tabelas) db.exec(`DELETE FROM ${t}`);
@@ -616,7 +616,7 @@ app.post('/api/config/apagar-banco', limitarAcaoCritica, (req, res) => {
         if (!isPreservedConfigKey(row.chave)) delCfg.run(row.chave);
       }
       try {
-        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('sessoes','venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produtos','ordens_servico','financeiro','caixa','clientes','fornecedores','usuarios','impressoras')");
+        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('sessoes','venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produto_composicao','produto_categorias','produtos','ordens_servico','financeiro','caixa','clientes','fornecedores','usuarios','impressoras')");
       } catch {}
       db.prepare(`INSERT INTO usuarios (nome, email, senha, cargo, celular, data_nascimento, cpf, tipo_pessoa, ativo)
         VALUES (?,?,?,?,?,?,?,?,1)`).run(
@@ -784,9 +784,103 @@ app.delete('/api/fornecedores/:id', (req, res) => {
   res.json({ message: 'Fornecedor removido' });
 });
 
+function garantirCategoria(nome) {
+  const n = String(nome || '').trim();
+  if (!n) return '';
+  const row = db.prepare('SELECT id, nome, ativo FROM produto_categorias WHERE lower(nome) = lower(?) ORDER BY ativo DESC, id DESC LIMIT 1').get(n);
+  if (row) {
+    if (!row.ativo) db.prepare('UPDATE produto_categorias SET ativo = 1 WHERE id = ?').run(row.id);
+    return row.nome;
+  }
+  db.prepare('INSERT INTO produto_categorias (nome, ativo) VALUES (?, 1)').run(n);
+  return n;
+}
+
+// ============ CATEGORIAS ============
+app.get('/api/categorias', (req, res) => {
+  const { search = '', page = 1, limit = 15 } = req.query;
+  let query = `SELECT c.*,
+    (SELECT COUNT(*) FROM produtos p WHERE p.ativo = 1 AND lower(IFNULL(p.categoria,'')) = lower(c.nome)) as produtos
+    FROM produto_categorias c WHERE c.ativo = 1`;
+  const params = [];
+  if (search) {
+    query += ' AND (c.nome LIKE ? OR IFNULL(c.descricao,\'\') LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s);
+  }
+  query += ' ORDER BY c.nome ASC';
+  let countQuery = 'SELECT COUNT(*) as total FROM produto_categorias c WHERE c.ativo = 1';
+  if (search) countQuery += ' AND (c.nome LIKE ? OR IFNULL(c.descricao,\'\') LIKE ?)';
+  const total = db.prepare(countQuery).get(...params)?.total || 0;
+  const offset = (page - 1) * limit;
+  const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset);
+  res.json({ data, total, page: +page, limit: +limit, totalPages: Math.ceil(total / limit) || 1 });
+});
+
+app.get('/api/categorias/all', (req, res) => {
+  const rows = db.prepare(`
+    SELECT c.id, c.nome, c.descricao,
+      (SELECT COUNT(*) FROM produtos p WHERE p.ativo = 1 AND lower(IFNULL(p.categoria,'')) = lower(c.nome)) as produtos
+    FROM produto_categorias c WHERE c.ativo = 1 ORDER BY c.nome
+  `).all();
+  res.json(rows);
+});
+
+app.get('/api/categorias/:id', (req, res) => {
+  const row = db.prepare(`
+    SELECT c.*,
+      (SELECT COUNT(*) FROM produtos p WHERE p.ativo = 1 AND lower(IFNULL(p.categoria,'')) = lower(c.nome)) as produtos
+    FROM produto_categorias c WHERE c.id = ?
+  `).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Categoria não encontrada' });
+  res.json(row);
+});
+
+app.post('/api/categorias', (req, res) => {
+  const nome = String(req.body.nome || '').trim();
+  const descricao = String(req.body.descricao || '').trim();
+  if (!nome) return res.status(400).json({ error: 'Nome é obrigatório' });
+  const existe = db.prepare('SELECT id FROM produto_categorias WHERE lower(nome) = lower(?) AND ativo = 1').get(nome);
+  if (existe) return res.status(400).json({ error: 'Já existe uma categoria com este nome' });
+  const inativa = db.prepare('SELECT id FROM produto_categorias WHERE lower(nome) = lower(?)').get(nome);
+  if (inativa) {
+    db.prepare('UPDATE produto_categorias SET ativo = 1, descricao = ? WHERE id = ?').run(descricao || null, inativa.id);
+    return res.json({ id: inativa.id });
+  }
+  const result = db.prepare('INSERT INTO produto_categorias (nome, descricao, ativo) VALUES (?,?,1)').run(nome, descricao || null);
+  res.json({ id: result.lastInsertRowid });
+});
+
+app.put('/api/categorias/:id', (req, res) => {
+  const cat = db.prepare('SELECT * FROM produto_categorias WHERE id = ?').get(req.params.id);
+  if (!cat) return res.status(404).json({ error: 'Categoria não encontrada' });
+  const nome = String(req.body.nome || '').trim();
+  const descricao = String(req.body.descricao || '').trim();
+  if (!nome) return res.status(400).json({ error: 'Nome é obrigatório' });
+  const outro = db.prepare('SELECT id FROM produto_categorias WHERE lower(nome) = lower(?) AND id != ? AND ativo = 1').get(nome, cat.id);
+  if (outro) return res.status(400).json({ error: 'Já existe uma categoria com este nome' });
+  const txn = db.transaction(() => {
+    db.prepare('UPDATE produto_categorias SET nome=?, descricao=? WHERE id=?').run(nome, descricao || null, cat.id);
+    if (nome !== cat.nome) {
+      db.prepare('UPDATE produtos SET categoria = ? WHERE lower(IFNULL(categoria,\'\')) = lower(?)').run(nome, cat.nome);
+    }
+  });
+  txn();
+  res.json({ message: 'Categoria atualizada' });
+});
+
+app.delete('/api/categorias/:id', (req, res) => {
+  const cat = db.prepare('SELECT * FROM produto_categorias WHERE id = ?').get(req.params.id);
+  if (!cat) return res.status(404).json({ error: 'Categoria não encontrada' });
+  const usados = db.prepare('SELECT COUNT(*) as c FROM produtos WHERE ativo = 1 AND lower(IFNULL(categoria,\'\')) = lower(?)').get(cat.nome).c;
+  if (usados) return res.status(400).json({ error: `Não é possível excluir: ${usados} produto(s) nesta categoria` });
+  db.prepare('UPDATE produto_categorias SET ativo = 0 WHERE id = ?').run(cat.id);
+  res.json({ message: 'Categoria removida' });
+});
+
 // ============ PRODUTOS ============
 app.get('/api/produtos', (req, res) => {
-  const { search = '', page = 1, limit = 15 } = req.query;
+  const { search = '', page = 1, limit = 15, categoria } = req.query;
   let query = `SELECT p.*, f.nome as fornecedor_nome, o.nome as estoque_origem_nome, o.estoque as estoque_origem_qtd,
     (SELECT COUNT(*) FROM promocoes pr WHERE pr.produto_id = p.id AND pr.ativo = 1
       AND (pr.data_inicio IS NULL OR date(pr.data_inicio) <= date('now','localtime'))
@@ -801,10 +895,23 @@ app.get('/api/produtos', (req, res) => {
     const s = `%${search}%`;
     params.push(s, s, s);
   }
+  if (categoria) {
+    query += ' AND lower(IFNULL(p.categoria,\'\')) = lower(?)';
+    params.push(String(categoria).trim());
+  }
   query += ' ORDER BY p.nome ASC';
   let countQuery = 'SELECT COUNT(*) as total FROM produtos p WHERE p.ativo = 1';
-  if (search) countQuery += ' AND (p.nome LIKE ? OR p.codigo LIKE ? OR p.categoria LIKE ?)';
-  const total = db.prepare(countQuery).get(...params)?.total || 0;
+  const countParams = [];
+  if (search) {
+    countQuery += ' AND (p.nome LIKE ? OR p.codigo LIKE ? OR p.categoria LIKE ?)';
+    const s = `%${search}%`;
+    countParams.push(s, s, s);
+  }
+  if (categoria) {
+    countQuery += ' AND lower(IFNULL(p.categoria,\'\')) = lower(?)';
+    countParams.push(String(categoria).trim());
+  }
+  const total = db.prepare(countQuery).get(...countParams)?.total || 0;
   const offset = (page - 1) * limit;
   const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset)
     .map(p => enriquecerProduto(p));
@@ -954,7 +1061,8 @@ app.post('/api/produtos/import', (req, res) => {
         const tipo = produtosTipos.normalizarTipo(p.tipo);
         const controla = tipo === 'servico' ? 0 : produtosTipos.flagOn(p.controla_estoque, true);
         const fracionado = tipo === 'pesavel' ? 1 : produtosTipos.flagOn(p.fracionado, false);
-        const vals = [p.nome, p.codigo, p.descricao, p.preco, p.preco_custo, p.estoque, p.estoque_minimo, p.categoria, p.ncm, p.cfop, p.unidade, p.origem, origemId, consumo, tipo, controla, fracionado, p.marca || null, p.referencia || null, p.localizacao || null];
+        const categoriaNome = garantirCategoria(p.categoria);
+        const vals = [p.nome, p.codigo, p.descricao, p.preco, p.preco_custo, p.estoque, p.estoque_minimo, categoriaNome, p.ncm, p.cfop, p.unidade, p.origem, origemId, consumo, tipo, controla, fracionado, p.marca || null, p.referencia || null, p.localizacao || null];
         if (row) {
           const anterior = getEstoque.get(row.id)?.estoque || 0;
           upd.run(...vals, row.id);
@@ -1060,12 +1168,13 @@ app.post('/api/produtos', (req, res) => {
   let extra;
   try { extra = camposProduto(req.body); }
   catch (err) { return res.status(400).json({ error: err.message }); }
+  const categoriaNome = garantirCategoria(categoria);
   const txn = db.transaction(() => {
     const result = db.prepare(`INSERT INTO produtos
       (nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem,
        estoque_origem_id, estoque_consumo, tipo, controla_estoque, fracionado, marca, referencia, localizacao, comissao, tempo_servico, garantia_dias)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, extra.estoque, estoque_minimo || 0, categoria, fornecedor_id || null,
+      nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, extra.estoque, estoque_minimo || 0, categoriaNome, fornecedor_id || null,
       ncm || '00000000', cfop || '5102', extra.unidade, origem || '0', extra.estoque_origem_id, extra.estoque_consumo,
       extra.tipo, extra.controla_estoque, extra.fracionado, extra.marca, extra.referencia, extra.localizacao,
       extra.comissao, extra.tempo_servico, extra.garantia_dias
@@ -1082,11 +1191,12 @@ app.put('/api/produtos/:id', (req, res) => {
   let extra;
   try { extra = camposProduto(req.body, req.params.id); }
   catch (err) { return res.status(400).json({ error: err.message }); }
+  const categoriaNome = garantirCategoria(categoria);
   const txn = db.transaction(() => {
     db.prepare(`UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, foto=?, estoque=?, estoque_minimo=?, categoria=?,
       fornecedor_id=?, ncm=?, cfop=?, unidade=?, origem=?, estoque_origem_id=?, estoque_consumo=?, tipo=?, controla_estoque=?, fracionado=?,
       marca=?, referencia=?, localizacao=?, comissao=?, tempo_servico=?, garantia_dias=? WHERE id=?`).run(
-      nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, extra.estoque, estoque_minimo || 0, categoria, fornecedor_id || null,
+      nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, extra.estoque, estoque_minimo || 0, categoriaNome, fornecedor_id || null,
       ncm || '00000000', cfop || '5102', extra.unidade, origem || '0', extra.estoque_origem_id, extra.estoque_consumo,
       extra.tipo, extra.controla_estoque, extra.fracionado, extra.marca, extra.referencia, extra.localizacao,
       extra.comissao, extra.tempo_servico, extra.garantia_dias, req.params.id
@@ -1291,6 +1401,7 @@ const PERMISSOES_DISPONIVEIS = [
   { key: 'financeiro', label: 'Financeiro' },
   { key: 'clientes', label: 'Clientes' },
   { key: 'produtos', label: 'Produtos' },
+  { key: 'categorias', label: 'Categorias de estoque' },
   { key: 'ordens-servico', label: 'Ordens de servico' },
   { key: 'usuarios', label: 'Usuarios' },
   { key: 'fornecedores', label: 'Fornecedores' },
