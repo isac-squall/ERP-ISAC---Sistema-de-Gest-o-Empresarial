@@ -454,6 +454,20 @@ a.btn-icon-square { text-decoration: none; }
 .status-badge.compra-recebido { background: #E8F5E9; color: #2E7D32; }
 .compra-itens-table input { width: 100%; padding: 6px 8px; }
 .compra-itens-table td { vertical-align: middle; }
+.rh-form-card { background: var(--bg-card); border-radius: 8px; box-shadow: var(--shadow); padding: 20px; margin-bottom: 16px; }
+.rh-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.rh-form-grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 14px; }
+.rh-flex-hint {
+  background: rgba(33,150,243,0.08); border: 1px solid rgba(33,150,243,0.25);
+  border-radius: 8px; padding: 14px 16px;
+}
+.rh-flex-hint h4 { margin: 0 0 6px; font-size: 14px; }
+.rh-page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.rh-page-head h2 { font-size: 20px; margin: 0; }
+.rh-page-head p { color: var(--text-muted); margin: 4px 0 0; font-size: 13px; }
+@media (max-width: 900px) {
+  .rh-form-grid, .rh-form-grid-4 { grid-template-columns: 1fr; }
+}
 .estoque-table td { white-space: nowrap; }
 .estoque-table td:nth-child(3) { white-space: normal; }
 

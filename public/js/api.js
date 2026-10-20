@@ -97,6 +97,31 @@ const API = {
     receber: (id) => API.request(`/compras/${id}/receber`, { method: 'POST', body: {} })
   },
 
+  rh: {
+    grades: {
+      list: (p) => API.request(`/rh/grades?${new URLSearchParams(p || {})}`),
+      all: () => API.request('/rh/grades/all'),
+      get: (id) => API.request(`/rh/grades/${id}`),
+      create: (d) => API.request('/rh/grades', { method: 'POST', body: d }),
+      update: (id, d) => API.request(`/rh/grades/${id}`, { method: 'PUT', body: d }),
+      delete: (id) => API.request(`/rh/grades/${id}`, { method: 'DELETE' })
+    },
+    funcionarios: {
+      list: (p) => API.request(`/rh/funcionarios?${new URLSearchParams(p || {})}`),
+      all: () => API.request('/rh/funcionarios/all'),
+      get: (id) => API.request(`/rh/funcionarios/${id}`),
+      create: (d) => API.request('/rh/funcionarios', { method: 'POST', body: d }),
+      update: (id, d) => API.request(`/rh/funcionarios/${id}`, { method: 'PUT', body: d }),
+      delete: (id) => API.request(`/rh/funcionarios/${id}`, { method: 'DELETE' })
+    },
+    pontos: {
+      list: (p) => API.request(`/rh/pontos?${new URLSearchParams(p || {})}`),
+      create: (d) => API.request('/rh/pontos', { method: 'POST', body: d }),
+      delete: (id) => API.request(`/rh/pontos/${id}`, { method: 'DELETE' })
+    },
+    folha: (p) => API.request(`/rh/folhas?${new URLSearchParams(p || {})}`)
+  },
+
   produtos: {
     list: (p) => API.request(`/produtos?${new URLSearchParams(p)}`),
     all: () => API.request('/produtos/all'),

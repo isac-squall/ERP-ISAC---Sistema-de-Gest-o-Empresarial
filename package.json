@@ -8,7 +8,8 @@
     "dev": "node server.js",
     "test:dre": "node dre/test.js",
     "test:produtos": "node produtos/test.js",
-    "test:compras": "node compras/test.js"
+    "test:compras": "node compras/test.js",
+    "test:rh": "node rh/test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

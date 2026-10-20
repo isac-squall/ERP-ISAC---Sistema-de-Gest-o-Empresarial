@@ -8,6 +8,7 @@ const produtosIo = require('./produtos/io');
 const produtosTipos = require('./produtos/tipos');
 const produtosEstoque = require('./produtos/estoque');
 const comprasMod = require('./compras');
+const rhMod = require('./rh');
 const backupMod = require('./backup');
 const contador = require('./contador');
 const dre = require('./dre');
@@ -178,6 +179,7 @@ function permissoesDaRota(req) {
   }
   if (p.startsWith('/api/estoque')) return ['estoque', 'produtos', 'vendas'];
   if (p.startsWith('/api/compras')) return ['compras'];
+  if (p.startsWith('/api/rh')) return ['rh-funcionarios', 'rh-pontos', 'rh-grades'];
   if (p.startsWith('/api/produtos') || p.startsWith('/api/promocoes') || p.startsWith('/api/categorias')) {
     return m === 'GET' ? ['produtos', 'vendas'] : ['produtos'];
   }
@@ -303,7 +305,9 @@ function permissoesDoCargo(cargo) {
       'compras',
       'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
       'relatorio', 'contador-nfe', 'contador-compras', 'contador-xml',
-      'contador-extrato', 'contador-sped', 'backup', 'impressoras', 'configuracoes', 'manual'
+      'contador-extrato', 'contador-sped',
+      'rh-funcionarios', 'rh-pontos', 'rh-grades',
+      'backup', 'impressoras', 'configuracoes', 'manual'
     ];
   }
   return ['dashboard', 'manual'];
@@ -1107,6 +1111,263 @@ app.post('/api/compras/:id/receber', (req, res) => {
   }
 });
 
+function rhGradeRow(id) {
+  return db.prepare('SELECT * FROM rh_grades WHERE id = ?').get(id);
+}
+
+app.get('/api/rh/grades', (req, res) => {
+  const { search = '', page = 1, limit = 15, status = '' } = req.query;
+  let where = 'WHERE 1=1';
+  const params = [];
+  if (status) { where += ' AND g.status = ?'; params.push(rhMod.normalizarStatus(status)); }
+  if (search) {
+    where += ' AND (g.nome LIKE ? OR g.tipo LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s);
+  }
+  const from = `FROM rh_grades g ${where}`;
+  const total = db.prepare(`SELECT COUNT(*) as total ${from}`).get(...params)?.total || 0;
+  const limite = Math.min(Math.max(Number(limit) || 15, 1), 200);
+  const pagina = Math.max(Number(page) || 1, 1);
+  const data = db.prepare(`
+    SELECT g.*,
+      (SELECT COUNT(*) FROM rh_funcionarios f WHERE f.grade_id = g.id AND f.ativo = 1) as funcionarios
+    ${from} ORDER BY g.nome ASC LIMIT ? OFFSET ?
+  `).all(...params, limite, (pagina - 1) * limite);
+  res.json({ data, total, page: pagina, limit: limite, totalPages: Math.ceil(total / limite) || 1 });
+});
+
+app.get('/api/rh/grades/all', (req, res) => {
+  res.json(db.prepare("SELECT id, nome, status, tipo FROM rh_grades WHERE status = 'ativo' ORDER BY nome").all());
+});
+
+app.get('/api/rh/grades/:id', (req, res) => {
+  const row = rhGradeRow(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Grade horaria nao encontrada' });
+  row.funcionarios = db.prepare('SELECT COUNT(*) as c FROM rh_funcionarios WHERE grade_id = ? AND ativo = 1').get(row.id).c;
+  res.json(row);
+});
+
+app.post('/api/rh/grades', (req, res) => {
+  try {
+    const d = rhMod.payloadGrade(req.body || {});
+    const result = db.prepare(`INSERT INTO rh_grades
+      (nome, status, tipo, horas_dia, horas_semana, horas_mes, limite_dia, intervalo_minimo, banco_horas, flexivel, exigir_localizacao, exigir_perto)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      d.nome, d.status, d.tipo, d.horas_dia, d.horas_semana, d.horas_mes, d.limite_dia, d.intervalo_minimo,
+      d.banco_horas, d.flexivel, d.exigir_localizacao, d.exigir_perto
+    );
+    res.json({ id: result.lastInsertRowid });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao criar grade' });
+  }
+});
+
+app.put('/api/rh/grades/:id', (req, res) => {
+  try {
+    const atual = rhGradeRow(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Grade horaria nao encontrada' });
+    const d = rhMod.payloadGrade(req.body || {});
+    db.prepare(`UPDATE rh_grades SET nome=?, status=?, tipo=?, horas_dia=?, horas_semana=?, horas_mes=?,
+      limite_dia=?, intervalo_minimo=?, banco_horas=?, flexivel=?, exigir_localizacao=?, exigir_perto=? WHERE id=?`).run(
+      d.nome, d.status, d.tipo, d.horas_dia, d.horas_semana, d.horas_mes, d.limite_dia, d.intervalo_minimo,
+      d.banco_horas, d.flexivel, d.exigir_localizacao, d.exigir_perto, atual.id
+    );
+    res.json({ message: 'Grade atualizada' });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao atualizar grade' });
+  }
+});
+
+app.delete('/api/rh/grades/:id', (req, res) => {
+  const atual = rhGradeRow(req.params.id);
+  if (!atual) return res.status(404).json({ error: 'Grade horaria nao encontrada' });
+  const usados = db.prepare('SELECT COUNT(*) as c FROM rh_funcionarios WHERE grade_id = ? AND ativo = 1').get(atual.id).c;
+  if (usados) return res.status(400).json({ error: `Nao e possivel excluir: ${usados} funcionario(s) nesta grade` });
+  db.prepare('DELETE FROM rh_grades WHERE id = ?').run(atual.id);
+  res.json({ message: 'Grade excluida' });
+});
+
+function payloadFuncionario(body) {
+  const nome = String(body.nome || '').trim();
+  if (!nome) {
+    const err = new Error('Nome e obrigatorio');
+    err.status = 400;
+    throw err;
+  }
+  const gradeId = inteiroOuNulo(body.grade_id);
+  if (gradeId) {
+    const g = rhGradeRow(gradeId);
+    if (!g) {
+      const err = new Error('Grade horaria nao encontrada');
+      err.status = 400;
+      throw err;
+    }
+  }
+  return {
+    nome: nome.slice(0, 120),
+    cpf: String(body.cpf || '').slice(0, 20),
+    cargo: String(body.cargo || '').slice(0, 80),
+    telefone: String(body.telefone || '').slice(0, 30),
+    email: String(body.email || '').slice(0, 120),
+    data_admissao: dataValida(body.data_admissao),
+    data_demissao: dataValida(body.data_demissao),
+    salario: Number(body.salario) || 0,
+    grade_id: gradeId,
+    usuario_id: inteiroOuNulo(body.usuario_id),
+    ativo: body.ativo === 0 || body.ativo === '0' || body.ativo === false ? 0 : 1
+  };
+}
+
+app.get('/api/rh/funcionarios', (req, res) => {
+  const { search = '', page = 1, limit = 15, ativo = '' } = req.query;
+  let where = 'WHERE 1=1';
+  const params = [];
+  if (ativo === '1' || ativo === '0') { where += ' AND f.ativo = ?'; params.push(Number(ativo)); }
+  if (search) {
+    where += ' AND (f.nome LIKE ? OR IFNULL(f.cpf,\'\') LIKE ? OR IFNULL(f.cargo,\'\') LIKE ? OR IFNULL(f.email,\'\') LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s, s);
+  }
+  const from = `FROM rh_funcionarios f LEFT JOIN rh_grades g ON g.id = f.grade_id ${where}`;
+  const total = db.prepare(`SELECT COUNT(*) as total ${from}`).get(...params)?.total || 0;
+  const limite = Math.min(Math.max(Number(limit) || 15, 1), 200);
+  const pagina = Math.max(Number(page) || 1, 1);
+  const data = db.prepare(`
+    SELECT f.*, g.nome as grade_nome, g.tipo as grade_tipo
+    ${from} ORDER BY f.nome ASC LIMIT ? OFFSET ?
+  `).all(...params, limite, (pagina - 1) * limite);
+  res.json({ data, total, page: pagina, limit: limite, totalPages: Math.ceil(total / limite) || 1 });
+});
+
+app.get('/api/rh/funcionarios/all', (req, res) => {
+  res.json(db.prepare('SELECT id, nome, cargo, grade_id FROM rh_funcionarios WHERE ativo = 1 ORDER BY nome').all());
+});
+
+app.get('/api/rh/funcionarios/:id', (req, res) => {
+  const row = db.prepare(`
+    SELECT f.*, g.nome as grade_nome FROM rh_funcionarios f
+    LEFT JOIN rh_grades g ON g.id = f.grade_id WHERE f.id = ?
+  `).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Funcionario nao encontrado' });
+  res.json(row);
+});
+
+app.post('/api/rh/funcionarios', (req, res) => {
+  try {
+    const d = payloadFuncionario(req.body || {});
+    const result = db.prepare(`INSERT INTO rh_funcionarios
+      (nome, cpf, cargo, telefone, email, data_admissao, data_demissao, salario, grade_id, usuario_id, ativo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+      d.nome, d.cpf, d.cargo, d.telefone, d.email, d.data_admissao, d.data_demissao, d.salario, d.grade_id, d.usuario_id, d.ativo
+    );
+    res.json({ id: result.lastInsertRowid });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao cadastrar funcionario' });
+  }
+});
+
+app.put('/api/rh/funcionarios/:id', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT id FROM rh_funcionarios WHERE id = ?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionario nao encontrado' });
+    const d = payloadFuncionario(req.body || {});
+    db.prepare(`UPDATE rh_funcionarios SET nome=?, cpf=?, cargo=?, telefone=?, email=?, data_admissao=?,
+      data_demissao=?, salario=?, grade_id=?, usuario_id=?, ativo=? WHERE id=?`).run(
+      d.nome, d.cpf, d.cargo, d.telefone, d.email, d.data_admissao, d.data_demissao, d.salario, d.grade_id, d.usuario_id, d.ativo, atual.id
+    );
+    res.json({ message: 'Funcionario atualizado' });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao atualizar funcionario' });
+  }
+});
+
+app.delete('/api/rh/funcionarios/:id', (req, res) => {
+  const atual = db.prepare('SELECT id FROM rh_funcionarios WHERE id = ?').get(req.params.id);
+  if (!atual) return res.status(404).json({ error: 'Funcionario nao encontrado' });
+  db.prepare('UPDATE rh_funcionarios SET ativo = 0 WHERE id = ?').run(atual.id);
+  res.json({ message: 'Funcionario desativado' });
+});
+
+app.get('/api/rh/pontos', (req, res) => {
+  const { search = '', page = 1, limit = 15, funcionario_id = '', de = '', ate = '' } = req.query;
+  let where = 'WHERE 1=1';
+  const params = [];
+  const fid = inteiroOuNulo(funcionario_id);
+  if (fid) { where += ' AND p.funcionario_id = ?'; params.push(fid); }
+  if (de && dataValida(de)) { where += ' AND date(p.data) >= date(?)'; params.push(de); }
+  if (ate && dataValida(ate)) { where += ' AND date(p.data) <= date(?)'; params.push(ate); }
+  if (search) {
+    where += ' AND (f.nome LIKE ? OR IFNULL(p.observacao,\'\') LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s);
+  }
+  const from = `FROM rh_pontos p JOIN rh_funcionarios f ON f.id = p.funcionario_id ${where}`;
+  const total = db.prepare(`SELECT COUNT(*) as total ${from}`).get(...params)?.total || 0;
+  const limite = Math.min(Math.max(Number(limit) || 15, 1), 200);
+  const pagina = Math.max(Number(page) || 1, 1);
+  const data = db.prepare(`
+    SELECT p.*, f.nome as funcionario_nome
+    ${from} ORDER BY p.data DESC, p.horario DESC LIMIT ? OFFSET ?
+  `).all(...params, limite, (pagina - 1) * limite);
+  res.json({ data, total, page: pagina, limit: limite, totalPages: Math.ceil(total / limite) || 1 });
+});
+
+app.post('/api/rh/pontos', (req, res) => {
+  try {
+    const funcionarioId = inteiroOuNulo(req.body?.funcionario_id);
+    if (!funcionarioId) {
+      const err = new Error('Funcionario e obrigatorio');
+      err.status = 400;
+      throw err;
+    }
+    const func = db.prepare('SELECT id FROM rh_funcionarios WHERE id = ? AND ativo = 1').get(funcionarioId);
+    if (!func) {
+      const err = new Error('Funcionario nao encontrado');
+      err.status = 400;
+      throw err;
+    }
+    const data = dataValida(req.body.data) || hojeIso();
+    const horario = rhMod.parseHora(req.body.horario, '08:00');
+    const tipo = rhMod.normalizarBatida(req.body.tipo);
+    const result = db.prepare(`INSERT INTO rh_pontos (funcionario_id, data, horario, tipo, observacao)
+      VALUES (?,?,?,?,?)`).run(funcionarioId, data, horario, tipo, String(req.body.observacao || '').slice(0, 200));
+    res.json({ id: result.lastInsertRowid });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao registrar ponto' });
+  }
+});
+
+app.delete('/api/rh/pontos/:id', (req, res) => {
+  const atual = db.prepare('SELECT id FROM rh_pontos WHERE id = ?').get(req.params.id);
+  if (!atual) return res.status(404).json({ error: 'Batida nao encontrada' });
+  db.prepare('DELETE FROM rh_pontos WHERE id = ?').run(atual.id);
+  res.json({ message: 'Batida excluida' });
+});
+
+app.get('/api/rh/folhas', (req, res) => {
+  try {
+    const funcionarioId = inteiroOuNulo(req.query.funcionario_id);
+    if (!funcionarioId) return res.status(400).json({ error: 'Informe o funcionario' });
+    const func = db.prepare(`
+      SELECT f.*, g.nome as grade_nome FROM rh_funcionarios f
+      LEFT JOIN rh_grades g ON g.id = f.grade_id WHERE f.id = ?
+    `).get(funcionarioId);
+    if (!func) return res.status(404).json({ error: 'Funcionario nao encontrado' });
+    const de = dataValida(req.query.de) || db.prepare("SELECT date('now','localtime','start of month') as d").get().d;
+    const ate = dataValida(req.query.ate) || hojeIso();
+    const batidas = db.prepare(`
+      SELECT * FROM rh_pontos WHERE funcionario_id = ? AND date(data) >= date(?) AND date(data) <= date(?)
+      ORDER BY data, horario
+    `).all(funcionarioId, de, ate);
+    const grade = func.grade_id ? rhGradeRow(func.grade_id) : null;
+    const folha = rhMod.calcularFolha({ batidas, grade });
+    res.json({ funcionario: func, grade, de, ate, batidas, ...folha });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao gerar folha' });
+  }
+});
+
 function garantirCategoria(nome) {
   const n = String(nome || '').trim();
   if (!n) return '';
@@ -1776,6 +2037,9 @@ const PERMISSOES_DISPONIVEIS = [
   { key: 'estoque', label: 'Estoque' },
   { key: 'compras', label: 'Pedidos de compras' },
   { key: 'ordens-servico', label: 'Ordens de servico' },
+  { key: 'rh-funcionarios', label: 'R.H. Funcionarios' },
+  { key: 'rh-pontos', label: 'R.H. Folhas de ponto' },
+  { key: 'rh-grades', label: 'R.H. Grades horarias' },
   { key: 'usuarios', label: 'Usuarios' },
   { key: 'fornecedores', label: 'Fornecedores' },
   { key: 'historico-vendas', label: 'Historico de vendas' },

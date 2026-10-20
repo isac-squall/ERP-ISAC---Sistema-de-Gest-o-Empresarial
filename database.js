@@ -343,6 +343,56 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_compra_itens_compra ON compra_itens(compra_id);
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rh_grades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    status TEXT DEFAULT 'ativo',
+    tipo TEXT DEFAULT 'comercial',
+    horas_dia TEXT DEFAULT '08:00',
+    horas_semana TEXT DEFAULT '44:00',
+    horas_mes TEXT DEFAULT '220:00',
+    limite_dia TEXT DEFAULT '10:00',
+    intervalo_minimo TEXT DEFAULT '01:00',
+    banco_horas INTEGER DEFAULT 0,
+    flexivel INTEGER DEFAULT 0,
+    exigir_localizacao INTEGER DEFAULT 0,
+    exigir_perto INTEGER DEFAULT 0,
+    criado_em TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS rh_funcionarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    cpf TEXT,
+    cargo TEXT,
+    telefone TEXT,
+    email TEXT,
+    data_admissao TEXT,
+    data_demissao TEXT,
+    salario REAL DEFAULT 0,
+    grade_id INTEGER,
+    usuario_id INTEGER,
+    ativo INTEGER DEFAULT 1,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (grade_id) REFERENCES rh_grades(id),
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  );
+  CREATE TABLE IF NOT EXISTS rh_pontos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    funcionario_id INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    horario TEXT NOT NULL,
+    tipo TEXT DEFAULT 'entrada',
+    observacao TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (funcionario_id) REFERENCES rh_funcionarios(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_rh_grades_status ON rh_grades(status);
+  CREATE INDEX IF NOT EXISTS idx_rh_func_nome ON rh_funcionarios(nome);
+  CREATE INDEX IF NOT EXISTS idx_rh_func_grade ON rh_funcionarios(grade_id);
+  CREATE INDEX IF NOT EXISTS idx_rh_pontos_func_data ON rh_pontos(funcionario_id, data);
+`);
+
 (function seedCategorias() {
   const nomes = db.prepare(`
     SELECT DISTINCT TRIM(categoria) as nome FROM produtos
@@ -395,11 +445,12 @@ db.exec(`
 const PAGINAS_CONTADOR = [
   'contador-nfe', 'contador-compras', 'contador-xml', 'contador-extrato', 'contador-sped'
 ];
+const PAGINAS_RH = ['rh-funcionarios', 'rh-pontos', 'rh-grades'];
 const PAGINAS_TODAS = [
   'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
   'compras',
   'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
-  'relatorio', ...PAGINAS_CONTADOR, 'backup', 'impressoras', 'configuracoes', 'manual'
+  'relatorio', ...PAGINAS_CONTADOR, ...PAGINAS_RH, 'backup', 'impressoras', 'configuracoes', 'manual'
 ];
 const PERFIS_PADRAO = [
   {
@@ -414,7 +465,7 @@ const PERFIS_PADRAO = [
       'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
       'compras',
       'ordens-servico', 'fornecedores', 'historico-vendas', 'relatorio',
-      ...PAGINAS_CONTADOR, 'impressoras', 'manual'
+      ...PAGINAS_CONTADOR, ...PAGINAS_RH, 'impressoras', 'manual'
     ]
   },
   {
@@ -471,6 +522,13 @@ if (adminPerfil) {
     if (i >= 0) perms.splice(i + 1, 0, 'compras');
     else perms.push('compras');
   }
+  for (const k of PAGINAS_RH) {
+    if (!perms.includes(k)) {
+      const i = perms.indexOf('backup');
+      if (i >= 0) perms.splice(i, 0, k);
+      else perms.push(k);
+    }
+  }
   db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), adminPerfil.id);
 }
 const gerentePerfil = db.prepare("SELECT id, permissoes FROM perfis WHERE nome = 'Gerente'").get();
@@ -509,6 +567,14 @@ if (gerentePerfil) {
     if (i >= 0) perms.splice(i + 1, 0, 'compras');
     else perms.push('compras');
     dirty = true;
+  }
+  for (const k of PAGINAS_RH) {
+    if (!perms.includes(k)) {
+      const i = perms.indexOf('impressoras');
+      if (i >= 0) perms.splice(i, 0, k);
+      else perms.push(k);
+      dirty = true;
+    }
   }
   if (dirty) db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), gerentePerfil.id);
 }

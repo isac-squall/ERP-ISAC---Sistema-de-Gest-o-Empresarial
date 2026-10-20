@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <title>ERP ISAC - Sistema de gestão empresarial</title>
-  <link rel="stylesheet" href="css/styles.css?v=30">
+  <link rel="stylesheet" href="css/styles.css?v=32">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -92,12 +92,12 @@
         <a href="#" class="nav-item" data-page="categorias">
           <i class="fas fa-tags"></i> Categorias
         </a>
-          <a href="#" class="nav-item" data-page="estoque">
-            <i class="fas fa-warehouse"></i> Estoque
-          </a>
-          <a href="#" class="nav-item" data-page="compras">
-            <i class="fas fa-shopping-basket"></i> Pedidos de compras
-          </a>
+        <a href="#" class="nav-item" data-page="estoque">
+          <i class="fas fa-warehouse"></i> Estoque
+        </a>
+        <a href="#" class="nav-item" data-page="compras">
+          <i class="fas fa-shopping-basket"></i> Pedidos de compras
+        </a>
         <a href="#" class="nav-item" data-page="ordens-servico">
           <i class="fas fa-wrench"></i> Ordens de serviço
         </a>
@@ -133,6 +133,23 @@
             </a>
             <a href="#" class="nav-item nav-subitem" data-page="contador-sped">
               <i class="fas fa-file-alt"></i> SPED Fiscal
+            </a>
+          </div>
+        </div>
+        <div class="nav-group" data-group="rh">
+          <a href="#" class="nav-item nav-group-toggle" data-group-toggle="rh">
+            <i class="fas fa-user-tie"></i> R.H.
+            <i class="fas fa-chevron-down nav-group-caret"></i>
+          </a>
+          <div class="nav-submenu" data-submenu="rh">
+            <a href="#" class="nav-item nav-subitem" data-page="rh-funcionarios">
+              <i class="fas fa-id-badge"></i> Funcionários
+            </a>
+            <a href="#" class="nav-item nav-subitem" data-page="rh-pontos">
+              <i class="fas fa-clock"></i> Folhas de Ponto
+            </a>
+            <a href="#" class="nav-item nav-subitem" data-page="rh-grades">
+              <i class="fas fa-calendar-alt"></i> Grades Horárias
             </a>
           </div>
         </div>
@@ -242,7 +259,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-  <script src="js/api.js?v=30"></script>
-  <script src="js/app.js?v=30"></script>
+  <script src="js/api.js?v=32"></script>
+  <script src="js/app.js?v=32"></script>
 </body>
 </html>
