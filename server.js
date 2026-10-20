@@ -9,6 +9,7 @@ const produtosTipos = require('./produtos/tipos');
 const produtosEstoque = require('./produtos/estoque');
 const comprasMod = require('./compras');
 const rhMod = require('./rh');
+const ecomMod = require('./ecommerce');
 const backupMod = require('./backup');
 const contador = require('./contador');
 const dre = require('./dre');
@@ -30,7 +31,10 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '25mb' }));
+app.use(express.json({
+  limit: '25mb',
+  verify: (req, res, buf) => { req.rawBody = buf; }
+}));
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: false,
   lastModified: false,
@@ -157,6 +161,7 @@ function rotaPublica(req) {
   if ((p === '/api/licenca/ativar' || p === '/api/licenca/validar') && m === 'POST') return true;
   if (p === '/api/empresa' && m === 'GET') return true;
   if (p.startsWith('/api/loja') && m === 'GET') return true;
+  if (p.startsWith('/api/webhooks/') && m === 'POST') return true;
   return false;
 }
 
@@ -179,6 +184,7 @@ function permissoesDaRota(req) {
   }
   if (p.startsWith('/api/estoque')) return ['estoque', 'produtos', 'vendas'];
   if (p.startsWith('/api/compras')) return ['compras'];
+  if (p.startsWith('/api/ecommerce')) return ['ecommerce'];
   if (p.startsWith('/api/rh')) return ['rh-funcionarios', 'rh-pontos', 'rh-grades'];
   if (p.startsWith('/api/produtos') || p.startsWith('/api/promocoes') || p.startsWith('/api/categorias')) {
     return m === 'GET' ? ['produtos', 'vendas'] : ['produtos'];
@@ -302,7 +308,7 @@ function permissoesDoCargo(cargo) {
   if (cargo === 'Administrador') {
     return [
       'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
-      'compras',
+      'compras', 'ecommerce',
       'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
       'relatorio', 'contador-nfe', 'contador-compras', 'contador-xml',
       'contador-extrato', 'contador-sped',
@@ -497,7 +503,8 @@ function isLicencaKey(chave) {
 }
 
 function isPreservedConfigKey(chave) {
-  return isLicencaKey(chave) || String(chave || '').startsWith('empresa_');
+  const k = String(chave || '');
+  return isLicencaKey(chave) || k.startsWith('empresa_') || k.startsWith('ecommerce_');
 }
 
 function onlyDigits(v) {
@@ -1108,6 +1115,272 @@ app.post('/api/compras/:id/receber', (req, res) => {
     res.json({ message: 'Pedido recebido', status: 'Recebido', financeiro_id: financeiroId });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message || 'Falha ao receber' });
+  }
+});
+
+function ecomCfg() {
+  return Object.fromEntries(db.prepare('SELECT chave, valor FROM config').all().map(r => [r.chave, r.valor]));
+}
+
+function ecomSecret(plataforma) {
+  const cfg = ecomCfg();
+  const p = ecomMod.normalizarPlataforma(plataforma);
+  if (p === 'woocommerce') return cfg.ecommerce_woo_secret || '';
+  if (p === 'shopify') return cfg.ecommerce_shopify_secret || '';
+  if (p === 'nuvemshop') return cfg.ecommerce_nuvemshop_token || '';
+  if (p === 'vtex') return cfg.ecommerce_vtex_token || '';
+  return cfg.ecommerce_api_secret || '';
+}
+
+function ecomUsuarioSistema() {
+  const row = db.prepare("SELECT id FROM usuarios WHERE cargo = 'Administrador' AND ativo = 1 ORDER BY id LIMIT 1").get();
+  return row?.id || 1;
+}
+
+function autenticarWebhook(req, plataforma) {
+  const p = ecomMod.normalizarPlataforma(plataforma);
+  const headers = {};
+  for (const [k, v] of Object.entries(req.headers || {})) headers[String(k).toLowerCase()] = v;
+  const bearer = String(headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+  if (bearer.startsWith('erp_live_')) {
+    const hash = hashToken(bearer);
+    const tok = db.prepare('SELECT * FROM ecommerce_tokens WHERE token_hash = ? AND ativo = 1').get(hash);
+    if (tok) return { via: 'token', token: tok };
+  }
+  if (p === 'generico') {
+    const esperado = ecomSecret('generico');
+    if (esperado && ecomMod.timingSafeEqual(esperado, bearer)) return { via: 'secret' };
+    if (tokValidoGenerico(bearer)) return { via: 'token' };
+    const err = new Error('Token de API invalido');
+    err.status = 401;
+    throw err;
+  }
+  ecomMod.verificarAssinatura({
+    plataforma: p,
+    secret: ecomSecret(p),
+    rawBody: req.rawBody || Buffer.from(JSON.stringify(req.body || {})),
+    headers
+  });
+  return { via: 'hmac' };
+}
+
+function tokValidoGenerico(bearer) {
+  if (!bearer) return false;
+  const hash = hashToken(bearer);
+  return !!db.prepare('SELECT id FROM ecommerce_tokens WHERE token_hash = ? AND ativo = 1').get(hash);
+}
+
+function registrarWebhookLog({ plataforma, evento, ok, payload, erro }) {
+  db.prepare(`INSERT INTO ecommerce_webhooks_log (plataforma, evento, ok, payload, erro) VALUES (?,?,?,?,?)`)
+    .run(plataforma || 'generico', evento || '', ok ? 1 : 0, payload ? String(payload).slice(0, 8000) : null, erro || null);
+}
+
+function processarPedidoEcommerce(plataforma, body) {
+  const pedido = ecomMod.validarPedido(ecomMod.parsePedido(plataforma, body));
+  const existente = db.prepare('SELECT * FROM ecommerce_pedidos WHERE plataforma = ? AND external_id = ?')
+    .get(plataforma, pedido.external_id);
+  if (pedido.status === 'pendente') {
+    return { ignored: true, status: 'pendente', external_id: pedido.external_id };
+  }
+  if (pedido.status === 'cancelado') {
+    if (existente?.venda_id) {
+      const venda = db.prepare('SELECT * FROM vendas WHERE id = ?').get(existente.venda_id);
+      if (venda && venda.status !== 'Cancelada') {
+        const itens = db.prepare('SELECT * FROM venda_itens WHERE venda_id = ?').all(venda.id);
+        const txn = db.transaction(() => {
+          devolverEstoqueVenda(itens, ecomUsuarioSistema(), `Cancelamento loja ${plataforma} #${pedido.external_id}`);
+          db.prepare("UPDATE vendas SET status='Cancelada' WHERE id=?").run(venda.id);
+          estornarFinanceiroVenda(venda.id, `Estorno loja ${plataforma} #${pedido.external_id}`);
+          db.prepare('UPDATE ecommerce_pedidos SET status=? WHERE id=?').run('cancelado', existente.id);
+        });
+        txn();
+      } else {
+        db.prepare('UPDATE ecommerce_pedidos SET status=? WHERE id=?').run('cancelado', existente.id);
+      }
+      return { cancelled: true, venda_id: existente.venda_id, pedido_id: existente.id };
+    }
+    return { ignored: true, status: 'cancelado', external_id: pedido.external_id };
+  }
+  if (existente?.venda_id) {
+    return { duplicate: true, venda_id: existente.venda_id, pedido_id: existente.id };
+  }
+  const cfg = ecomCfg();
+  const payload = JSON.stringify(body || {}).slice(0, 8000);
+  if (String(cfg.ecommerce_auto_baixa || '1') === '0') {
+    const clienteId = ecomMod.upsertCliente(db, pedido.cliente);
+    if (existente) return { queued: true, pedido_id: existente.id };
+    const ins = db.prepare(`INSERT INTO ecommerce_pedidos (plataforma, external_id, cliente_id, status, total, payload_json)
+      VALUES (?,?,?,?,?,?)`).run(plataforma, pedido.external_id, clienteId, 'pago', 0, payload);
+    return { queued: true, pedido_id: ins.lastInsertRowid };
+  }
+  try {
+    return db.transaction(() => {
+      const clienteId = ecomMod.upsertCliente(db, pedido.cliente);
+      const itens = ecomMod.resolverItens(db, pedido.itens);
+      let pedidoId = existente?.id;
+      if (!pedidoId) {
+        pedidoId = db.prepare(`INSERT INTO ecommerce_pedidos (plataforma, external_id, cliente_id, status, payload_json)
+          VALUES (?,?,?,?,?)`).run(plataforma, pedido.external_id, clienteId, 'pago', payload).lastInsertRowid;
+      }
+      const venda = criarVendaInterna({
+        cliente_id: clienteId,
+        itens,
+        desconto: pedido.desconto || 0,
+        forma_pagamento: pedido.forma_pagamento,
+        usuario_id: ecomUsuarioSistema(),
+        exigirCaixa: false,
+        origem: 'ecommerce',
+        ecommerce_pedido_id: pedidoId
+      });
+      db.prepare('UPDATE ecommerce_pedidos SET venda_id=?, cliente_id=?, status=?, total=? WHERE id=?')
+        .run(venda.id, clienteId, 'pago', venda.total, pedidoId);
+      db.prepare('UPDATE vendas SET ecommerce_pedido_id=? WHERE id=?').run(pedidoId, venda.id);
+      return { venda_id: venda.id, pedido_id: pedidoId, cliente_id: clienteId, total: venda.total };
+    })();
+  } catch (err) {
+    if (String(err.message || '').includes('UNIQUE')) {
+      const row = db.prepare('SELECT * FROM ecommerce_pedidos WHERE plataforma = ? AND external_id = ?')
+        .get(plataforma, pedido.external_id);
+      if (row?.venda_id) return { duplicate: true, venda_id: row.venda_id, pedido_id: row.id };
+    }
+    throw err;
+  }
+}
+
+app.post('/api/webhooks/:plataforma', (req, res) => {
+  const plataforma = ecomMod.normalizarPlataforma(req.params.plataforma);
+  try {
+    autenticarWebhook(req, plataforma);
+    const r = processarPedidoEcommerce(plataforma, req.body || {});
+    registrarWebhookLog({
+      plataforma,
+      evento: r.cancelled ? 'cancelado' : (r.duplicate ? 'duplicado' : 'pedido'),
+      ok: 1,
+      payload: JSON.stringify({ external_id: (req.body || {}).id || (req.body || {}).external_id, r }).slice(0, 4000)
+    });
+    res.json({ ok: true, plataforma, ...r });
+  } catch (err) {
+    registrarWebhookLog({
+      plataforma,
+      evento: 'erro',
+      ok: 0,
+      payload: JSON.stringify(req.body || {}).slice(0, 2000),
+      erro: err.message
+    });
+    res.status(err.status || 400).json({ error: err.message || 'Falha no webhook' });
+  }
+});
+
+app.get('/api/ecommerce/config', (req, res) => {
+  const cfg = ecomCfg();
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+  const host = req.headers['x-forwarded-host'] || req.headers.host || `localhost:${PORT}`;
+  const base = `${proto}://${host}`;
+  res.json({
+    auto_baixa: String(cfg.ecommerce_auto_baixa || '1') === '1',
+    woo_secret: ecomMod.mascarar(cfg.ecommerce_woo_secret),
+    shopify_secret: ecomMod.mascarar(cfg.ecommerce_shopify_secret),
+    nuvemshop_token: ecomMod.mascarar(cfg.ecommerce_nuvemshop_token),
+    vtex_token: ecomMod.mascarar(cfg.ecommerce_vtex_token),
+    api_secret: ecomMod.mascarar(cfg.ecommerce_api_secret),
+    tem_woo: !!cfg.ecommerce_woo_secret,
+    tem_shopify: !!cfg.ecommerce_shopify_secret,
+    tem_nuvemshop: !!cfg.ecommerce_nuvemshop_token,
+    tem_vtex: !!cfg.ecommerce_vtex_token,
+    tem_api: !!cfg.ecommerce_api_secret,
+    urls: {
+      generico: `${base}/api/webhooks/generico`,
+      woocommerce: `${base}/api/webhooks/woocommerce`,
+      shopify: `${base}/api/webhooks/shopify`,
+      nuvemshop: `${base}/api/webhooks/nuvemshop`,
+      vtex: `${base}/api/webhooks/vtex`
+    }
+  });
+});
+
+app.put('/api/ecommerce/config', (req, res) => {
+  const body = req.body || {};
+  const stmt = db.prepare('INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor');
+  const map = {
+    ecommerce_auto_baixa: body.auto_baixa === false || body.auto_baixa === 0 || body.auto_baixa === '0' ? '0' : '1'
+  };
+  if (body.woo_secret != null && String(body.woo_secret).trim() && !String(body.woo_secret).includes('**')) {
+    map.ecommerce_woo_secret = String(body.woo_secret).trim();
+  }
+  if (body.shopify_secret != null && String(body.shopify_secret).trim() && !String(body.shopify_secret).includes('**')) {
+    map.ecommerce_shopify_secret = String(body.shopify_secret).trim();
+  }
+  if (body.nuvemshop_token != null && String(body.nuvemshop_token).trim() && !String(body.nuvemshop_token).includes('**')) {
+    map.ecommerce_nuvemshop_token = String(body.nuvemshop_token).trim();
+  }
+  if (body.vtex_token != null && String(body.vtex_token).trim() && !String(body.vtex_token).includes('**')) {
+    map.ecommerce_vtex_token = String(body.vtex_token).trim();
+  }
+  if (body.api_secret != null && String(body.api_secret).trim() && !String(body.api_secret).includes('**')) {
+    map.ecommerce_api_secret = String(body.api_secret).trim();
+  }
+  const tx = db.transaction(() => {
+    for (const [k, v] of Object.entries(map)) stmt.run(k, v);
+  });
+  tx();
+  res.json({ message: 'Integracao salva' });
+});
+
+app.get('/api/ecommerce/tokens', (req, res) => {
+  const rows = db.prepare('SELECT id, nome, plataforma, prefixo, ativo, criado_em FROM ecommerce_tokens ORDER BY id DESC').all();
+  res.json({ data: rows });
+});
+
+app.post('/api/ecommerce/tokens', (req, res) => {
+  const nome = String(req.body?.nome || '').trim() || 'Token loja';
+  const plataforma = ecomMod.normalizarPlataforma(req.body?.plataforma);
+  const gerado = ecomMod.gerarToken();
+  const r = db.prepare('INSERT INTO ecommerce_tokens (nome, plataforma, token_hash, prefixo, ativo) VALUES (?,?,?,?,1)')
+    .run(nome, plataforma, gerado.hash, gerado.prefixo);
+  res.json({ id: r.lastInsertRowid, token: gerado.token, prefixo: gerado.prefixo, message: 'Copie o token agora. Ele nao sera exibido de novo.' });
+});
+
+app.delete('/api/ecommerce/tokens/:id', (req, res) => {
+  db.prepare('UPDATE ecommerce_tokens SET ativo = 0 WHERE id = ?').run(req.params.id);
+  res.json({ message: 'Token desativado' });
+});
+
+app.get('/api/ecommerce/pedidos', (req, res) => {
+  const { search = '', page = 1, limit = 15, plataforma } = req.query;
+  let query = `SELECT p.*, c.nome as cliente_nome, v.status as venda_status, v.total as venda_total
+    FROM ecommerce_pedidos p
+    LEFT JOIN clientes c ON c.id = p.cliente_id
+    LEFT JOIN vendas v ON v.id = p.venda_id WHERE 1=1`;
+  const params = [];
+  if (plataforma) { query += ' AND p.plataforma = ?'; params.push(plataforma); }
+  if (search) {
+    query += ' AND (p.external_id LIKE ? OR c.nome LIKE ? OR CAST(p.venda_id AS TEXT) LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s);
+  }
+  query += ' ORDER BY p.id DESC';
+  const countQ = query.replace(/SELECT p\.\*, c\.nome as cliente_nome, v\.status as venda_status, v\.total as venda_total[\s\S]*?FROM ecommerce_pedidos p/, 'SELECT COUNT(*) as total FROM ecommerce_pedidos p');
+  const total = db.prepare(countQ).get(...params)?.total || 0;
+  const offset = (page - 1) * limit;
+  const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset);
+  res.json({ data, total, page: +page, limit: +limit, totalPages: Math.ceil(total / limit) || 1 });
+});
+
+app.get('/api/ecommerce/log', (req, res) => {
+  const { page = 1, limit = 20 } = req.query;
+  const total = db.prepare('SELECT COUNT(*) as total FROM ecommerce_webhooks_log').get().total || 0;
+  const offset = (page - 1) * limit;
+  const data = db.prepare('SELECT * FROM ecommerce_webhooks_log ORDER BY id DESC LIMIT ? OFFSET ?').all(+limit, offset);
+  res.json({ data, total, page: +page, limit: +limit, totalPages: Math.ceil(total / limit) || 1 });
+});
+
+app.post('/api/ecommerce/pedidos', (req, res) => {
+  try {
+    const plataforma = ecomMod.normalizarPlataforma(req.body?.plataforma || 'generico');
+    const r = processarPedidoEcommerce(plataforma, req.body || {});
+    res.json({ ok: true, ...r });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao importar pedido' });
   }
 });
 
@@ -2036,6 +2309,7 @@ const PERMISSOES_DISPONIVEIS = [
   { key: 'categorias', label: 'Categorias de estoque' },
   { key: 'estoque', label: 'Estoque' },
   { key: 'compras', label: 'Pedidos de compras' },
+  { key: 'ecommerce', label: 'Loja online / API' },
   { key: 'ordens-servico', label: 'Ordens de servico' },
   { key: 'rh-funcionarios', label: 'R.H. Funcionarios' },
   { key: 'rh-pontos', label: 'R.H. Folhas de ponto' },
@@ -2533,21 +2807,35 @@ app.get('/api/caixa/historico', (req, res) => {
 
 
 // ============ VENDAS ============
-app.post('/api/vendas', async (req, res) => {
-  const { cliente_id, itens, desconto, forma_pagamento, valor_recebido, parcelas, emitir_nfce } = req.body;
-  const usuario_id = req.usuario.id;
-  const status = db.prepare('SELECT aberto FROM caixa_status WHERE id = 1').get();
-  if (!status?.aberto) return res.status(400).json({ error: 'Caixa fechado. Abra o caixa para realizar vendas.' });
-  if (!itens?.length) return res.status(400).json({ error: 'Adicione itens à venda' });
+function criarVendaInterna({
+  cliente_id, itens, desconto, forma_pagamento, valor_recebido, parcelas, usuario_id,
+  exigirCaixa = true, origem = 'pdv', ecommerce_pedido_id = null
+}) {
+  if (exigirCaixa) {
+    const status = db.prepare('SELECT aberto FROM caixa_status WHERE id = 1').get();
+    if (!status?.aberto) {
+      const err = new Error('Caixa fechado. Abra o caixa para realizar vendas.');
+      err.status = 400;
+      throw err;
+    }
+  }
+  if (!itens?.length) {
+    const err = new Error('Adicione itens à venda');
+    err.status = 400;
+    throw err;
+  }
   const fiado = isFiado(forma_pagamento);
-  if (fiado && !cliente_id) return res.status(400).json({ error: 'Selecione um cliente cadastrado para venda fiado.' });
-
+  if (fiado && !cliente_id) {
+    const err = new Error('Selecione um cliente cadastrado para venda fiado.');
+    err.status = 400;
+    throw err;
+  }
   const cfg = Object.fromEntries(db.prepare('SELECT chave, valor FROM config').all().map(r => [r.chave, r.valor]));
   const clienteNome = cliente_id
     ? (db.prepare('SELECT nome FROM clientes WHERE id = ?').get(cliente_id)?.nome || 'Visitante')
     : 'Visitante';
-  const insertVenda = db.prepare(`INSERT INTO vendas (cliente_id, total, desconto, forma_pagamento, usuario_id, valor_recebido, troco, parcelas, taxa_cartao)
-    VALUES (?,?,?,?,?,?,?,?,?)`);
+  const insertVenda = db.prepare(`INSERT INTO vendas (cliente_id, total, desconto, forma_pagamento, usuario_id, valor_recebido, troco, parcelas, taxa_cartao, origem, ecommerce_pedido_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
   const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, descricao, quantidade, preco_unitario, subtotal, os_id, preco_custo, estoque_origem_id, estoque_consumo, tipo, composicao) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
   const insertCaixa = db.prepare(`INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, cliente_nome, desconto, desconto_percent, venda_id, usuario_id)
     VALUES (?,?,?,?,?,?,?,?,?)`);
@@ -2566,7 +2854,10 @@ app.post('/api/vendas', async (req, res) => {
     const recebido = fiado ? 0 : (valor_recebido != null ? Number(valor_recebido) : total);
     const troco = fiado ? 0 : Math.max(0, recebido - total);
     const qtdParcelas = parcelas || 1;
-    const venda = insertVenda.run(cliente_id || null, total, desc, forma_pagamento, usuario_id, recebido, troco, qtdParcelas, taxa);
+    const venda = insertVenda.run(
+      cliente_id || null, total, desc, forma_pagamento, usuario_id, recebido, troco, qtdParcelas, taxa,
+      origem || 'pdv', ecommerce_pedido_id || null
+    );
     for (const item of itens) {
       const quantidade = Number(item.quantidade) || 1;
       const preco = Number(item.preco_unitario) || 0;
@@ -2590,8 +2881,8 @@ app.post('/api/vendas', async (req, res) => {
         marcarOS.run(item.os_id);
       }
     }
-    if (!fiado) {
-      insertCaixa.run('Venda realizada', 'Venda', total, forma_pagamento, clienteNome, desc,
+    if (!fiado && exigirCaixa) {
+      insertCaixa.run('Venda realizada', origem === 'ecommerce' ? 'Venda loja online' : 'Venda', total, forma_pagamento, clienteNome, desc,
         subtotal > 0 ? (desc / subtotal) * 100 : 0, venda.lastInsertRowid, usuario_id);
     }
     lancarVendaNoFinanceiro({
@@ -2604,19 +2895,26 @@ app.post('/api/vendas', async (req, res) => {
       liquido,
       parcelas: qtdParcelas
     });
-    return venda.lastInsertRowid;
+    return { id: venda.lastInsertRowid, total, taxa, liquido };
   });
+  return txn();
+}
 
+app.post('/api/vendas', async (req, res) => {
+  const { cliente_id, itens, desconto, forma_pagamento, valor_recebido, parcelas, emitir_nfce } = req.body;
   try {
-    const vendaId = txn();
-    const nota = await nfce.emitirAposVenda(vendaId, emitir_nfce);
+    const venda = criarVendaInterna({
+      cliente_id, itens, desconto, forma_pagamento, valor_recebido, parcelas,
+      usuario_id: req.usuario.id, exigirCaixa: true, origem: 'pdv'
+    });
+    const nota = await nfce.emitirAposVenda(venda.id, emitir_nfce);
     res.json({
-      id: vendaId,
+      id: venda.id,
       message: 'Venda realizada',
       nfce: nota ? nfce.resumoPublico(nota) : null
     });
   } catch (e) {
-    res.status(400).json({ error: e.message || 'Falha ao finalizar venda' });
+    res.status(e.status || 400).json({ error: e.message || 'Falha ao finalizar venda' });
   }
 });
 

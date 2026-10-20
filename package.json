@@ -9,7 +9,8 @@
     "test:dre": "node dre/test.js",
     "test:produtos": "node produtos/test.js",
     "test:compras": "node compras/test.js",
-    "test:rh": "node rh/test.js"
+    "test:rh": "node rh/test.js",
+    "test:ecommerce": "node ecommerce/test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

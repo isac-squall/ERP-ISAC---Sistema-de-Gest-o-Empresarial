@@ -97,6 +97,17 @@ const API = {
     receber: (id) => API.request(`/compras/${id}/receber`, { method: 'POST', body: {} })
   },
 
+  ecommerce: {
+    config: () => API.request('/ecommerce/config'),
+    saveConfig: (d) => API.request('/ecommerce/config', { method: 'PUT', body: d }),
+    tokens: () => API.request('/ecommerce/tokens'),
+    criarToken: (d) => API.request('/ecommerce/tokens', { method: 'POST', body: d }),
+    deleteToken: (id) => API.request(`/ecommerce/tokens/${id}`, { method: 'DELETE' }),
+    pedidos: (p) => API.request(`/ecommerce/pedidos?${new URLSearchParams(p || {})}`),
+    importar: (d) => API.request('/ecommerce/pedidos', { method: 'POST', body: d }),
+    log: (p) => API.request(`/ecommerce/log?${new URLSearchParams(p || {})}`)
+  },
+
   rh: {
     grades: {
       list: (p) => API.request(`/rh/grades?${new URLSearchParams(p || {})}`),

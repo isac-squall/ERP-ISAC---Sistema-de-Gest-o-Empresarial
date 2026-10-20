@@ -393,6 +393,48 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_rh_pontos_func_data ON rh_pontos(funcionario_id, data);
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ecommerce_pedidos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plataforma TEXT NOT NULL DEFAULT 'generico',
+    external_id TEXT NOT NULL,
+    venda_id INTEGER,
+    cliente_id INTEGER,
+    status TEXT DEFAULT 'pago',
+    total REAL DEFAULT 0,
+    payload_json TEXT,
+    erro TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE (plataforma, external_id),
+    FOREIGN KEY (venda_id) REFERENCES vendas(id),
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+  );
+  CREATE TABLE IF NOT EXISTS ecommerce_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    plataforma TEXT DEFAULT 'generico',
+    token_hash TEXT NOT NULL,
+    prefixo TEXT,
+    ativo INTEGER DEFAULT 1,
+    criado_em TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS ecommerce_webhooks_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plataforma TEXT,
+    evento TEXT,
+    ok INTEGER DEFAULT 1,
+    payload TEXT,
+    erro TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_ecom_pedidos_ext ON ecommerce_pedidos(plataforma, external_id);
+  CREATE INDEX IF NOT EXISTS idx_ecom_pedidos_venda ON ecommerce_pedidos(venda_id);
+  CREATE INDEX IF NOT EXISTS idx_ecom_tokens_hash ON ecommerce_tokens(token_hash);
+`);
+ensureColumn('vendas', 'origem', "TEXT DEFAULT 'pdv'");
+ensureColumn('vendas', 'ecommerce_pedido_id', 'INTEGER');
+ensureColumn('produtos', 'sku_ecommerce', 'TEXT');
+
 (function seedCategorias() {
   const nomes = db.prepare(`
     SELECT DISTINCT TRIM(categoria) as nome FROM produtos
@@ -448,7 +490,7 @@ const PAGINAS_CONTADOR = [
 const PAGINAS_RH = ['rh-funcionarios', 'rh-pontos', 'rh-grades'];
 const PAGINAS_TODAS = [
   'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
-  'compras',
+  'compras', 'ecommerce',
   'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
   'relatorio', ...PAGINAS_CONTADOR, ...PAGINAS_RH, 'backup', 'impressoras', 'configuracoes', 'manual'
 ];
@@ -463,7 +505,7 @@ const PERFIS_PADRAO = [
     descricao: 'Gestao operacional sem usuarios e configuracoes',
     permissoes: [
       'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
-      'compras',
+      'compras', 'ecommerce',
       'ordens-servico', 'fornecedores', 'historico-vendas', 'relatorio',
       ...PAGINAS_CONTADOR, ...PAGINAS_RH, 'impressoras', 'manual'
     ]
@@ -522,6 +564,11 @@ if (adminPerfil) {
     if (i >= 0) perms.splice(i + 1, 0, 'compras');
     else perms.push('compras');
   }
+  if (!perms.includes('ecommerce')) {
+    const i = perms.indexOf('compras');
+    if (i >= 0) perms.splice(i + 1, 0, 'ecommerce');
+    else perms.push('ecommerce');
+  }
   for (const k of PAGINAS_RH) {
     if (!perms.includes(k)) {
       const i = perms.indexOf('backup');
@@ -566,6 +613,12 @@ if (gerentePerfil) {
     const i = perms.indexOf('estoque');
     if (i >= 0) perms.splice(i + 1, 0, 'compras');
     else perms.push('compras');
+    dirty = true;
+  }
+  if (!perms.includes('ecommerce')) {
+    const i = perms.indexOf('compras');
+    if (i >= 0) perms.splice(i + 1, 0, 'ecommerce');
+    else perms.push('ecommerce');
     dirty = true;
   }
   for (const k of PAGINAS_RH) {
