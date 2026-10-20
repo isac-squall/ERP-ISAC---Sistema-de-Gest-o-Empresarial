@@ -12,6 +12,9 @@ const PAGES = {
   categorias: { title: 'Categorias de estoque', breadcrumb: 'Dashboard / Categorias' },
   estoque: { title: 'Estoque', breadcrumb: 'Dashboard / Estoque' },
   compras: { title: 'Pedidos de compras', breadcrumb: 'Dashboard / Pedidos de compras' },
+  'rh-funcionarios': { title: 'Funcionários', breadcrumb: 'Dashboard / R.H. / Funcionários' },
+  'rh-pontos': { title: 'Folhas de ponto', breadcrumb: 'Dashboard / R.H. / Folhas de ponto' },
+  'rh-grades': { title: 'Grades horárias', breadcrumb: 'Dashboard / R.H. / Grades horárias' },
   'ordens-servico': { title: 'Ordens de serviço', breadcrumb: 'Dashboard / Ordens de serviço' },
   usuarios: { title: 'Usuários', breadcrumb: 'Dashboard / Usuários' },
   fornecedores: { title: 'Fornecedores', breadcrumb: 'Dashboard / Fornecedores' },
@@ -171,18 +174,22 @@ function bindGlobalEvents() {
 }
 
 const CONTADOR_PAGES = ['contador-nfe', 'contador-compras', 'contador-xml', 'contador-extrato', 'contador-sped'];
+const RH_PAGES = ['rh-funcionarios', 'rh-pontos', 'rh-grades'];
 
 function userPermissoes() {
   const list = currentUser?.permissoes;
   let allowed;
   if (Array.isArray(list) && list.length) allowed = [...list];
   else if (currentUser?.cargo === 'Administrador') {
-    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque', 'compras', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
+    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque', 'compras', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, ...RH_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
   } else {
     allowed = ['dashboard', 'manual'];
   }
   if (currentUser?.cargo === 'Administrador' || currentUser?.cargo === 'Gerente') {
     for (const k of CONTADOR_PAGES) {
+      if (!allowed.includes(k)) allowed.push(k);
+    }
+    for (const k of RH_PAGES) {
       if (!allowed.includes(k)) allowed.push(k);
     }
   }
@@ -324,6 +331,9 @@ async function renderPage() {
     categorias: renderCategorias,
     estoque: renderEstoque,
     compras: renderCompras,
+    'rh-funcionarios': renderRhFuncionarios,
+    'rh-pontos': renderRhPontos,
+    'rh-grades': renderRhGrades,
     'ordens-servico': renderOrdensServico,
     usuarios: renderUsuarios,
     fornecedores: renderFornecedores,
@@ -2004,6 +2014,410 @@ async function deleteCompra(id) {
     await API.compras.delete(id);
     showToast('Pedido excluido', 'success');
     renderCompras();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+// ===================== R.H. =====================
+const RH_BATIDAS = [
+  { key: 'entrada', label: 'Entrada' },
+  { key: 'intervalo_inicio', label: 'Inicio intervalo' },
+  { key: 'intervalo_fim', label: 'Fim intervalo' },
+  { key: 'saida', label: 'Saida' }
+];
+
+async function renderRhFuncionarios() {
+  const st = pageState['rh-funcionarios'];
+  const result = await API.rh.funcionarios.list({ search: st.search, page: st.page, limit: st.limit });
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Funcionários', 'Dashboard / R.H. / Funcionários')}
+    ${renderTableToolbar(st.search, `Total de funcionarios: ${result.total}`, 'Novo Funcionario')}
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Nome</th><th>Cargo</th><th>Grade</th><th>Admissao</th><th>Salario</th><th>Status</th><th>Acoes</th></tr></thead>
+        <tbody id="table-body">${renderRhFuncionariosRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('rh-funcionarios', result, loadRhFuncionarios);
+  document.getElementById('table-new').onclick = () => showRhFuncionarioForm();
+}
+
+function renderRhFuncionariosRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="8">Nenhum funcionario encontrado</td></tr>';
+  return data.map(f => `<tr>
+    <td>${f.id}</td>
+    <td>${escapeHtml(f.nome)}</td>
+    <td>${escapeHtml(f.cargo || '-')}</td>
+    <td>${escapeHtml(f.grade_nome || '-')}</td>
+    <td>${formatDate(f.data_admissao)}</td>
+    <td>${formatCurrency(f.salario)}</td>
+    <td><span class="status-badge ${f.ativo ? 'ativo' : 'inativo'}">${f.ativo ? 'Ativo' : 'Inativo'}</span></td>
+    <td class="actions-cell">
+      <button class="btn-icon edit" onclick="showRhFuncionarioForm(${f.id})"><i class="fas fa-edit"></i></button>
+      <button class="btn-icon" title="Folha" onclick="abrirFolhaFuncionario(${f.id})"><i class="fas fa-clock"></i></button>
+      <button class="btn-icon delete" onclick="deleteRhFuncionario(${f.id})"><i class="fas fa-trash"></i></button>
+    </td></tr>`).join('');
+}
+
+async function loadRhFuncionarios() {
+  const st = pageState['rh-funcionarios'];
+  const result = await API.rh.funcionarios.list({ search: st.search, page: st.page, limit: st.limit });
+  document.getElementById('table-body').innerHTML = renderRhFuncionariosRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadRhFuncionarios();
+  });
+  document.querySelector('.toolbar-info').textContent = `Total de funcionarios: ${result.total}`;
+}
+
+async function showRhFuncionarioForm(id) {
+  const grades = await API.rh.grades.all().catch(() => []);
+  let data = { ativo: 1 };
+  if (id) data = await API.rh.funcionarios.get(id);
+  openModal(id ? 'Editar funcionario' : 'Novo funcionario', `
+    <form id="entity-form">
+      <div class="form-group"><label>Nome *</label><input name="nome" value="${escapeHtml(data.nome || '')}" required></div>
+      <div class="form-row">
+        <div class="form-group"><label>CPF</label><input name="cpf" value="${escapeHtml(data.cpf || '')}"></div>
+        <div class="form-group"><label>Cargo</label><input name="cargo" value="${escapeHtml(data.cargo || '')}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Telefone</label><input name="telefone" value="${escapeHtml(data.telefone || '')}"></div>
+        <div class="form-group"><label>Email</label><input name="email" type="email" value="${escapeHtml(data.email || '')}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Admissao</label><input name="data_admissao" type="date" value="${toInputDate(data.data_admissao)}"></div>
+        <div class="form-group"><label>Salario</label><input name="salario" type="number" step="0.01" value="${data.salario || 0}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Grade horaria</label>
+          <select name="grade_id">
+            <option value="">Sem grade</option>
+            ${grades.map(g => `<option value="${g.id}" ${data.grade_id == g.id ? 'selected' : ''}>${escapeHtml(g.nome)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>Status</label>
+          <select name="ativo">
+            <option value="1" ${data.ativo ? 'selected' : ''}>Ativo</option>
+            <option value="0" ${!data.ativo ? 'selected' : ''}>Inativo</option>
+          </select>
+        </div>
+      </div>
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('entity-save').onclick = async () => {
+    const form = document.getElementById('entity-form');
+    if (!form.reportValidity()) return;
+    const fd = new FormData(form);
+    const body = Object.fromEntries(fd);
+    body.salario = parseFloat(body.salario) || 0;
+    body.grade_id = body.grade_id || null;
+    body.ativo = Number(body.ativo);
+    try {
+      if (id) await API.rh.funcionarios.update(id, body);
+      else await API.rh.funcionarios.create(body);
+      closeModal(); showToast('Funcionario salvo', 'success'); renderRhFuncionarios();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function deleteRhFuncionario(id) {
+  if (!confirm('Desativar este funcionario?')) return;
+  try {
+    await API.rh.funcionarios.delete(id);
+    showToast('Funcionario desativado', 'success');
+    renderRhFuncionarios();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+function abrirFolhaFuncionario(id) {
+  pageState['rh-pontos'] = pageState['rh-pontos'] || { page: 1, limit: 15, search: '' };
+  pageState['rh-pontos'].funcionario_id = String(id);
+  navigate('rh-pontos');
+}
+
+async function renderRhPontos() {
+  const st = pageState['rh-pontos'];
+  st.de = st.de || '';
+  st.ate = st.ate || '';
+  st.funcionario_id = st.funcionario_id || '';
+  const [funcs, result] = await Promise.all([
+    API.rh.funcionarios.all().catch(() => []),
+    API.rh.pontos.list({ search: st.search, page: st.page, limit: st.limit, funcionario_id: st.funcionario_id, de: st.de, ate: st.ate })
+  ]);
+  let folhaHtml = '';
+  if (st.funcionario_id) {
+    try {
+      const folha = await API.rh.folha({ funcionario_id: st.funcionario_id, de: st.de, ate: st.ate });
+      folhaHtml = `
+        <div class="stats-row stats-row-4">
+          <div class="stat-card teal"><h4>Previsto</h4><div class="stat-value">${escapeHtml(folha.previsto_hora)}</div></div>
+          <div class="stat-card green"><h4>Trabalhado</h4><div class="stat-value">${escapeHtml(folha.trabalhados_hora)}</div></div>
+          <div class="stat-card orange"><h4>Extras</h4><div class="stat-value">${escapeHtml(folha.extras_hora)}</div></div>
+          <div class="stat-card blue"><h4>Saldo / banco</h4><div class="stat-value">${escapeHtml(folha.saldo_hora)} / ${escapeHtml(folha.banco_hora)}</div></div>
+        </div>`;
+    } catch {}
+  }
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Folhas de ponto', 'Dashboard / R.H. / Folhas de ponto')}
+    ${folhaHtml}
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Funcionario..." value="${escapeHtml(st.search || '')}" id="table-search">
+      </div>
+      <select id="rh-ponto-func" class="toolbar-select">
+        <option value="">Todos os funcionarios</option>
+        ${funcs.map(f => `<option value="${f.id}" ${String(st.funcionario_id) === String(f.id) ? 'selected' : ''}>${escapeHtml(f.nome)}</option>`).join('')}
+      </select>
+      <input type="date" id="rh-ponto-de" class="toolbar-select" value="${escapeHtml(st.de)}">
+      <input type="date" id="rh-ponto-ate" class="toolbar-select" value="${escapeHtml(st.ate)}">
+      <span class="toolbar-info">Total de batidas: ${result.total}</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-primary" id="table-new"><i class="fas fa-plus"></i> Registrar ponto</button>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Funcionario</th><th>Data</th><th>Horario</th><th>Tipo</th><th>Obs</th><th>Acoes</th></tr></thead>
+        <tbody id="table-body">${renderRhPontosRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('rh-pontos', result, loadRhPontos);
+  document.getElementById('table-new').onclick = () => showRhPontoForm();
+  document.getElementById('rh-ponto-func').onchange = () => {
+    st.funcionario_id = document.getElementById('rh-ponto-func').value;
+    st.page = 1;
+    renderRhPontos();
+  };
+  document.getElementById('rh-ponto-de').onchange = () => { st.de = document.getElementById('rh-ponto-de').value; st.page = 1; renderRhPontos(); };
+  document.getElementById('rh-ponto-ate').onchange = () => { st.ate = document.getElementById('rh-ponto-ate').value; st.page = 1; renderRhPontos(); };
+}
+
+function renderRhPontosRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="7">Nenhuma batida encontrada</td></tr>';
+  const labels = { entrada: 'Entrada', saida: 'Saida', intervalo_inicio: 'Inicio intervalo', intervalo_fim: 'Fim intervalo' };
+  return data.map(p => `<tr>
+    <td>${p.id}</td>
+    <td>${escapeHtml(p.funcionario_nome || '-')}</td>
+    <td>${formatDate(p.data)}</td>
+    <td>${escapeHtml(p.horario)}</td>
+    <td><span class="status-badge aberta">${escapeHtml(labels[p.tipo] || p.tipo)}</span></td>
+    <td>${escapeHtml(p.observacao || '-')}</td>
+    <td class="actions-cell">
+      <button class="btn-icon delete" onclick="deleteRhPonto(${p.id})"><i class="fas fa-trash"></i></button>
+    </td></tr>`).join('');
+}
+
+async function loadRhPontos() {
+  const st = pageState['rh-pontos'];
+  const result = await API.rh.pontos.list({ search: st.search, page: st.page, limit: st.limit, funcionario_id: st.funcionario_id || '', de: st.de || '', ate: st.ate || '' });
+  document.getElementById('table-body').innerHTML = renderRhPontosRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadRhPontos();
+  });
+  document.querySelector('.toolbar-info').textContent = `Total de batidas: ${result.total}`;
+}
+
+async function showRhPontoForm() {
+  const funcs = await API.rh.funcionarios.all();
+  const st = pageState['rh-pontos'] || {};
+  openModal('Registrar ponto', `
+    <form id="rh-ponto-form">
+      <div class="form-group"><label>Funcionario *</label>
+        <select name="funcionario_id" required>
+          <option value="">Selecione...</option>
+          ${funcs.map(f => `<option value="${f.id}" ${String(st.funcionario_id) === String(f.id) ? 'selected' : ''}>${escapeHtml(f.nome)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Data</label><input name="data" type="date" value="${hojeLocalIso()}" required></div>
+        <div class="form-group"><label>Horario</label><input name="horario" type="time" value="08:00" required></div>
+      </div>
+      <div class="form-group"><label>Tipo</label>
+        <select name="tipo">${RH_BATIDAS.map(b => `<option value="${b.key}">${b.label}</option>`).join('')}</select>
+      </div>
+      <div class="form-group"><label>Observacao</label><input name="observacao"></div>
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="rh-ponto-save">Salvar</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('rh-ponto-save').onclick = async () => {
+    const form = document.getElementById('rh-ponto-form');
+    if (!form.reportValidity()) return;
+    const body = Object.fromEntries(new FormData(form));
+    try {
+      await API.rh.pontos.create(body);
+      closeModal(); showToast('Ponto registrado', 'success'); renderRhPontos();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function deleteRhPonto(id) {
+  if (!confirm('Excluir esta batida?')) return;
+  try {
+    await API.rh.pontos.delete(id);
+    showToast('Batida excluida', 'success');
+    renderRhPontos();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function renderRhGrades() {
+  const st = pageState['rh-grades'];
+  const result = await API.rh.grades.list({ search: st.search, page: st.page, limit: st.limit });
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Grades horárias', 'Dashboard / R.H. / Grades horárias')}
+    ${renderTableToolbar(st.search, `Total de grades: ${result.total}`, 'Nova grade')}
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr>
+          <th>#</th><th>Nome</th><th>Tipo</th><th>Dia</th><th>Semana</th><th>Mes</th><th>Banco</th><th>Funcionarios</th><th>Status</th><th>Acoes</th>
+        </tr></thead>
+        <tbody id="table-body">${renderRhGradesRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('rh-grades', result, loadRhGrades);
+  document.getElementById('table-new').onclick = () => showRhGradeForm();
+}
+
+function renderRhGradesRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="10">Nenhuma grade encontrada</td></tr>';
+  return data.map(g => `<tr>
+    <td>${g.id}</td>
+    <td>${escapeHtml(g.nome)}</td>
+    <td>${g.tipo === 'flexivel' ? 'Flexivel' : 'Comercial'}</td>
+    <td>${escapeHtml(g.horas_dia)}</td>
+    <td>${escapeHtml(g.horas_semana)}</td>
+    <td>${escapeHtml(g.horas_mes)}</td>
+    <td>${g.banco_horas ? 'Sim' : 'Nao'}</td>
+    <td>${g.funcionarios || 0}</td>
+    <td><span class="status-badge ${g.status === 'ativo' ? 'ativo' : 'inativo'}">${g.status === 'ativo' ? 'Ativo' : 'Inativo'}</span></td>
+    <td class="actions-cell">
+      <button class="btn-icon edit" onclick="showRhGradeForm(${g.id})"><i class="fas fa-edit"></i></button>
+      <button class="btn-icon delete" onclick="deleteRhGrade(${g.id})"><i class="fas fa-trash"></i></button>
+    </td></tr>`).join('');
+}
+
+async function loadRhGrades() {
+  const st = pageState['rh-grades'];
+  const result = await API.rh.grades.list({ search: st.search, page: st.page, limit: st.limit });
+  document.getElementById('table-body').innerHTML = renderRhGradesRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadRhGrades();
+  });
+  document.querySelector('.toolbar-info').textContent = `Total de grades: ${result.total}`;
+}
+
+async function showRhGradeForm(id) {
+  let data = {
+    status: 'ativo', tipo: 'comercial', horas_dia: '08:00', horas_semana: '44:00',
+    horas_mes: '220:00', limite_dia: '10:00', intervalo_minimo: '01:00',
+    banco_horas: 0, exigir_localizacao: 0, exigir_perto: 0
+  };
+  if (id) data = await API.rh.grades.get(id);
+  document.getElementById('content').innerHTML = `
+    <div class="rh-page-head">
+      <div>
+        <div class="breadcrumb">Dashboard / R.H. / Grades Horárias / ${id ? 'Editar' : 'Novo'}</div>
+        <h2>${id ? 'Editar grade horário de trabalho' : 'Cadastrar grade horário de trabalho'}</h2>
+        <p>Crie uma grade para vincular aos funcionarios desta unidade.</p>
+      </div>
+      <button class="btn btn-outline" id="rh-grade-voltar">&lt; Voltar</button>
+    </div>
+    <form id="rh-grade-form">
+      <div class="rh-form-card">
+        <div class="rh-form-grid">
+          <div class="form-group"><label>Nome *</label>
+            <input name="nome" value="${escapeHtml(data.nome || '')}" required placeholder="Ex.: Comercial 44h">
+          </div>
+          <div class="form-group"><label>Status</label>
+            <select name="status">
+              <option value="ativo" ${data.status === 'ativo' ? 'selected' : ''}>Ativo</option>
+              <option value="inativo" ${data.status === 'inativo' ? 'selected' : ''}>Inativo</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="rh-form-card">
+        <h3>Horas</h3>
+        <div class="rh-form-grid-4">
+          <div class="form-group"><label>Tipo</label>
+            <select name="tipo" id="rh-grade-tipo">
+              <option value="comercial" ${data.tipo !== 'flexivel' ? 'selected' : ''}>Comercial</option>
+              <option value="flexivel" ${data.tipo === 'flexivel' ? 'selected' : ''}>Flexivel</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Horas previstas por dia</label>
+            <input name="horas_dia" value="${escapeHtml(data.horas_dia || '08:00')}" placeholder="08:00" required>
+          </div>
+          <div class="form-group"><label>Horas previstas por semana</label>
+            <input name="horas_semana" value="${escapeHtml(data.horas_semana || '44:00')}" placeholder="44:00" required>
+          </div>
+          <div class="form-group"><label>Horas previstas por mes</label>
+            <input name="horas_mes" value="${escapeHtml(data.horas_mes || '220:00')}" placeholder="220:00" required>
+          </div>
+        </div>
+        <div class="rh-form-grid-4">
+          <div class="form-group"><label>Permitir banco de horas</label>
+            <select name="banco_horas">
+              <option value="0" ${!Number(data.banco_horas) ? 'selected' : ''}>Nao</option>
+              <option value="1" ${Number(data.banco_horas) ? 'selected' : ''}>Sim</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Limite de horas por dia</label>
+            <input name="limite_dia" value="${escapeHtml(data.limite_dia || '10:00')}" placeholder="10:00">
+          </div>
+          <div class="form-group"><label>Intervalo minimo</label>
+            <input name="intervalo_minimo" value="${escapeHtml(data.intervalo_minimo || '01:00')}" placeholder="01:00">
+          </div>
+          <div class="rh-flex-hint">
+            <h4>Flexivel</h4>
+            <p class="muted" style="margin:0">Grades flexiveis calculam saldo pelas batidas, sem bloquear por horario exato.</p>
+          </div>
+        </div>
+        <div class="rh-form-grid">
+          <div class="form-group"><label>Exigir localizacao para bater ponto</label>
+            <select name="exigir_localizacao">
+              <option value="0" ${!Number(data.exigir_localizacao) ? 'selected' : ''}>Nao</option>
+              <option value="1" ${Number(data.exigir_localizacao) ? 'selected' : ''}>Sim</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Exigir estar perto do ponto</label>
+            <select name="exigir_perto">
+              <option value="0" ${!Number(data.exigir_perto) ? 'selected' : ''}>Nao</option>
+              <option value="1" ${Number(data.exigir_perto) ? 'selected' : ''}>Sim</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button type="button" class="btn btn-outline" id="rh-grade-cancel">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Salvar grade</button>
+      </div>
+    </form>`;
+  document.getElementById('rh-grade-voltar').onclick = () => renderRhGrades();
+  document.getElementById('rh-grade-cancel').onclick = () => renderRhGrades();
+  document.getElementById('rh-grade-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target));
+    body.banco_horas = Number(body.banco_horas);
+    body.exigir_localizacao = Number(body.exigir_localizacao);
+    body.exigir_perto = Number(body.exigir_perto);
+    try {
+      if (id) await API.rh.grades.update(id, body);
+      else await API.rh.grades.create(body);
+      showToast('Grade salva', 'success');
+      renderRhGrades();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function deleteRhGrade(id) {
+  if (!confirm('Excluir esta grade horaria?')) return;
+  try {
+    await API.rh.grades.delete(id);
+    showToast('Grade excluida', 'success');
+    renderRhGrades();
   } catch (err) { showToast(err.message, 'error'); }
 }
 

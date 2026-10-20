@@ -245,6 +245,52 @@ module.exports = [
     ]
   },
   {
+    id: 'rh-funcionarios',
+    modulo: 'R.H.',
+    sessao: 'Funcionarios',
+    pagina: 'rh-funcionarios',
+    titulo: 'Cadastrar funcionarios e vincular grade',
+    keywords: 'rh recursos humanos funcionario cargo salario admissao cpf grade horaria equipe colaborador',
+    conteudo: `Em R.H. > Funcionarios voce cadastra nome, CPF, cargo, telefone, e-mail, data de admissao, salario e a grade horaria. Status Ativo/Inativo. A lista mostra grade vinculada e permite abrir a folha de ponto do funcionario. Excluir desativa o cadastro. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Abra R.H. > Funcionarios.',
+      'Clique em Novo Funcionario.',
+      'Preencha nome, cargo, admissao, salario e a grade.',
+      'Salve. Use o relogio na linha para ver a folha de ponto.'
+    ]
+  },
+  {
+    id: 'rh-pontos',
+    modulo: 'R.H.',
+    sessao: 'Folhas de ponto',
+    pagina: 'rh-pontos',
+    titulo: 'Registrar ponto e acompanhar a folha',
+    keywords: 'rh ponto batida folha jornada extra banco horas entrada saida intervalo funcionario',
+    conteudo: `Folhas de ponto registram batidas (Entrada, Inicio intervalo, Fim intervalo, Saida). Filtre por funcionario e periodo. Com um funcionario selecionado, os cards mostram previsto, trabalhado, extras e saldo/banco conforme a grade. Extra e o que passar da jornada do dia. Banco de horas so conta se a grade permitir.`,
+    passos: [
+      'Abra R.H. > Folhas de Ponto.',
+      'Clique em Registrar ponto, escolha funcionario, data, horario e tipo.',
+      'Filtre por funcionario e datas para ver a folha.',
+      'Exclua uma batida se foi lancada errada.'
+    ]
+  },
+  {
+    id: 'rh-grades',
+    modulo: 'R.H.',
+    sessao: 'Grades horarias',
+    pagina: 'rh-grades',
+    titulo: 'Cadastrar grade horario de trabalho',
+    keywords: 'rh grade horaria jornada comercial flexivel banco horas intervalo localizacao unidade equipe',
+    conteudo: `Grades horarias definem a jornada dos funcionarios. Cadastro no estilo SimpleDot: Nome, Status Ativo/Inativo, Tipo Comercial ou Flexivel, horas previstas por dia/semana/mes, limite de horas por dia, intervalo minimo, banco de horas, exigir localizacao e exigir estar perto da unidade. Breadcrumb: Dashboard / R.H. / Grades Horarias / Novo. Botoes Voltar e Salvar. Grade flexivel calcula o saldo pelas batidas. Nao exclui grade em uso por funcionario ativo.`,
+    passos: [
+      'Abra R.H. > Grades Horarias.',
+      'Clique em Nova grade.',
+      'Informe nome, status, tipo e as horas.',
+      'Defina banco de horas e regras de localizacao.',
+      'Salve e vincule a grade no cadastro do funcionario.'
+    ]
+  },
+  {
     id: 'ordens-servico',
     modulo: 'Ordens de servico',
     sessao: 'Gestao de OS',
@@ -519,7 +565,7 @@ module.exports = [
     pagina: 'usuarios',
     titulo: 'O que cada nivel pode ver',
     keywords: 'permissao menu escondido cargo nivel acesso sem permissao',
-    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo, inclusive Contador, Gerenciar Backup e Impressoras. Gerente nao acessa Usuarios, Backup nem Configuracoes (acessa Contador e Impressoras). Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio, Contador, Backup, Impressoras nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Admin, Gerente e Vendedor acessam Categorias e Estoque. Sem permissao a tela avisa Sem permissao para esta pagina.`,
+    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo, inclusive Contador, Gerenciar Backup e Impressoras. Gerente nao acessa Usuarios, Backup nem Configuracoes (acessa Contador, Impressoras, Pedidos de compras e R.H.). Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio, Contador, Backup, Impressoras, Compras, R.H. nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Admin, Gerente e Vendedor acessam Categorias e Estoque. Sem permissao a tela avisa Sem permissao para esta pagina.`,
     passos: [
       'Faca login com o usuario do cargo desejado.',
       'Confira o menu lateral filtrado.',
