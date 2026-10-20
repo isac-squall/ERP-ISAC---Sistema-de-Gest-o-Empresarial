@@ -328,7 +328,15 @@ app.get('/api/dashboard', (req, res) => {
   const vendasMes = db.prepare("SELECT COALESCE(SUM(total),0) as total FROM vendas WHERE strftime('%Y-%m', criado_em) = strftime('%Y-%m', 'now','localtime')").get();
   const totalClientes = db.prepare('SELECT COUNT(*) as total FROM clientes WHERE ativo = 1').get();
   const totalProdutos = db.prepare('SELECT COUNT(*) as total FROM produtos WHERE ativo = 1').get();
-  const estoqueBaixo = db.prepare('SELECT COUNT(*) as total FROM produtos WHERE estoque <= estoque_minimo AND ativo = 1').get();
+  const estoqueBaixo = db.prepare(`
+    SELECT COUNT(*) as total FROM produtos p
+    LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE p.ativo = 1 AND (
+      CASE WHEN p.estoque_origem_id IS NOT NULL AND IFNULL(p.estoque_consumo,0) > 0
+        THEN CAST((IFNULL(o.estoque,0) / p.estoque_consumo) AS INTEGER)
+        ELSE p.estoque END
+    ) <= IFNULL(p.estoque_minimo,0)
+  `).get();
   const ordensAbertas = db.prepare("SELECT COUNT(*) as total FROM ordens_servico WHERE status IN ('Aberta','Em andamento')").get();
   const ordensProntas = db.prepare("SELECT COUNT(*) as total FROM ordens_servico WHERE status = 'Pronta para entrega'").get();
   const valorPrevisto = db.prepare("SELECT COALESCE(SUM(valor_previsto),0) as total FROM ordens_servico WHERE status NOT IN ('Entregue','Cancelada')").get();
@@ -400,7 +408,21 @@ app.get('/api/dashboard/charts', (req, res) => {
 });
 
 app.get('/api/notificacoes', (req, res) => {
-  const estoque = db.prepare('SELECT id, nome, estoque, estoque_minimo FROM produtos WHERE ativo=1 AND estoque <= estoque_minimo LIMIT 10').all();
+  const estoque = db.prepare(`
+    SELECT p.id, p.nome,
+      CASE WHEN p.estoque_origem_id IS NOT NULL AND IFNULL(p.estoque_consumo,0) > 0
+        THEN CAST((IFNULL(o.estoque,0) / p.estoque_consumo) AS INTEGER)
+        ELSE p.estoque END as estoque,
+      p.estoque_minimo
+    FROM produtos p
+    LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE p.ativo=1 AND (
+      CASE WHEN p.estoque_origem_id IS NOT NULL AND IFNULL(p.estoque_consumo,0) > 0
+        THEN CAST((IFNULL(o.estoque,0) / p.estoque_consumo) AS INTEGER)
+        ELSE p.estoque END
+    ) <= IFNULL(p.estoque_minimo,0)
+    LIMIT 10
+  `).all();
   const osProntas = db.prepare("SELECT id, equipamento FROM ordens_servico WHERE status='Pronta para entrega' LIMIT 10").all();
   const atrasadas = db.prepare(`SELECT id, descricao, valor FROM financeiro WHERE status='Pendente' AND date(data_vencimento) < date('now','localtime') LIMIT 10`).all();
   const itens = [
@@ -757,11 +779,14 @@ app.delete('/api/fornecedores/:id', (req, res) => {
 // ============ PRODUTOS ============
 app.get('/api/produtos', (req, res) => {
   const { search = '', page = 1, limit = 15 } = req.query;
-  let query = `SELECT p.*, f.nome as fornecedor_nome,
+  let query = `SELECT p.*, f.nome as fornecedor_nome, o.nome as estoque_origem_nome, o.estoque as estoque_origem_qtd,
     (SELECT COUNT(*) FROM promocoes pr WHERE pr.produto_id = p.id AND pr.ativo = 1
       AND (pr.data_inicio IS NULL OR date(pr.data_inicio) <= date('now','localtime'))
       AND (pr.data_fim IS NULL OR date(pr.data_fim) >= date('now','localtime'))) as promocao_ativa
-    FROM produtos p LEFT JOIN fornecedores f ON p.fornecedor_id = f.id WHERE p.ativo = 1`;
+    FROM produtos p
+    LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+    LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE p.ativo = 1`;
   const params = [];
   if (search) {
     query += ' AND (p.nome LIKE ? OR p.codigo LIKE ? OR p.categoria LIKE ?)';
@@ -773,18 +798,41 @@ app.get('/api/produtos', (req, res) => {
   if (search) countQuery += ' AND (p.nome LIKE ? OR p.codigo LIKE ? OR p.categoria LIKE ?)';
   const total = db.prepare(countQuery).get(...params)?.total || 0;
   const offset = (page - 1) * limit;
-  const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset);
+  const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset)
+    .map(p => ({ ...p, estoque_disponivel: estoqueDisponivelProduto(p) }));
   res.json({ data, total, page: +page, limit: +limit, totalPages: Math.ceil(total / limit) || 1 });
 });
 
+function estoqueDisponivelProduto(p, origem) {
+  const consumo = Number(p?.estoque_consumo) || 0;
+  if (p?.estoque_origem_id && consumo > 0) {
+    const saldo = Number(origem?.estoque != null ? origem.estoque : p.estoque_origem_qtd) || 0;
+    return Math.floor((saldo + 1e-9) / consumo);
+  }
+  return Math.floor((Number(p?.estoque) || 0) + 1e-9);
+}
+
 app.get('/api/produtos/all', (req, res) => {
-  res.json(db.prepare('SELECT id, nome, preco, preco_custo, estoque, codigo, categoria FROM produtos WHERE ativo = 1 ORDER BY nome').all());
+  const rows = db.prepare(`
+    SELECT p.id, p.nome, p.preco, p.preco_custo, p.estoque, p.codigo, p.categoria,
+      p.estoque_origem_id, p.estoque_consumo, o.nome as estoque_origem_nome, o.estoque as estoque_origem_qtd
+    FROM produtos p
+    LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE p.ativo = 1 ORDER BY p.nome
+  `).all();
+  res.json(rows.map(p => ({ ...p, estoque_disponivel: estoqueDisponivelProduto(p) })));
 });
 
 app.get('/api/produtos/codigo/:codigo', (req, res) => {
-  const row = db.prepare('SELECT id, nome, preco, estoque, estoque_minimo, codigo, categoria FROM produtos WHERE ativo = 1 AND codigo = ?').get(req.params.codigo);
+  const row = db.prepare(`
+    SELECT p.id, p.nome, p.preco, p.preco_custo, p.estoque, p.estoque_minimo, p.codigo, p.categoria,
+      p.estoque_origem_id, p.estoque_consumo, o.nome as estoque_origem_nome, o.estoque as estoque_origem_qtd
+    FROM produtos p
+    LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE p.ativo = 1 AND p.codigo = ?
+  `).get(req.params.codigo);
   if (!row) return res.status(404).json({ error: 'Produto não encontrado' });
-  res.json(row);
+  res.json({ ...row, estoque_disponivel: estoqueDisponivelProduto(row) });
 });
 
 app.get('/api/produtos/formatos', (req, res) => {
@@ -792,8 +840,12 @@ app.get('/api/produtos/formatos', (req, res) => {
 });
 
 function produtosParaExport() {
-  return db.prepare(`SELECT nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria, ncm, cfop, unidade, origem
-    FROM produtos WHERE ativo = 1 ORDER BY nome`).all();
+  return db.prepare(`SELECT p.nome, p.codigo, p.descricao, p.preco, p.preco_custo, p.estoque, p.estoque_minimo,
+      p.categoria, p.ncm, p.cfop, p.unidade, p.origem, p.estoque_consumo,
+      o.codigo as estoque_origem_codigo
+    FROM produtos p
+    LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE p.ativo = 1 ORDER BY p.nome`).all();
 }
 
 function enviarArquivoProdutos(res, out, nome) {
@@ -828,11 +880,11 @@ app.post('/api/produtos/import', (req, res) => {
     const parsed = produtosIo.parse(raw, { formato, nomeArquivo: nome });
     if (!parsed.length) return res.status(400).json({ error: 'Nenhum produto encontrado no arquivo' });
 
-    const findCodigo = db.prepare(`SELECT id FROM produtos WHERE codigo IS NOT NULL AND codigo != '' AND codigo = ? ORDER BY ativo DESC, id DESC LIMIT 1`);
+    const findCodigo = db.prepare(`SELECT id, estoque_origem_id FROM produtos WHERE codigo IS NOT NULL AND codigo != '' AND codigo = ? ORDER BY ativo DESC, id DESC LIMIT 1`);
     const findNome = db.prepare(`SELECT id FROM produtos WHERE lower(nome) = lower(?) ORDER BY ativo DESC, id DESC LIMIT 1`);
-    const ins = db.prepare(`INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria, ncm, cfop, unidade, origem, ativo)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`);
-    const upd = db.prepare(`UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, estoque=?, estoque_minimo=?, categoria=?, ncm=?, cfop=?, unidade=?, origem=?, ativo=1 WHERE id=?`);
+    const ins = db.prepare(`INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria, ncm, cfop, unidade, origem, estoque_origem_id, estoque_consumo, ativo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`);
+    const upd = db.prepare(`UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, estoque=?, estoque_minimo=?, categoria=?, ncm=?, cfop=?, unidade=?, origem=?, estoque_origem_id=?, estoque_consumo=?, ativo=1 WHERE id=?`);
     const mov = db.prepare(`INSERT INTO estoque_movimentos (produto_id, tipo, quantidade, estoque_anterior, estoque_novo, observacao, usuario_id) VALUES (?,?,?,?,?,?,?)`);
     const getEstoque = db.prepare('SELECT estoque FROM produtos WHERE id = ?');
 
@@ -849,7 +901,14 @@ app.post('/api/produtos/import', (req, res) => {
         }
         let row = p.codigo ? findCodigo.get(p.codigo) : null;
         if (!row) row = findNome.get(p.nome);
-        const vals = [p.nome, p.codigo, p.descricao, p.preco, p.preco_custo, p.estoque, p.estoque_minimo, p.categoria, p.ncm, p.cfop, p.unidade, p.origem];
+        let origemId = null;
+        let consumo = Number(p.estoque_consumo) || 0;
+        if (p.estoque_origem_codigo) {
+          const origem = findCodigo.get(p.estoque_origem_codigo);
+          if (origem && !origem.estoque_origem_id) origemId = origem.id;
+        }
+        if (!origemId) consumo = 0;
+        const vals = [p.nome, p.codigo, p.descricao, p.preco, p.preco_custo, p.estoque, p.estoque_minimo, p.categoria, p.ncm, p.cfop, p.unidade, p.origem, origemId, consumo];
         if (row) {
           const anterior = getEstoque.get(row.id)?.estoque || 0;
           upd.run(...vals, row.id);
@@ -871,22 +930,46 @@ app.post('/api/produtos/import', (req, res) => {
   }
 });
 
+function validarEstoqueOrigem(origemId, consumo, produtoId) {
+  const origem = origemId ? parseInt(origemId, 10) : 0;
+  const cons = Number(consumo) || 0;
+  if (!origem) return { estoque_origem_id: null, estoque_consumo: 0 };
+  if (produtoId && origem === Number(produtoId)) {
+    throw new Error('A dose não pode ser produzida a partir de si mesma');
+  }
+  if (cons <= 0) throw new Error('Informe quanto da garrafa cada unidade consome');
+  const origemProd = db.prepare('SELECT id, estoque_origem_id, ativo FROM produtos WHERE id = ?').get(origem);
+  if (!origemProd || !origemProd.ativo) throw new Error('Produto de origem não encontrado');
+  if (origemProd.estoque_origem_id) throw new Error('A origem precisa ser a garrafa, não outra dose');
+  return { estoque_origem_id: origem, estoque_consumo: cons };
+}
+
 app.get('/api/produtos/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
+  const row = db.prepare(`
+    SELECT p.*, o.nome as estoque_origem_nome, o.estoque as estoque_origem_qtd
+    FROM produtos p LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE p.id = ?
+  `).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Produto não encontrado' });
-  res.json(row);
+  res.json({ ...row, estoque_disponivel: estoqueDisponivelProduto(row) });
 });
 
 app.post('/api/produtos', (req, res) => {
   const { nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem } = req.body;
   if (!nome) return res.status(400).json({ error: 'Nome é obrigatório' });
-  const result = db.prepare('INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null, ncm || '00000000', cfop || '5102', unidade || 'UN', origem || '0');
+  let comp;
+  try { comp = validarEstoqueOrigem(req.body.estoque_origem_id, req.body.estoque_consumo); }
+  catch (err) { return res.status(400).json({ error: err.message }); }
+  const result = db.prepare('INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem, estoque_origem_id, estoque_consumo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null, ncm || '00000000', cfop || '5102', unidade || 'UN', origem || '0', comp.estoque_origem_id, comp.estoque_consumo);
   res.json({ id: result.lastInsertRowid });
 });
 
 app.put('/api/produtos/:id', (req, res) => {
   const { nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem } = req.body;
-  db.prepare('UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, foto=?, estoque=?, estoque_minimo=?, categoria=?, fornecedor_id=?, ncm=?, cfop=?, unidade=?, origem=? WHERE id=?').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null, ncm || '00000000', cfop || '5102', unidade || 'UN', origem || '0', req.params.id);
+  let comp;
+  try { comp = validarEstoqueOrigem(req.body.estoque_origem_id, req.body.estoque_consumo, req.params.id); }
+  catch (err) { return res.status(400).json({ error: err.message }); }
+  db.prepare('UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, foto=?, estoque=?, estoque_minimo=?, categoria=?, fornecedor_id=?, ncm=?, cfop=?, unidade=?, origem=?, estoque_origem_id=?, estoque_consumo=? WHERE id=?').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null, ncm || '00000000', cfop || '5102', unidade || 'UN', origem || '0', comp.estoque_origem_id, comp.estoque_consumo, req.params.id);
   res.json({ message: 'Produto atualizado' });
 });
 
@@ -900,11 +983,11 @@ app.post('/api/produtos/:id/estoque', (req, res) => {
   if (!produto) return res.status(404).json({ error: 'Produto não encontrado' });
   const { tipo, quantidade, observacao } = req.body;
   const usuario_id = req.usuario.id;
-  const qtd = parseInt(quantidade, 10);
+  const qtd = Number(quantidade);
   if (!tipo || !['entrada', 'ajuste', 'inventario'].includes(tipo)) {
     return res.status(400).json({ error: 'Tipo inválido' });
   }
-  if (isNaN(qtd) || (tipo === 'entrada' && qtd <= 0) || (tipo === 'ajuste' && qtd === 0) || (tipo === 'inventario' && qtd < 0)) {
+  if (!Number.isFinite(qtd) || (tipo === 'entrada' && qtd <= 0) || (tipo === 'ajuste' && qtd === 0) || (tipo === 'inventario' && qtd < 0)) {
     return res.status(400).json({ error: 'Quantidade inválida' });
   }
   const anterior = produto.estoque || 0;
@@ -1182,18 +1265,48 @@ function registrarMovimentoEstoque({ produtoId, tipo, quantidade, anterior, novo
   );
 }
 
+function baixarEstoqueItem(item, quantidade, usuarioId, observacao) {
+  const prod = db.prepare('SELECT id, estoque, estoque_origem_id, estoque_consumo FROM produtos WHERE id = ?').get(item.produto_id);
+  if (!prod) throw new Error('Produto não encontrado');
+  const consumo = Number(prod.estoque_consumo) || 0;
+  const origemId = prod.estoque_origem_id && consumo > 0 ? prod.estoque_origem_id : null;
+  const alvoId = origemId || prod.id;
+  const qtdBaixa = Math.round((origemId ? quantidade * consumo : quantidade) * 10000) / 10000;
+  const alvo = db.prepare('SELECT estoque FROM produtos WHERE id = ?').get(alvoId);
+  const anterior = Number(alvo?.estoque) || 0;
+  if (anterior + 1e-9 < qtdBaixa) throw new Error('Estoque insuficiente');
+  const novo = Math.round((anterior - qtdBaixa) * 10000) / 10000;
+  db.prepare('UPDATE produtos SET estoque = ? WHERE id = ?').run(novo, alvoId);
+  registrarMovimentoEstoque({
+    produtoId: alvoId,
+    tipo: 'Saída',
+    quantidade: qtdBaixa,
+    anterior,
+    novo,
+    observacao,
+    usuarioId
+  });
+  return { estoque_origem_id: origemId, estoque_consumo: origemId ? consumo : 0 };
+}
+
 function devolverEstoqueVenda(itens, usuarioId, observacao) {
   for (const item of itens) {
     if (!item.produto_id) continue;
-    const prod = db.prepare('SELECT estoque FROM produtos WHERE id = ?').get(item.produto_id);
+    const origemId = item.estoque_origem_id || null;
+    const consumo = Number(item.estoque_consumo) || 0;
+    const qtdItem = Number(item.quantidade) || 0;
+    const alvoId = origemId && consumo > 0 ? origemId : item.produto_id;
+    const qtdDevolve = Math.round((origemId && consumo > 0 ? qtdItem * consumo : qtdItem) * 10000) / 10000;
+    const prod = db.prepare('SELECT estoque FROM produtos WHERE id = ?').get(alvoId);
     const anterior = Number(prod?.estoque) || 0;
-    db.prepare('UPDATE produtos SET estoque = estoque + ? WHERE id = ?').run(item.quantidade, item.produto_id);
+    const novo = Math.round((anterior + qtdDevolve) * 10000) / 10000;
+    db.prepare('UPDATE produtos SET estoque = ? WHERE id = ?').run(novo, alvoId);
     registrarMovimentoEstoque({
-      produtoId: item.produto_id,
+      produtoId: alvoId,
       tipo: 'Entrada',
-      quantidade: item.quantidade,
+      quantidade: qtdDevolve,
       anterior,
-      novo: anterior + (Number(item.quantidade) || 0),
+      novo,
       observacao,
       usuarioId
     });
@@ -1514,8 +1627,7 @@ app.post('/api/vendas', async (req, res) => {
     : 'Visitante';
   const insertVenda = db.prepare(`INSERT INTO vendas (cliente_id, total, desconto, forma_pagamento, usuario_id, valor_recebido, troco, parcelas, taxa_cartao)
     VALUES (?,?,?,?,?,?,?,?,?)`);
-  const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, descricao, quantidade, preco_unitario, subtotal, os_id, preco_custo) VALUES (?,?,?,?,?,?,?,?)');
-  const updateEstoque = db.prepare('UPDATE produtos SET estoque = estoque - ? WHERE id = ? AND estoque >= ?');
+  const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, descricao, quantidade, preco_unitario, subtotal, os_id, preco_custo, estoque_origem_id, estoque_consumo) VALUES (?,?,?,?,?,?,?,?,?,?)');
   const insertCaixa = db.prepare(`INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, cliente_nome, desconto, desconto_percent, venda_id, usuario_id)
     VALUES (?,?,?,?,?,?,?,?,?)`);
   const marcarOS = db.prepare("UPDATE ordens_servico SET status='Entregue', data_entrega=datetime('now','localtime') WHERE id=? AND status NOT IN ('Entregue','Cancelada')");
@@ -1541,23 +1653,13 @@ app.post('/api/vendas', async (req, res) => {
       if ((!custo || Number.isNaN(custo)) && item.produto_id) {
         custo = Number(db.prepare('SELECT preco_custo FROM produtos WHERE id = ?').get(item.produto_id)?.preco_custo) || 0;
       }
+      let baixa = { estoque_origem_id: null, estoque_consumo: 0 };
       if (item.produto_id) {
-        const prod = db.prepare('SELECT estoque FROM produtos WHERE id = ?').get(item.produto_id);
-        const anterior = Number(prod?.estoque) || 0;
-        const ok = updateEstoque.run(quantidade, item.produto_id, quantidade);
-        if (ok.changes === 0) throw new Error('Estoque insuficiente');
-        registrarMovimentoEstoque({
-          produtoId: item.produto_id,
-          tipo: 'Saída',
-          quantidade,
-          anterior,
-          novo: anterior - quantidade,
-          observacao: `Venda #${venda.lastInsertRowid}`,
-          usuarioId: usuario_id
-        });
+        baixa = baixarEstoqueItem(item, quantidade, usuario_id, `Venda #${venda.lastInsertRowid}`);
       }
       insertItem.run(venda.lastInsertRowid, item.produto_id || null, item.descricao || null,
-        quantidade, preco, quantidade * preco, item.os_id || null, custo || 0);
+        quantidade, preco, quantidade * preco, item.os_id || null, custo || 0,
+        baixa.estoque_origem_id, baixa.estoque_consumo);
       if (item.os_id) {
         const os = db.prepare('SELECT id, status FROM ordens_servico WHERE id = ?').get(item.os_id);
         if (!os) throw new Error(`Ordem de serviço #${item.os_id} não encontrada`);
@@ -1957,9 +2059,18 @@ app.get('/api/relatorio', (req, res) => {
   `).get(from, to).total;
 
   const estoque = db.prepare(`
-    SELECT COALESCE(SUM(estoque * COALESCE(preco,0)),0) as valor,
-           SUM(CASE WHEN estoque <= estoque_minimo THEN 1 ELSE 0 END) as alertas
-    FROM produtos WHERE ativo = 1
+    SELECT COALESCE(SUM(
+             CASE WHEN p.estoque_origem_id IS NOT NULL AND IFNULL(p.estoque_consumo,0) > 0 THEN 0
+             ELSE p.estoque * COALESCE(p.preco,0) END
+           ),0) as valor,
+           SUM(CASE WHEN (
+             CASE WHEN p.estoque_origem_id IS NOT NULL AND IFNULL(p.estoque_consumo,0) > 0
+               THEN CAST((IFNULL(o.estoque,0) / p.estoque_consumo) AS INTEGER)
+               ELSE p.estoque END
+           ) <= IFNULL(p.estoque_minimo,0) THEN 1 ELSE 0 END) as alertas
+    FROM produtos p
+    LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE p.ativo = 1
   `).get();
 
   const caixaMov = db.prepare(`

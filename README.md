@@ -9,7 +9,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Gerenciar caixa** — Abertura, entrada (suprimento), saida (sangria), fechamento e historico
 - **Financeiro** — Contas a pagar e receber, vencidos, saldo previsto e previsao em 7/15/30 dias
 - **Clientes** — Cadastro com busca e paginacao; vinculo no PDV (Visitante)
-- **Produtos** — Estoque, precos, codigo de barras, promocao, foto, NCM/CFOP e importacao/exportacao
+- **Produtos** — Estoque, precos, codigo de barras, promocao, foto, NCM/CFOP, importacao/exportacao e dose (baixa da garrafa)
 - **Ordens de servico** — Status, cliente, Servicos/Equipamentos, valor previsto; cobranca no PDV
 - **Usuarios** — Acessos e niveis (Administrador, Gerente, Vendedor, Caixa)
 - **Fornecedores** — Cadastro vinculado a produtos e contas a pagar
@@ -38,6 +38,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Licenca/mensalidade: icone de computador no cabecalho; periodo de teste de 30 dias; se vencer, o sistema bloqueia ate ativar a chave da maquina
 - PDV + Financeiro: baixa automatica da venda, taxas liquidas de cartao/PIX, Fiado com alerta de inadimplencia, sangria/suprimento no Financeiro e margem no PDV
 - DRE no Financeiro: resultado do exercicio por competencia (Receita Bruta, CMV, despesas, LAJIR e Lucro Liquido) com export TXT/CSV
+- Bebidas por dose: cadastre a dose vinculada a garrafa e o consumo (ex.: 0,05 = 20 doses). A venda baixa o estoque da garrafa; o cancelamento devolve
 
 ## Produtos: importar e exportar
 
@@ -48,7 +49,8 @@ Formatos: Excel (`.xlsx` / `.xls`), CSV, TSV, TXT, JSON, XML, SQL, HTML e Markdo
 - **Exportar** baixa todos os produtos ativos; **Baixar modelo** gera o layout com uma linha de exemplo
 - **Importar** cadastra produtos novos e atualiza os existentes pelo codigo de barras ou pelo nome
 - Campos obrigatorios: nome, codigo de barras, preco e estoque
-- Colunas reconhecidas: nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria, ncm, cfop, unidade, origem
+- Colunas reconhecidas: nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria, ncm, cfop, unidade, origem, estoque_origem_codigo, estoque_consumo
+- Dose: em **Produzido a partir de** escolha a garrafa e informe o consumo por unidade (1 dividido pelo numero de doses). Ex.: 20 doses por garrafa = `0,05`. O PDV mostra as doses restantes e baixa a garrafa na venda
 
 ## PDV (Realizar vendas)
 
@@ -65,6 +67,7 @@ O caixa precisa estar aberto. A venda comeca vazia (Caixa livre).
 - Sangria e suprimento do Caixa alimentam Despesa/Receita no Financeiro em tempo real
 - Atalhos: F7 finalizar, F8 produto/servico, F6 historico, F3 cancelar aba, Ctrl+T / Ctrl+W abas
 - Se a NFC-e estiver habilitada, o F7 pode emitir a nota automaticamente
+- Dose: o PDV mostra as doses restantes da garrafa; ao vender, baixa o consumo no estoque da garrafa (cancelamento devolve)
 
 ## DRE (Demonstracao do Resultado)
 
