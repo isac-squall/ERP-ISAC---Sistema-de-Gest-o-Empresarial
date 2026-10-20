@@ -133,12 +133,12 @@ module.exports = [
     sessao: 'DRE - Demonstracao do Resultado',
     pagina: 'financeiro',
     titulo: 'Resultado do exercicio (DRE) por competencia',
-    keywords: 'dre demonstracao resultado exercicio lucro prejuizo receita bruta liquida cmv lucro bruto despesa operacional lajir margem competencia',
-    conteudo: `A aba DRE no Financeiro monta a Demonstracao do Resultado no regime de competencia: o faturamento entra pela data da venda e as despesas pela data de vencimento, independentemente do pagamento (diferente do extrato, que e de caixa). Receita Bruta = vendas de produtos + servicos (OS) + outras receitas; Deducoes = descontos, impostos sobre vendas e estornos; depois CMV (custo dos itens vendidos), Despesas administrativas e comerciais (inclui taxas de operadora), Resultado Operacional (LAJIR), Resultado Financeiro e Lucro/Prejuizo Liquido. Compras de estoque ficam fora do DRE (vao para o ativo) e aparecem na secao Fora do DRE. A classificacao usa a categoria do lancamento (imposto, aluguel, energia, taxa, juros, estoque, etc.). Filtre por periodo e baixe TXT ou CSV para o contador.`,
+    keywords: 'dre demonstracao resultado exercicio lucro prejuizo receita bruta liquida cmv lucro bruto despesa operacional lajir margem competencia fiado receber cobrar cliente',
+    conteudo: `A aba DRE no Financeiro monta a Demonstracao do Resultado no regime de competencia: o faturamento entra pela data da venda e as despesas pela data de vencimento, independentemente do pagamento (diferente do extrato, que e de caixa). Receita Bruta = vendas de produtos + servicos (OS) + outras receitas; Deducoes = descontos, impostos sobre vendas e estornos; depois CMV (custo dos itens vendidos), Despesas administrativas e comerciais (inclui taxas de operadora), Resultado Operacional (LAJIR), Resultado Financeiro e Lucro/Prejuizo Liquido. Venda fiado entra na Receita Bruta no dia da venda e aparece na linha Fiado a receber (a cobrar) em negativo, com o nome do cliente, para controle de cobranca (o titulo vence em 30 dias). Compras de estoque ficam fora do DRE (vao para o ativo) e aparecem na secao Fora do DRE. A classificacao usa a categoria do lancamento (imposto, aluguel, energia, taxa, juros, estoque, etc.). Filtre por periodo e baixe TXT ou CSV para o contador.`,
     passos: [
       'Abra Financeiro e clique na aba DRE.',
       'Escolha o periodo (Hoje, 7 dias, 30 dias, Mes, Ano) ou informe De e Ate.',
-      'Confira as linhas da DRE e os cards de margem.',
+      'Confira as linhas da DRE, o card Fiado a receber e a tabela de clientes a cobrar.',
       'Veja o detalhamento por categoria e os itens Fora do DRE.',
       'Baixe TXT ou CSV para enviar ao contador.'
     ]

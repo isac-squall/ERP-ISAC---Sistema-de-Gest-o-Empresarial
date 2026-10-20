@@ -37,7 +37,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Contador: listar NFC-e, relatorio de compras, ZIP de XMLs, extrato TXT/CSV e SPED Fiscal (EFD ICMS/IPI simplificado)
 - Licenca/mensalidade: icone de computador no cabecalho; periodo de teste de 30 dias; se vencer, o sistema bloqueia ate ativar a chave da maquina
 - PDV + Financeiro: baixa automatica da venda, taxas liquidas de cartao/PIX, Fiado com alerta de inadimplencia, sangria/suprimento no Financeiro e margem no PDV
-- DRE no Financeiro: resultado do exercicio por competencia (Receita Bruta, CMV, despesas, LAJIR e Lucro Liquido) com export TXT/CSV
+- DRE no Financeiro: resultado do exercicio por competencia (Receita Bruta, CMV, despesas, LAJIR e Lucro Liquido) com export TXT/CSV; fiado a receber no dia da venda (valor a cobrar)
 - Bebidas por dose: cadastre a dose vinculada a garrafa e o consumo (ex.: 0,05 = 20 doses). A venda baixa o estoque da garrafa; o cancelamento devolve
 
 ## Produtos: importar e exportar
@@ -80,6 +80,8 @@ No **Financeiro**, a aba **DRE** monta o resultado do periodo no regime de **com
 - Resultado Operacional (LAJIR), Resultado Financeiro e Lucro/Prejuizo Liquido, com margens bruta e liquida
 - A classificacao usa a categoria do lancamento; o detalhamento por categoria e a secao **Fora do DRE** ficam visiveis
 - Exporta TXT e CSV; endpoint `GET /api/dre` (parametros `de`, `ate` ou `periodo`)
+- Fiado entra na Receita Bruta no dia da venda e aparece como **Fiado a receber (a cobrar)** em negativo, com o cliente, para controle de cobranca (o titulo vence em 30 dias)
+- Horario do sistema: America/Sao_Paulo (o filtro Hoje segue o dia no Brasil)
 - Teste: `npm run test:dre` (roda em transacao com rollback, nao altera o banco)
 
 ## NFC-e

@@ -1,3 +1,4 @@
+process.env.TZ = process.env.TZ || 'America/Sao_Paulo';
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');

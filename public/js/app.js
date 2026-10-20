@@ -2739,7 +2739,7 @@ function bucketLabelPt(b) {
   const map = {
     cmv: 'CMV', imposto: 'Imposto', comercial: 'Comercial', administrativa: 'Administrativa',
     financeira: 'Financeiro', estorno_venda: 'Estorno venda', estorno_taxa: 'Estorno taxa',
-    ignorar: 'Fora do DRE', receita: 'Receita'
+    ignorar: 'Fora do DRE', receita: 'Receita', fiado: 'Fiado a receber'
   };
   return map[b] || b;
 }
@@ -2776,11 +2776,12 @@ async function renderFinanceiroDre() {
       { label: 'Lucro Bruto', value: formatCurrency(s.lucro_bruto) },
       { label: 'Resultado Operacional', value: formatCurrency(s.resultado_operacional) },
       { label: 'Lucro Liquido', value: formatCurrency(s.lucro_liquido) },
-      { label: 'Margem Liquida', value: `${(s.margem_liquida || 0).toFixed(1)}%` }
+      { label: 'Fiado a receber', value: formatCurrency(s.fiado_receber) }
     ])}
     <div class="dre-note">
       <i class="fas fa-info-circle"></i> Regime de <strong>competencia</strong>: faturamento pela data da venda e despesas pela data de vencimento (nao pelo pagamento).
       Compras de estoque ficam fora do DRE (ativo). CMV calculado pelo custo dos itens vendidos.
+      <strong>Fiado</strong> entra na Receita Bruta no dia da venda e aparece como valor a cobrar (negativo) para controle.
     </div>
     <div class="dre-layout">
       <div class="dre-panel">
@@ -2796,6 +2797,22 @@ async function renderFinanceiroDre() {
         </div>
       </div>
     </div>
+    ${(d.fiado || []).length ? `
+    <div class="table-wrapper">
+      <h3 class="dre-fiado-title">Fiado a cobrar no periodo (${formatCurrency(s.fiado_receber)})</h3>
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Cliente</th><th>Descricao</th><th>Venda</th><th>Vencimento</th><th>Status</th><th>Valor</th></tr></thead>
+        <tbody>${(d.fiado || []).map(f => `<tr>
+          <td>${f.id}</td>
+          <td>${escapeHtml(f.cliente_nome || '-')}</td>
+          <td>${escapeHtml(f.descricao || '-')}</td>
+          <td>${f.venda_id ? '#' + f.venda_id : '-'}</td>
+          <td>${formatDate(f.data_vencimento)}</td>
+          <td>${escapeHtml(f.status || '-')}</td>
+          <td class="${f.status === 'Pendente' ? 'text-danger' : ''}">${formatCurrency(f.status === 'Pendente' ? -Number(f.valor || 0) : Number(f.valor || 0))}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}
     <div class="table-wrapper">
       <table class="data-table">
         <thead><tr><th>#</th><th>Tipo</th><th>Descricao</th><th>Classificacao</th><th>Pessoa</th><th>Valor</th><th>Data</th></tr></thead>
