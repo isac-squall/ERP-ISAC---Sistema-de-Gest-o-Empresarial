@@ -143,6 +143,39 @@ function gerarDre(query) {
   const resultadoFinanceiro = round(receitas.financeiras - financeirasDesp.despesas);
   const lucroLiquido = round(resultadoOperacional + resultadoFinanceiro);
 
+  const fiadoLista = db.prepare(`
+    SELECT f.id, f.valor, f.status, f.data_vencimento, f.descricao, f.venda_id,
+      c.nome AS cliente_nome, v.criado_em AS venda_em
+    FROM financeiro f
+    JOIN vendas v ON v.id = f.venda_id
+    LEFT JOIN clientes c ON c.id = f.cliente_id
+    WHERE f.status != 'Cancelado'
+      AND f.tipo = 'Receita'
+      AND (f.categoria = 'Crediario' OR lower(IFNULL(f.forma_pagamento,'')) LIKE '%fiado%'
+        OR lower(IFNULL(f.forma_pagamento,'')) LIKE '%credi%')
+      AND v.status != 'Cancelada'
+      AND (
+        (date(v.criado_em) >= date(?) AND date(v.criado_em) <= date(?))
+        OR (date(f.data_vencimento) >= date(?) AND date(f.data_vencimento) <= date(?))
+      )
+    ORDER BY f.data_vencimento, c.nome
+  `).all(from, to, from, to);
+  const fiadoReceber = round(fiadoLista
+    .filter(x => x.status === 'Pendente')
+    .reduce((s, x) => s + Number(x.valor || 0), 0));
+  for (const f of fiadoLista) {
+    detalhes.push({
+      id: f.id,
+      tipo: 'Receita',
+      categoria: 'Crediario',
+      descricao: f.descricao || '',
+      pessoa: f.cliente_nome || '',
+      valor: f.status === 'Pendente' ? -round(Number(f.valor) || 0) : round(Number(f.valor) || 0),
+      bucket: 'fiado',
+      data: f.data_vencimento || f.venda_em
+    });
+  }
+
   return {
     empresa,
     de: from,
@@ -166,7 +199,8 @@ function gerarDre(query) {
       { grupo: 'Financeiro', label: '(+) Receitas financeiras', valor: round(receitas.financeiras) },
       { grupo: 'Financeiro', label: '(-) Despesas financeiras', valor: round(financeirasDesp.despesas) },
       { grupo: 'Financeiro', label: '(=) Resultado Financeiro', valor: resultadoFinanceiro, total: true },
-      { grupo: 'Final', label: '(=) Lucro / Prejuizo Liquido', valor: lucroLiquido, total: true }
+      { grupo: 'Final', label: '(=) Lucro / Prejuizo Liquido', valor: lucroLiquido, total: true },
+      { grupo: 'Controle', label: '(-) Fiado a receber (a cobrar)', valor: -fiadoReceber }
     ],
     resumo: {
       receita_bruta: receitaBruta,
@@ -191,8 +225,10 @@ function gerarDre(query) {
       margem_liquida: receitaBruta > 0 ? round((lucroLiquido / receitaBruta) * 100) : 0,
       margem_bruta: receitaLiquida > 0 ? round((lucroBruto / receitaLiquida) * 100) : 0,
       vendas_qtd: vendas.length,
-      receita_vendas: round(receitaVendas)
+      receita_vendas: round(receitaVendas),
+      fiado_receber: fiadoReceber
     },
+    fiado: fiadoLista,
     detalhes,
     ignorados
   };
@@ -219,7 +255,15 @@ function dreTxt(query) {
   }
   L.push(''.padEnd(72, '='));
   L.push(`Margem bruta: ${moneyBr(d.resumo.margem_bruta)}%   Margem liquida: ${moneyBr(d.resumo.margem_liquida)}%`);
+  L.push(`Fiado a receber: ${moneyBr(d.resumo.fiado_receber)}`);
   L.push('');
+  if ((d.fiado || []).length) {
+    L.push('Fiado a cobrar (por cliente):');
+    for (const f of d.fiado) {
+      L.push(`  ${(f.cliente_nome || 'Cliente').slice(0, 28).padEnd(28)} ${moneyBr(f.valor).padStart(12)}  ${f.status}  venc ${f.data_vencimento || '-'}`);
+    }
+    L.push('');
+  }
   L.push('Detalhamento por categoria:');
   for (const f of d.detalhes) {
     L.push(`  ${f.tipo}  ${f.bucket.padEnd(16)} ${String(f.descricao).slice(0, 26).padEnd(28)} ${moneyBr(f.valor).padStart(12)}`);
@@ -252,7 +296,7 @@ function dreCsv(query) {
   return { texto: '\ufeff' + lines.join('\r\n'), nome, de: d.de, ate: d.ate, extra: d };
 }
 
-const BUCKETS = {
+  const BUCKETS = {
   cmv: 'CMV / Custo',
   imposto: 'Imposto s/ venda',
   comercial: 'Despesa comercial',
@@ -260,7 +304,8 @@ const BUCKETS = {
   financeira: 'Resultado financeiro',
   estorno_venda: 'Estorno de venda',
   estorno_taxa: 'Estorno de taxa',
-  ignorar: 'Fora do DRE'
+  ignorar: 'Fora do DRE',
+  fiado: 'Fiado a receber'
 };
 
 function bucketLabel(b) {

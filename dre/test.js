@@ -92,6 +92,21 @@ const tx = db.transaction(() => {
   assert.strictEqual(dre.classificar({ tipo: 'Despesa', categoria: 'Compra de estoque' }), 'ignorar');
   assert.strictEqual(dre.classificar({ tipo: 'Receita', categoria: 'Suprimento', origem: 'suprimento' }), 'ignorar');
 
+  const vF = db.prepare(`
+    INSERT INTO vendas (cliente_id, total, desconto, forma_pagamento, status, criado_em)
+    VALUES (1, 80, 0, 'Fiado', 'Concluída', ?)
+  `).run(`${DE} 12:00:00`).lastInsertRowid;
+  insertItem(vF, { subtotal: 80, quantidade: 1, custo: 20 });
+  db.prepare(`
+    INSERT INTO financeiro (tipo, categoria, descricao, valor, data_vencimento, status, cliente_id, venda_id, origem, forma_pagamento)
+    VALUES ('Receita', 'Crediario', ?, 80, '2099-03-01', 'Pendente', 1, ?, 'venda', 'Fiado')
+  `).run(`${MARK} Fiado cliente teste`, vF);
+  const r3 = dre.gerarDre({ de: DE, ate: ATE });
+  perto(r3.resumo.fiado_receber, 80, 'fiado a receber');
+  perto(r3.resumo.receita_produtos, 210, 'receita produtos inclui fiado');
+  assert.ok(r3.fiado.some(x => Number(x.valor) === 80 && x.status === 'Pendente'), 'lista fiado no periodo da venda');
+  assert.ok(r3.linhas.some(l => l.grupo === 'Controle' && Number(l.valor) === -80), 'linha negativa de fiado a cobrar');
+
   console.log('DRE OK: receita bruta', s.receita_bruta, '| lucro liquido', s.lucro_liquido);
   throw new Error('__ROLLBACK__');
 });
