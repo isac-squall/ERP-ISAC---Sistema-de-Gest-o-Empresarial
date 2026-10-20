@@ -41,25 +41,21 @@ window.erpSessaoExpirada = () => {
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
+  bindGlobalEvents();
+  aplicarEmpresa();
   try {
     const saved = localStorage.getItem('erp_user');
     if (saved) {
       const salvo = JSON.parse(saved);
       if (salvo && salvo.id) {
-        try {
-          currentUser = await API.me();
-          localStorage.setItem('erp_user', JSON.stringify(currentUser));
-          showApp();
-        } catch {
-          irParaLogin();
-        }
-      } else currentUser = null;
+        currentUser = await API.me();
+        localStorage.setItem('erp_user', JSON.stringify(currentUser));
+        await showApp();
+      }
     }
   } catch {
     irParaLogin();
   }
-  bindGlobalEvents();
-  aplicarEmpresa();
   checarLicenca();
 });
 
@@ -73,8 +69,9 @@ function bindGlobalEvents() {
       );
       delete currentUser.token;
       delete currentUser.expira_em;
+      try { currentUser = await API.me(); } catch {}
       localStorage.setItem('erp_user', JSON.stringify(currentUser));
-      showApp();
+      await showApp();
     } catch (err) { showToast(err.message, 'error'); }
   };
 
@@ -197,7 +194,7 @@ function applyMenuPermissions() {
   const allowed = userPermissoes();
   document.querySelectorAll('.nav-item').forEach(el => {
     const page = el.dataset.page;
-    el.classList.toggle('hidden', page && !allowed.includes(page));
+    el.classList.toggle('hidden', !!(page && !allowed.includes(page)));
   });
   document.querySelectorAll('.nav-group').forEach(group => {
     const any = [...group.querySelectorAll('[data-page]')].some(el => allowed.includes(el.dataset.page));
@@ -212,10 +209,12 @@ async function showApp() {
   document.getElementById('user-name').textContent = currentUser.nome;
   document.getElementById('ai-chat')?.classList.remove('hidden');
   applyMenuPermissions();
+  requestAnimationFrame(() => applyMenuPermissions());
   refreshNotificacoes();
   aplicarEmpresa();
   carregarImpressoraAtiva();
   const st = await checarLicenca();
+  applyMenuPermissions();
   if (st && st.bloqueada) return;
   const start = canAccess('dashboard') ? 'dashboard' : (userPermissoes()[0] || 'manual');
   navigate(start);
