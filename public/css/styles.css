@@ -448,6 +448,12 @@ a.btn-icon-square { text-decoration: none; }
 .status-badge.estoque-baixo { background: #FFF8E1; color: #F57F17; }
 .status-badge.estoque-zerado { background: #FFEBEE; color: #C62828; }
 .status-badge.estoque-nao_controla { background: #ECEFF1; color: #546E7A; }
+.status-badge.compra-aguardando { background: #FFF8E1; color: #F57F17; }
+.status-badge.compra-aprovado { background: #E3F2FD; color: #1565C0; }
+.status-badge.compra-recusado { background: #FFEBEE; color: #C62828; }
+.status-badge.compra-recebido { background: #E8F5E9; color: #2E7D32; }
+.compra-itens-table input { width: 100%; padding: 6px 8px; }
+.compra-itens-table td { vertical-align: middle; }
 .estoque-table td { white-space: nowrap; }
 .estoque-table td:nth-child(3) { white-space: normal; }
 

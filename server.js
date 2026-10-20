@@ -7,6 +7,7 @@ const nfce = require('./nfce');
 const produtosIo = require('./produtos/io');
 const produtosTipos = require('./produtos/tipos');
 const produtosEstoque = require('./produtos/estoque');
+const comprasMod = require('./compras');
 const backupMod = require('./backup');
 const contador = require('./contador');
 const dre = require('./dre');
@@ -176,6 +177,7 @@ function permissoesDaRota(req) {
     return ['produtos'];
   }
   if (p.startsWith('/api/estoque')) return ['estoque', 'produtos', 'vendas'];
+  if (p.startsWith('/api/compras')) return ['compras'];
   if (p.startsWith('/api/produtos') || p.startsWith('/api/promocoes') || p.startsWith('/api/categorias')) {
     return m === 'GET' ? ['produtos', 'vendas'] : ['produtos'];
   }
@@ -298,6 +300,7 @@ function permissoesDoCargo(cargo) {
   if (cargo === 'Administrador') {
     return [
       'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
+      'compras',
       'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
       'relatorio', 'contador-nfe', 'contador-compras', 'contador-xml',
       'contador-extrato', 'contador-sped', 'backup', 'impressoras', 'configuracoes', 'manual'
@@ -865,6 +868,243 @@ app.put('/api/fornecedores/:id', (req, res) => {
 app.delete('/api/fornecedores/:id', (req, res) => {
   db.prepare('UPDATE fornecedores SET ativo = 0 WHERE id = ?').run(req.params.id);
   res.json({ message: 'Fornecedor removido' });
+});
+
+function compraComItens(id) {
+  const row = db.prepare(`
+    SELECT c.*, f.nome as fornecedor_nome, u.nome as usuario_nome
+    FROM compras c
+    LEFT JOIN fornecedores f ON f.id = c.fornecedor_id
+    LEFT JOIN usuarios u ON u.id = c.usuario_id
+    WHERE c.id = ?
+  `).get(id);
+  if (!row) return null;
+  row.itens = db.prepare(`
+    SELECT i.*, p.nome as produto_nome, p.codigo as produto_codigo, p.unidade, p.tipo
+    FROM compra_itens i
+    LEFT JOIN produtos p ON p.id = i.produto_id
+    WHERE i.compra_id = ?
+    ORDER BY i.id
+  `).all(id);
+  return row;
+}
+
+function salvarItensCompra(compraId, itens) {
+  db.prepare('DELETE FROM compra_itens WHERE compra_id = ?').run(compraId);
+  const ins = db.prepare(`INSERT INTO compra_itens (compra_id, produto_id, descricao, quantidade, preco_unitario, subtotal)
+    VALUES (?,?,?,?,?,?)`);
+  for (const it of itens) {
+    ins.run(compraId, it.produto_id, it.descricao || '', it.quantidade, it.preco_unitario, it.subtotal);
+  }
+}
+
+function payloadCompra(body, opts = {}) {
+  const fornecedorId = inteiroOuNulo(body.fornecedor_id);
+  if (!fornecedorId) {
+    const err = new Error('Fornecedor e obrigatorio');
+    err.status = 400;
+    throw err;
+  }
+  const forn = db.prepare('SELECT id FROM fornecedores WHERE id = ? AND ativo = 1').get(fornecedorId);
+  if (!forn) {
+    const err = new Error('Fornecedor nao encontrado');
+    err.status = 400;
+    throw err;
+  }
+  const itens = comprasMod.validarItens(body.itens || []);
+  for (const it of itens) {
+    if (!it.produto_id) continue;
+    const p = db.prepare('SELECT id, nome, ativo FROM produtos WHERE id = ?').get(it.produto_id);
+    if (!p || !p.ativo) {
+      const err = new Error(`Produto nao encontrado: ${it.descricao || it.produto_id}`);
+      err.status = 400;
+      throw err;
+    }
+    if (!it.descricao) it.descricao = p.nome;
+  }
+  const dataPedido = dataValida(body.data_pedido) || hojeIso();
+  return {
+    fornecedor_id: fornecedorId,
+    status: opts.status || comprasMod.normalizarStatus(body.status || 'Aguardando'),
+    data_pedido: dataPedido,
+    valor: comprasMod.totalizar(itens),
+    forma_pagamento: comprasMod.normalizarForma(body.forma_pagamento),
+    observacao: String(body.observacao || '').slice(0, 500),
+    itens
+  };
+}
+
+function receberCompra(compra, usuarioId) {
+  const itens = db.prepare('SELECT * FROM compra_itens WHERE compra_id = ?').all(compra.id);
+  if (!itens.length) {
+    const err = new Error('Pedido sem itens');
+    err.status = 400;
+    throw err;
+  }
+  for (const it of itens) {
+    if (!it.produto_id) continue;
+    const p = db.prepare('SELECT * FROM produtos WHERE id = ?').get(it.produto_id);
+    if (!p) continue;
+    const tipo = produtosTipos.normalizarTipo(p.tipo);
+    if (tipo === 'servico' || tipo === 'kit' || p.estoque_origem_id || !produtosTipos.controlaEstoque(p, tipo)) continue;
+    const qtd = Number(it.quantidade) || 0;
+    if (qtd <= 0) continue;
+    const anterior = Number(p.estoque) || 0;
+    const novo = produtosTipos.arred(anterior + qtd);
+    db.prepare('UPDATE produtos SET estoque = ?, preco_custo = ? WHERE id = ?').run(novo, it.preco_unitario, p.id);
+    registrarMovimentoEstoque({
+      produtoId: p.id,
+      tipo: 'entrada',
+      quantidade: qtd,
+      anterior,
+      novo,
+      observacao: `Compra #${compra.id}`,
+      usuarioId
+    });
+  }
+  const fin = inserirFinanceiro({
+    tipo: 'Despesa',
+    categoria: 'Estoque',
+    descricao: `Compra #${compra.id}`,
+    valor: Number(compra.valor) || 0,
+    data_vencimento: hojeIso(),
+    status: 'Pendente',
+    fornecedor_id: compra.fornecedor_id,
+    origem: 'compra'
+  });
+  db.prepare(`UPDATE compras SET status='Recebido', data_recebimento=datetime('now','localtime'), financeiro_id=? WHERE id=?`)
+    .run(fin.lastInsertRowid, compra.id);
+  return fin.lastInsertRowid;
+}
+
+app.get('/api/compras', (req, res) => {
+  const { search = '', page = 1, limit = 15, status = '' } = req.query;
+  const st = String(status || '').trim();
+  let where = 'WHERE 1=1';
+  const params = [];
+  if (st && st !== 'Todos') {
+    where += ' AND c.status = ?';
+    params.push(comprasMod.normalizarStatus(st));
+  }
+  if (search) {
+    where += ` AND (CAST(c.id AS TEXT) LIKE ? OR IFNULL(f.nome,'') LIKE ? OR IFNULL(c.forma_pagamento,'') LIKE ? OR IFNULL(c.observacao,'') LIKE ?)`;
+    const s = `%${search}%`;
+    params.push(s, s, s, s);
+  }
+  const from = `FROM compras c LEFT JOIN fornecedores f ON f.id = c.fornecedor_id ${where}`;
+  const total = db.prepare(`SELECT COUNT(*) as total ${from}`).get(...params)?.total || 0;
+  const todos = db.prepare('SELECT status, valor FROM compras').all();
+  const resumo = comprasMod.resumir(todos);
+  const limite = Math.min(Math.max(Number(limit) || 15, 1), 200);
+  const pagina = Math.max(Number(page) || 1, 1);
+  const offset = (pagina - 1) * limite;
+  const data = db.prepare(`
+    SELECT c.*, f.nome as fornecedor_nome
+    ${from}
+    ORDER BY c.id DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limite, offset);
+  res.json({
+    data,
+    total,
+    page: pagina,
+    limit: limite,
+    totalPages: Math.ceil(total / limite) || 1,
+    resumo
+  });
+});
+
+app.get('/api/compras/:id', (req, res) => {
+  const row = compraComItens(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
+  res.json(row);
+});
+
+app.post('/api/compras', (req, res) => {
+  try {
+    const d = payloadCompra(req.body || {});
+    const txn = db.transaction(() => {
+      const result = db.prepare(`INSERT INTO compras
+        (fornecedor_id, status, data_pedido, valor, forma_pagamento, observacao, usuario_id)
+        VALUES (?,?,?,?,?,?,?)`).run(
+        d.fornecedor_id, 'Aguardando', d.data_pedido, d.valor, d.forma_pagamento, d.observacao,
+        req.usuario?.id || null
+      );
+      salvarItensCompra(result.lastInsertRowid, d.itens);
+      return result.lastInsertRowid;
+    });
+    res.json({ id: txn() });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao criar pedido' });
+  }
+});
+
+app.put('/api/compras/:id', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM compras WHERE id = ?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
+    if (!comprasMod.podeEditar(atual.status)) {
+      return res.status(400).json({ error: 'So e possivel editar pedidos aguardando aprovacao' });
+    }
+    const d = payloadCompra(req.body || {});
+    const txn = db.transaction(() => {
+      db.prepare(`UPDATE compras SET fornecedor_id=?, data_pedido=?, valor=?, forma_pagamento=?, observacao=? WHERE id=?`)
+        .run(d.fornecedor_id, d.data_pedido, d.valor, d.forma_pagamento, d.observacao, atual.id);
+      salvarItensCompra(atual.id, d.itens);
+    });
+    txn();
+    res.json({ message: 'Pedido atualizado' });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao atualizar pedido' });
+  }
+});
+
+app.delete('/api/compras/:id', (req, res) => {
+  const atual = db.prepare('SELECT * FROM compras WHERE id = ?').get(req.params.id);
+  if (!atual) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
+  if (!comprasMod.podeExcluir(atual.status)) {
+    return res.status(400).json({ error: 'So e possivel excluir pedidos aguardando ou recusados' });
+  }
+  db.prepare('DELETE FROM compra_itens WHERE compra_id = ?').run(atual.id);
+  db.prepare('DELETE FROM compras WHERE id = ?').run(atual.id);
+  res.json({ message: 'Pedido excluido' });
+});
+
+app.post('/api/compras/:id/aprovar', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM compras WHERE id = ?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
+    comprasMod.transicao(atual.status, 'Aprovado');
+    db.prepare(`UPDATE compras SET status='Aprovado', data_aprovacao=datetime('now','localtime') WHERE id=?`).run(atual.id);
+    res.json({ message: 'Pedido aprovado', status: 'Aprovado' });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao aprovar' });
+  }
+});
+
+app.post('/api/compras/:id/recusar', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM compras WHERE id = ?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
+    comprasMod.transicao(atual.status, 'Recusado');
+    db.prepare(`UPDATE compras SET status='Recusado' WHERE id=?`).run(atual.id);
+    res.json({ message: 'Pedido recusado', status: 'Recusado' });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao recusar' });
+  }
+});
+
+app.post('/api/compras/:id/receber', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM compras WHERE id = ?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
+    comprasMod.transicao(atual.status, 'Recebido');
+    const txn = db.transaction(() => receberCompra(atual, req.usuario?.id));
+    const financeiroId = txn();
+    res.json({ message: 'Pedido recebido', status: 'Recebido', financeiro_id: financeiroId });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao receber' });
+  }
 });
 
 function garantirCategoria(nome) {
@@ -1534,6 +1774,7 @@ const PERMISSOES_DISPONIVEIS = [
   { key: 'produtos', label: 'Produtos' },
   { key: 'categorias', label: 'Categorias de estoque' },
   { key: 'estoque', label: 'Estoque' },
+  { key: 'compras', label: 'Pedidos de compras' },
   { key: 'ordens-servico', label: 'Ordens de servico' },
   { key: 'usuarios', label: 'Usuarios' },
   { key: 'fornecedores', label: 'Fornecedores' },

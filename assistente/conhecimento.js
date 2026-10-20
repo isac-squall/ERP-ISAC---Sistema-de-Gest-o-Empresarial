@@ -229,6 +229,22 @@ module.exports = [
     ]
   },
   {
+    id: 'compras',
+    modulo: 'Pedidos de compras',
+    sessao: 'Compras e recebimento',
+    pagina: 'compras',
+    titulo: 'Pedir, aprovar e receber mercadoria',
+    keywords: 'compra compras pedido fornecedor aprovar recusar receber estoque conta pagar boleto',
+    conteudo: `Pedidos de compras controla a compra de mercadoria. Abas: Todos, Aguardando, Aprovados, Recusados e Recebidos. Colunas: numero, status, fornecedor, data, valor, pagamento e acoes. Crie o pedido com fornecedor, data, forma de pagamento e itens (quantidade e custo). Fluxo: Aguardando -> Aprovar ou Recusar; Aprovado -> Receber (entra no estoque, atualiza o custo e lanca conta a pagar no Financeiro, categoria Estoque). Pedido recebido nao edita nem exclui. Servico, kit e dose nao entram como item de estoque. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Abra Pedidos de compras no menu.',
+      'Clique em Novo Pedido de Compra, escolha o fornecedor e inclua os itens.',
+      'Salve. O pedido fica Aguardando.',
+      'Aprove ou recuse no menu de acoes.',
+      'No pedido Aprovado, clique em Receber para entrar o estoque e gerar a conta a pagar.'
+    ]
+  },
+  {
     id: 'ordens-servico',
     modulo: 'Ordens de servico',
     sessao: 'Gestao de OS',

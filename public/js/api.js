@@ -86,6 +86,17 @@ const API = {
     list: (p) => API.request(`/estoque?${new URLSearchParams(p)}`)
   },
 
+  compras: {
+    list: (p) => API.request(`/compras?${new URLSearchParams(p || {})}`),
+    get: (id) => API.request(`/compras/${id}`),
+    create: (d) => API.request('/compras', { method: 'POST', body: d }),
+    update: (id, d) => API.request(`/compras/${id}`, { method: 'PUT', body: d }),
+    delete: (id) => API.request(`/compras/${id}`, { method: 'DELETE' }),
+    aprovar: (id) => API.request(`/compras/${id}/aprovar`, { method: 'POST', body: {} }),
+    recusar: (id) => API.request(`/compras/${id}/recusar`, { method: 'POST', body: {} }),
+    receber: (id) => API.request(`/compras/${id}/receber`, { method: 'POST', body: {} })
+  },
+
   produtos: {
     list: (p) => API.request(`/produtos?${new URLSearchParams(p)}`),
     all: () => API.request('/produtos/all'),
@@ -259,7 +270,9 @@ function statusClass(status) {
     'Aberta': 'aberta', 'Em andamento': 'andamento',
     'Pronta para entrega': 'pronta', 'Entregue': 'entregue',
     'Cancelada': 'cancelada', 'Pendente': 'pendente',
-    'Pago': 'pago', 'Concluída': 'pago'
+    'Pago': 'pago', 'Concluída': 'pago',
+    'Aguardando': 'compra-aguardando', 'Aprovado': 'compra-aprovado',
+    'Recusado': 'compra-recusado', 'Recebido': 'compra-recebido'
   };
   return map[status] || 'aberta';
 }
