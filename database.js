@@ -501,6 +501,7 @@ const defaults = {
   nfce_simulacao: '1',
   empresa_nome: 'Sistema de gestão empresarial ERP ISAC',
   empresa_telefone: '',
+  empresa_whatsapp: '',
   empresa_email: '',
   empresa_instagram: '',
   empresa_cidade: '',

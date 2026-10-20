@@ -571,7 +571,8 @@ async function renderClientes() {
 function renderClientesRows(data) {
   if (!data.length) return '<tr class="empty-row"><td colspan="7">Nenhum registro encontrado</td></tr>';
   return data.map(c => `<tr>
-    <td>${c.id}</td><td>${escapeHtml(c.nome)}</td><td>${escapeHtml(c.cpf_cnpj || '-')}</td><td>${escapeHtml(c.telefone || '-')}</td>
+    <td>${c.id}</td><td>${escapeHtml(c.nome)}</td><td>${escapeHtml(c.cpf_cnpj || '-')}</td>
+    <td>${escapeHtml(c.telefone || '-')}${c.telefone ? ` <button type="button" class="btn-icon" title="WhatsApp" onclick="abrirWhatsappCliente(${JSON.stringify(String(c.telefone))})"><i class="fab fa-whatsapp"></i></button>` : ''}</td>
     <td>${escapeHtml(c.email || '-')}</td><td>${escapeHtml(c.cidade || '-')}</td>
     <td class="actions-cell">
       <button class="btn-icon edit" onclick="showClienteForm(${c.id})"><i class="fas fa-edit"></i></button>
@@ -597,7 +598,12 @@ async function showClienteForm(id) {
       <div class="form-group"><label>Nome *</label><input name="nome" value="${escapeHtml(data.nome || '')}" required></div>
       <div class="form-row">
         <div class="form-group"><label>CPF/CNPJ</label><input name="cpf_cnpj" value="${escapeHtml(data.cpf_cnpj || '')}"></div>
-        <div class="form-group"><label>Telefone</label><input name="telefone" value="${escapeHtml(data.telefone || '')}"></div>
+        <div class="form-group"><label>Telefone / WhatsApp</label>
+          <div class="input-with-action">
+            <input name="telefone" id="cliente-telefone" value="${escapeHtml(data.telefone || '')}" placeholder="(00) 00000-0000">
+            <button type="button" class="btn-icon-square" id="cliente-whatsapp" title="Abrir WhatsApp"><i class="fab fa-whatsapp"></i></button>
+          </div>
+        </div>
       </div>
       <div class="form-group"><label>Email</label><input name="email" type="email" value="${escapeHtml(data.email || '')}"></div>
       <div class="form-group"><label>Endereço</label><input name="endereco" value="${escapeHtml(data.endereco || '')}"></div>
@@ -608,6 +614,19 @@ async function showClienteForm(id) {
     </form>`,
     `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
   bindEntitySave(id, 'clientes', renderClientes);
+  document.getElementById('cliente-whatsapp').onclick = () => {
+    const n = String(document.getElementById('cliente-telefone').value || '').replace(/\D/g, '');
+    if (!n) { showToast('Informe o telefone do cliente', 'error'); return; }
+    const full = n.startsWith('55') ? n : (n.length >= 10 && n.length <= 11 ? '55' + n : n);
+    window.open('https://wa.me/' + full, '_blank');
+  };
+}
+
+function abrirWhatsappCliente(telefone) {
+  const n = String(telefone || '').replace(/\D/g, '');
+  if (!n) { showToast('Informe o telefone do cliente', 'error'); return; }
+  const full = n.startsWith('55') ? n : (n.length >= 10 && n.length <= 11 ? '55' + n : n);
+  window.open('https://wa.me/' + full, '_blank');
 }
 
 async function deleteCliente(id) {
@@ -641,6 +660,7 @@ async function renderProdutos() {
       <div class="toolbar-spacer"></div>
       <button class="btn-icon-square" id="produtos-settings" title="Opções"><i class="fas fa-cog"></i></button>
       <button class="btn btn-outline" id="produtos-categorias" title="Categorias de estoque"><i class="fas fa-tags"></i> Categorias</button>
+      <a class="btn btn-outline" href="/loja" target="_blank" title="Vitrine digital"><i class="fas fa-store"></i> Loja</a>
       <button class="btn btn-outline" id="produtos-importar" title="Importar produtos"><i class="fas fa-file-import"></i> Importar</button>
       <button class="btn btn-outline" id="produtos-exportar" title="Exportar produtos"><i class="fas fa-file-export"></i> Exportar</button>
       <button class="btn btn-success" id="produtos-promocoes"><i class="fas fa-percent"></i> Promocoes</button>
@@ -3632,8 +3652,17 @@ async function renderConfiguracoes() {
         <div class="form-group"><label>Telefone</label><input name="telefone" value="${escapeHtml(cfg.empresa_telefone || '')}" placeholder="(00) 00000-0000"></div>
       </div>
       <div class="form-row">
+        <div class="form-group"><label>WhatsApp da loja</label><input name="whatsapp" value="${escapeHtml(cfg.empresa_whatsapp || '')}" placeholder="(00) 00000-0000"></div>
         <div class="form-group"><label>E-mail</label><input name="email" type="email" value="${escapeHtml(cfg.empresa_email || '')}" placeholder="email@exemplo.com"></div>
+      </div>
+      <div class="form-row">
         <div class="form-group"><label>Instagram</label><input name="instagram" value="${escapeHtml(cfg.empresa_instagram || '')}" placeholder="@instagram"></div>
+        <div class="form-group"><label>Site da loja</label>
+          <div class="input-with-action">
+            <input value="${location.origin}/loja" readonly>
+            <a class="btn-icon-square" href="/loja" target="_blank" title="Abrir vitrine"><i class="fas fa-external-link-alt"></i></a>
+          </div>
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>Cidade</label><input name="cidade" value="${escapeHtml(cfg.empresa_cidade || '')}" placeholder="Informe a cidade"></div>

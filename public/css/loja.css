@@ -1,0 +1,125 @@
+:root {
+  --bg: #f4f7fb;
+  --card: #fff;
+  --text: #1a2332;
+  --muted: #6b778c;
+  --line: #e4eaf2;
+  --brand: #1565c0;
+  --brand-dark: #0d47a1;
+  --wa: #25d366;
+  --wa-dark: #1ebe57;
+  --danger: #e53935;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); }
+.hidden { display: none !important; }
+
+.loja-header {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 18px; background: #0d47a1; color: #fff;
+  box-shadow: 0 2px 12px rgba(13,71,161,.25);
+}
+.loja-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.loja-brand img, .loja-logo-ph {
+  width: 42px; height: 42px; border-radius: 10px; object-fit: cover; background: #fff; flex-shrink: 0;
+}
+.loja-logo-ph { display: grid; place-items: center; color: var(--brand); font-size: 18px; }
+.loja-brand strong { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.loja-brand span { display: block; font-size: 12px; opacity: .8; }
+.loja-cart-btn {
+  position: relative; border: 0; background: rgba(255,255,255,.15); color: #fff;
+  width: 42px; height: 42px; border-radius: 12px; cursor: pointer; font-size: 18px;
+}
+.loja-cart-btn span {
+  position: absolute; top: -4px; right: -4px; background: var(--wa); color: #fff;
+  font-size: 11px; min-width: 18px; height: 18px; border-radius: 9px;
+  display: grid; place-items: center; padding: 0 4px; font-weight: 700;
+}
+
+.loja-hero { padding: 28px 18px 8px; text-align: center; }
+.loja-hero h1 { margin: 0 0 6px; font-size: 26px; }
+.loja-hero p { margin: 0 0 16px; color: var(--muted); }
+.loja-search {
+  max-width: 520px; margin: 0 auto; position: relative;
+}
+.loja-search i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.loja-search input {
+  width: 100%; padding: 12px 14px 12px 40px; border: 1px solid var(--line); border-radius: 24px;
+  font-size: 15px; background: #fff;
+}
+.loja-search input:focus { outline: none; border-color: var(--brand); }
+
+.loja-cats {
+  display: flex; gap: 8px; overflow-x: auto; padding: 12px 18px 4px; scrollbar-width: none;
+}
+.loja-cats::-webkit-scrollbar { display: none; }
+.loja-cats button {
+  border: 1px solid var(--line); background: #fff; color: var(--text);
+  padding: 7px 14px; border-radius: 20px; cursor: pointer; white-space: nowrap; font-size: 13px;
+}
+.loja-cats button.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+.loja-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 14px; padding: 16px 18px 90px; max-width: 1100px; margin: 0 auto;
+}
+.loja-card {
+  background: var(--card); border-radius: 14px; overflow: hidden;
+  box-shadow: 0 4px 16px rgba(15,35,70,.06); display: flex; flex-direction: column;
+}
+.loja-card-foto {
+  height: 140px; background: #eef3f9; display: grid; place-items: center; overflow: hidden; color: #9aa8bd;
+}
+.loja-card-foto img { width: 100%; height: 100%; object-fit: cover; }
+.loja-card-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.loja-card-cat { font-size: 11px; color: var(--brand); font-weight: 600; text-transform: uppercase; }
+.loja-card h3 { margin: 0; font-size: 14px; line-height: 1.3; min-height: 36px; }
+.loja-card .preco { font-weight: 700; color: #0b7a3e; font-size: 16px; }
+.loja-card .preco s { color: var(--muted); font-weight: 500; font-size: 12px; margin-right: 6px; }
+.loja-card .promo { display: inline-block; background: #ffe082; color: #6d4c00; font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 700; }
+.loja-add {
+  margin-top: auto; border: 0; background: var(--brand); color: #fff; border-radius: 8px;
+  padding: 8px; cursor: pointer; font-weight: 600; font-size: 13px;
+}
+.loja-add:hover { background: var(--brand-dark); }
+.loja-empty { text-align: center; color: var(--muted); padding: 40px 16px; }
+
+.loja-wa-float {
+  position: fixed; right: 16px; bottom: 16px; z-index: 15;
+  width: 56px; height: 56px; border-radius: 50%; background: var(--wa); color: #fff;
+  display: grid; place-items: center; font-size: 28px; text-decoration: none;
+  box-shadow: 0 8px 20px rgba(37,211,102,.4);
+}
+
+.loja-drawer { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+.loja-drawer.open { pointer-events: auto; }
+.loja-drawer-overlay { position: absolute; inset: 0; background: rgba(0,0,0,.4); opacity: 0; transition: .2s; }
+.loja-drawer.open .loja-drawer-overlay { opacity: 1; }
+.loja-drawer-box {
+  position: absolute; right: 0; top: 0; bottom: 0; width: min(420px, 100%);
+  background: #fff; transform: translateX(100%); transition: .25s; display: flex; flex-direction: column;
+}
+.loja-drawer.open .loja-drawer-box { transform: none; }
+.loja-drawer-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.loja-drawer-head h2 { margin: 0; font-size: 18px; }
+.loja-drawer-head button { border: 0; background: none; font-size: 28px; cursor: pointer; line-height: 1; }
+.loja-cart-items { flex: 1; overflow: auto; padding: 12px 18px; }
+.loja-item { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.loja-item small { color: var(--muted); }
+.loja-qty { display: flex; align-items: center; gap: 8px; }
+.loja-qty button {
+  width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer;
+}
+.loja-cart-total { padding: 12px 18px; font-size: 16px; display: flex; justify-content: space-between; border-top: 1px solid var(--line); }
+.loja-pedido { padding: 0 18px 18px; display: flex; flex-direction: column; gap: 8px; }
+.loja-pedido input, .loja-pedido textarea {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; font-family: inherit;
+}
+.loja-btn-wa {
+  border: 0; background: var(--wa); color: #fff; padding: 12px; border-radius: 10px;
+  font-size: 15px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.loja-btn-wa:hover { background: var(--wa-dark); }
+.loja-pedido-hint { margin: 0; font-size: 12px; color: var(--muted); text-align: center; }
+.loja-footer { text-align: center; padding: 8px 16px 24px; color: var(--muted); font-size: 12px; }

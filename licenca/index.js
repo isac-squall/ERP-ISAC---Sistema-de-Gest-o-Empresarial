@@ -330,6 +330,7 @@ function gerar({ master, bios, uuid, disco, dias, tipo } = {}) {
 function rotaLivre(req) {
   const p = req.path || '';
   if (req.method === 'GET' && (p === '/api/licenca' || p === '/empresa' || p === '/api/empresa')) return true;
+  if (req.method === 'GET' && p.startsWith('/api/loja')) return true;
   if (req.method === 'POST' && (p === '/api/licenca/ativar' || p === '/api/licenca/validar')) return true;
   if (req.method === 'POST' && p === '/api/auth/login') return true;
   if (req.method === 'GET' && p === '/api/auth/me') return true;
