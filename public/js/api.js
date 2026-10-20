@@ -269,6 +269,7 @@ function openModal(title, body, footer) {
 
 function closeModal() {
   document.getElementById('modal').classList.add('hidden');
+  document.querySelector('.modal-box')?.classList.remove('wide');
 }
 
 function renderPagination(container, page, totalPages, total, limit, onChange) {

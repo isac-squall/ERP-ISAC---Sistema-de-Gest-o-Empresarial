@@ -14,7 +14,13 @@ const COLUNAS = [
   { key: 'unidade', aliases: ['unidade', 'un', 'und'] },
   { key: 'origem', aliases: ['origem', 'origem_icms'] },
   { key: 'estoque_origem_codigo', aliases: ['estoque_origem_codigo', 'origem_codigo', 'garrafa', 'produzido_de', 'kit_de'] },
-  { key: 'estoque_consumo', aliases: ['estoque_consumo', 'consumo', 'fator_dose', 'doses', 'ml_dose'] }
+  { key: 'estoque_consumo', aliases: ['estoque_consumo', 'consumo', 'fator_dose', 'doses', 'ml_dose'] },
+  { key: 'tipo', aliases: ['tipo', 'tipo_produto', 'kind'] },
+  { key: 'controla_estoque', aliases: ['controla_estoque', 'controla', 'estoque_controlado'] },
+  { key: 'fracionado', aliases: ['fracionado', 'decimal', 'peso'] },
+  { key: 'marca', aliases: ['marca', 'brand'] },
+  { key: 'referencia', aliases: ['referencia', 'ref', 'sku_interno'] },
+  { key: 'localizacao', aliases: ['localizacao', 'local', 'prateleira'] }
 ];
 
 const FORMATOS = [
@@ -543,6 +549,12 @@ function normalizar(item) {
     origem: String(item.origem || '0').trim() || '0',
     estoque_origem_codigo: String(item.estoque_origem_codigo || '').trim(),
     estoque_consumo: Number(String(item.estoque_consumo || '0').replace(',', '.')) || 0,
+    tipo: String(item.tipo || 'produto').trim() || 'produto',
+    controla_estoque: item.controla_estoque === '' || item.controla_estoque == null ? 1 : (Number(item.controla_estoque) ? 1 : 0),
+    fracionado: Number(item.fracionado) ? 1 : 0,
+    marca: String(item.marca || '').trim(),
+    referencia: String(item.referencia || '').trim(),
+    localizacao: String(item.localizacao || '').trim(),
     erros
   };
 }
@@ -562,7 +574,13 @@ function modelo(formato) {
     unidade: 'UN',
     origem: '0',
     estoque_origem_codigo: '',
-    estoque_consumo: 0
+    estoque_consumo: 0,
+    tipo: 'produto',
+    controla_estoque: 1,
+    fracionado: 0,
+    marca: '',
+    referencia: '',
+    localizacao: ''
   }], formato);
 }
 
