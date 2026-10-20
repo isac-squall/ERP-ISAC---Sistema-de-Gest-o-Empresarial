@@ -2506,6 +2506,10 @@ async function renderEcommerce() {
             <input name="vtex_token" placeholder="${escapeHtml(cfg.vtex_token || 'AppToken')}">
             <div class="ecom-url">${escapeHtml(cfg.urls.vtex)}</div>
           </div>
+          <div class="form-group"><label>Token Mercado Livre</label>
+            <input name="ml_token" placeholder="${escapeHtml(cfg.ml_token || 'Access token')}">
+            <div class="ecom-url">${escapeHtml((cfg.urls && cfg.urls.mercadolivre) || '')}</div>
+          </div>
         </div>
         <div class="form-group"><label>Token API generica (Bearer)</label>
           <input name="api_secret" placeholder="${escapeHtml(cfg.api_secret || 'erp_live_... ou segredo')}">

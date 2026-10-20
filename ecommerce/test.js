@@ -49,6 +49,63 @@ try {
   assert.strictEqual(e.status, 401);
 }
 
+assert.strictEqual(ecom.normalizarPlataforma('ml'), 'mercadolivre');
+assert.strictEqual(ecom.normalizarPlataforma('Mercado Livre'), 'mercadolivre');
+assert.strictEqual(ecom.normalizarPlataforma('meli'), 'mercadolivre');
+
+const mlOrder = ecom.parseMercadoLivre({
+  id: 2001,
+  status: 'paid',
+  buyer: {
+    first_name: 'Joao',
+    last_name: 'Silva',
+    email: 'joao@teste.com',
+    phone: { area_code: '11', number: '999998888' },
+    billing_info: { doc_number: '12345678901' }
+  },
+  payments: [{ status: 'approved', payment_type: 'credit_card' }],
+  order_items: [{ item: { seller_sku: 'SKU-ML-1', title: 'Camisa ML' }, quantity: 2, unit_price: 40 }]
+});
+assert.strictEqual(mlOrder.external_id, '2001');
+assert.strictEqual(mlOrder.status, 'pago');
+assert.strictEqual(mlOrder.cliente.nome, 'Joao Silva');
+assert.strictEqual(mlOrder.cliente.telefone, '11999998888');
+assert.strictEqual(mlOrder.itens[0].codigo, 'SKU-ML-1');
+assert.strictEqual(mlOrder.itens[0].quantidade, 2);
+ecom.validarPedido(mlOrder);
+
+assert.strictEqual(ecom.notificacaoMercadoLivre({ resource: '/orders/2001', topic: 'orders_v2' }), '2001');
+assert.strictEqual(ecom.notificacaoMercadoLivre({ topic: 'orders_v2', resource: 'orders/77' }), '77');
+
+const mlSecret = 'ml-app-secret';
+const mlReqId = 'req-ml-1';
+const mlTs = '1710000000';
+const mlManifest = `id:${mlReqId};request-id:${mlReqId};ts:${mlTs};`;
+const mlV1 = crypto.createHmac('sha256', mlSecret).update(mlManifest).digest('hex');
+assert.ok(ecom.verificarAssinatura({
+  plataforma: 'mercadolivre',
+  secret: mlSecret,
+  rawBody: Buffer.from('{}'),
+  headers: { 'x-signature': `ts=${mlTs},v1=${mlV1}`, 'x-request-id': mlReqId }
+}));
+assert.ok(ecom.verificarAssinatura({
+  plataforma: 'mercadolivre',
+  secret: mlSecret,
+  rawBody: Buffer.from('{}'),
+  headers: { authorization: `Bearer ${mlSecret}` }
+}));
+try {
+  ecom.verificarAssinatura({
+    plataforma: 'mercadolivre',
+    secret: mlSecret,
+    rawBody: Buffer.from('{}'),
+    headers: { 'x-signature': `ts=${mlTs},v1=deadbeef`, 'x-request-id': mlReqId }
+  });
+  assert.fail('hmac ml invalido deveria falhar');
+} catch (e) {
+  assert.strictEqual(e.status, 401);
+}
+
 const tok = ecom.gerarToken();
 assert.ok(tok.token.startsWith('erp_live_'));
 assert.ok(tok.hash.length === 64);
