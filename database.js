@@ -272,8 +272,31 @@ ensureColumn('produtos', 'unidade', "TEXT DEFAULT 'UN'");
 ensureColumn('produtos', 'origem', "TEXT DEFAULT '0'");
 ensureColumn('produtos', 'estoque_origem_id', 'INTEGER');
 ensureColumn('produtos', 'estoque_consumo', 'REAL DEFAULT 0');
+ensureColumn('produtos', 'tipo', "TEXT DEFAULT 'produto'");
+ensureColumn('produtos', 'controla_estoque', 'INTEGER DEFAULT 1');
+ensureColumn('produtos', 'fracionado', 'INTEGER DEFAULT 0');
+ensureColumn('produtos', 'marca', 'TEXT');
+ensureColumn('produtos', 'referencia', 'TEXT');
+ensureColumn('produtos', 'localizacao', 'TEXT');
+ensureColumn('produtos', 'comissao', 'REAL DEFAULT 0');
+ensureColumn('produtos', 'tempo_servico', 'INTEGER DEFAULT 0');
+ensureColumn('produtos', 'garantia_dias', 'INTEGER DEFAULT 0');
 ensureColumn('venda_itens', 'estoque_origem_id', 'INTEGER');
 ensureColumn('venda_itens', 'estoque_consumo', 'REAL DEFAULT 0');
+ensureColumn('venda_itens', 'composicao', 'TEXT');
+ensureColumn('venda_itens', 'tipo', 'TEXT');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS produto_composicao (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    produto_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    quantidade REAL NOT NULL DEFAULT 1,
+    FOREIGN KEY (produto_id) REFERENCES produtos(id),
+    FOREIGN KEY (item_id) REFERENCES produtos(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_produto_composicao_produto ON produto_composicao(produto_id);
+`);
 ensureColumn('vendas', 'nfce_id', 'INTEGER');
 ensureColumn('financeiro', 'venda_id', 'INTEGER');
 ensureColumn('financeiro', 'caixa_id', 'INTEGER');

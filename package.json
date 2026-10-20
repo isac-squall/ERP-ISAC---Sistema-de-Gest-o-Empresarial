@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test:dre": "node dre/test.js"
+    "test:dre": "node dre/test.js",
+    "test:produtos": "node produtos/test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

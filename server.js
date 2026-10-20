@@ -5,6 +5,7 @@ const path = require('path');
 const db = require('./database');
 const nfce = require('./nfce');
 const produtosIo = require('./produtos/io');
+const produtosTipos = require('./produtos/tipos');
 const backupMod = require('./backup');
 const contador = require('./contador');
 const dre = require('./dre');
@@ -332,7 +333,10 @@ app.get('/api/dashboard', (req, res) => {
   const estoqueBaixo = db.prepare(`
     SELECT COUNT(*) as total FROM produtos p
     LEFT JOIN produtos o ON o.id = p.estoque_origem_id
-    WHERE p.ativo = 1 AND (
+    WHERE p.ativo = 1
+      AND IFNULL(p.tipo,'produto') NOT IN ('servico','kit')
+      AND IFNULL(p.controla_estoque,1) = 1
+      AND (
       CASE WHEN p.estoque_origem_id IS NOT NULL AND IFNULL(p.estoque_consumo,0) > 0
         THEN CAST((IFNULL(o.estoque,0) / p.estoque_consumo) AS INTEGER)
         ELSE p.estoque END
@@ -417,7 +421,10 @@ app.get('/api/notificacoes', (req, res) => {
       p.estoque_minimo
     FROM produtos p
     LEFT JOIN produtos o ON o.id = p.estoque_origem_id
-    WHERE p.ativo=1 AND (
+    WHERE p.ativo=1
+      AND IFNULL(p.tipo,'produto') NOT IN ('servico','kit')
+      AND IFNULL(p.controla_estoque,1) = 1
+      AND (
       CASE WHEN p.estoque_origem_id IS NOT NULL AND IFNULL(p.estoque_consumo,0) > 0
         THEN CAST((IFNULL(o.estoque,0) / p.estoque_consumo) AS INTEGER)
         ELSE p.estoque END
@@ -800,40 +807,74 @@ app.get('/api/produtos', (req, res) => {
   const total = db.prepare(countQuery).get(...params)?.total || 0;
   const offset = (page - 1) * limit;
   const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset)
-    .map(p => ({ ...p, estoque_disponivel: estoqueDisponivelProduto(p) }));
+    .map(p => enriquecerProduto(p));
   res.json({ data, total, page: +page, limit: +limit, totalPages: Math.ceil(total / limit) || 1 });
 });
 
+function itensComposicao(produtoId) {
+  return db.prepare(`
+    SELECT c.item_id as id, c.quantidade, p.nome, p.codigo, p.estoque, p.preco_custo,
+      p.tipo, p.controla_estoque, p.fracionado, p.estoque_origem_id, p.estoque_consumo,
+      o.estoque as estoque_origem_qtd, o.nome as estoque_origem_nome
+    FROM produto_composicao c
+    JOIN produtos p ON p.id = c.item_id
+    LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE c.produto_id = ?
+    ORDER BY c.id
+  `).all(produtoId);
+}
+
 function estoqueDisponivelProduto(p, origem) {
-  const consumo = Number(p?.estoque_consumo) || 0;
-  if (p?.estoque_origem_id && consumo > 0) {
-    const saldo = Number(origem?.estoque != null ? origem.estoque : p.estoque_origem_qtd) || 0;
-    return Math.floor((saldo + 1e-9) / consumo);
+  const tipo = produtosTipos.normalizarTipo(p?.tipo);
+  if (!produtosTipos.controlaEstoque(p, tipo)) return null;
+  if (tipo === 'kit') {
+    const itens = p.composicao || itensComposicao(p.id);
+    return produtosTipos.calcularEstoqueDisponivel({ ...p, tipo, composicao: itens }, {
+      itensKit: itens.map(it => ({
+        quantidade: it.quantidade,
+        produto: it
+      }))
+    });
   }
-  return Math.floor((Number(p?.estoque) || 0) + 1e-9);
+  return produtosTipos.calcularEstoqueDisponivel(p, {
+    origemEstoque: origem?.estoque != null ? origem.estoque : p.estoque_origem_qtd
+  });
+}
+
+function enriquecerProduto(p) {
+  if (!p) return p;
+  const tipo = produtosTipos.normalizarTipo(p.tipo);
+  const row = { ...p, tipo };
+  if (tipo === 'kit') row.composicao = itensComposicao(p.id);
+  row.estoque_disponivel = estoqueDisponivelProduto(row);
+  row.controla_estoque = produtosTipos.controlaEstoque(row, tipo) ? 1 : 0;
+  row.fracionado = produtosTipos.ehFracionado(row, tipo) ? 1 : 0;
+  return row;
 }
 
 app.get('/api/produtos/all', (req, res) => {
   const rows = db.prepare(`
     SELECT p.id, p.nome, p.preco, p.preco_custo, p.estoque, p.codigo, p.categoria,
+      p.tipo, p.controla_estoque, p.fracionado, p.unidade,
       p.estoque_origem_id, p.estoque_consumo, o.nome as estoque_origem_nome, o.estoque as estoque_origem_qtd
     FROM produtos p
     LEFT JOIN produtos o ON o.id = p.estoque_origem_id
     WHERE p.ativo = 1 ORDER BY p.nome
   `).all();
-  res.json(rows.map(p => ({ ...p, estoque_disponivel: estoqueDisponivelProduto(p) })));
+  res.json(rows.map(p => enriquecerProduto(p)));
 });
 
 app.get('/api/produtos/codigo/:codigo', (req, res) => {
   const row = db.prepare(`
     SELECT p.id, p.nome, p.preco, p.preco_custo, p.estoque, p.estoque_minimo, p.codigo, p.categoria,
+      p.tipo, p.controla_estoque, p.fracionado, p.unidade,
       p.estoque_origem_id, p.estoque_consumo, o.nome as estoque_origem_nome, o.estoque as estoque_origem_qtd
     FROM produtos p
     LEFT JOIN produtos o ON o.id = p.estoque_origem_id
     WHERE p.ativo = 1 AND p.codigo = ?
   `).get(req.params.codigo);
   if (!row) return res.status(404).json({ error: 'Produto não encontrado' });
-  res.json({ ...row, estoque_disponivel: estoqueDisponivelProduto(row) });
+  res.json(enriquecerProduto(row));
 });
 
 app.get('/api/produtos/formatos', (req, res) => {
@@ -843,6 +884,7 @@ app.get('/api/produtos/formatos', (req, res) => {
 function produtosParaExport() {
   return db.prepare(`SELECT p.nome, p.codigo, p.descricao, p.preco, p.preco_custo, p.estoque, p.estoque_minimo,
       p.categoria, p.ncm, p.cfop, p.unidade, p.origem, p.estoque_consumo,
+      p.tipo, p.controla_estoque, p.fracionado, p.marca, p.referencia, p.localizacao,
       o.codigo as estoque_origem_codigo
     FROM produtos p
     LEFT JOIN produtos o ON o.id = p.estoque_origem_id
@@ -883,9 +925,9 @@ app.post('/api/produtos/import', (req, res) => {
 
     const findCodigo = db.prepare(`SELECT id, estoque_origem_id FROM produtos WHERE codigo IS NOT NULL AND codigo != '' AND codigo = ? ORDER BY ativo DESC, id DESC LIMIT 1`);
     const findNome = db.prepare(`SELECT id FROM produtos WHERE lower(nome) = lower(?) ORDER BY ativo DESC, id DESC LIMIT 1`);
-    const ins = db.prepare(`INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria, ncm, cfop, unidade, origem, estoque_origem_id, estoque_consumo, ativo)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`);
-    const upd = db.prepare(`UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, estoque=?, estoque_minimo=?, categoria=?, ncm=?, cfop=?, unidade=?, origem=?, estoque_origem_id=?, estoque_consumo=?, ativo=1 WHERE id=?`);
+    const ins = db.prepare(`INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria, ncm, cfop, unidade, origem, estoque_origem_id, estoque_consumo, tipo, controla_estoque, fracionado, marca, referencia, localizacao, ativo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`);
+    const upd = db.prepare(`UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, estoque=?, estoque_minimo=?, categoria=?, ncm=?, cfop=?, unidade=?, origem=?, estoque_origem_id=?, estoque_consumo=?, tipo=?, controla_estoque=?, fracionado=?, marca=?, referencia=?, localizacao=?, ativo=1 WHERE id=?`);
     const mov = db.prepare(`INSERT INTO estoque_movimentos (produto_id, tipo, quantidade, estoque_anterior, estoque_novo, observacao, usuario_id) VALUES (?,?,?,?,?,?,?)`);
     const getEstoque = db.prepare('SELECT estoque FROM produtos WHERE id = ?');
 
@@ -909,7 +951,10 @@ app.post('/api/produtos/import', (req, res) => {
           if (origem && !origem.estoque_origem_id) origemId = origem.id;
         }
         if (!origemId) consumo = 0;
-        const vals = [p.nome, p.codigo, p.descricao, p.preco, p.preco_custo, p.estoque, p.estoque_minimo, p.categoria, p.ncm, p.cfop, p.unidade, p.origem, origemId, consumo];
+        const tipo = produtosTipos.normalizarTipo(p.tipo);
+        const controla = tipo === 'servico' ? 0 : produtosTipos.flagOn(p.controla_estoque, true);
+        const fracionado = tipo === 'pesavel' ? 1 : produtosTipos.flagOn(p.fracionado, false);
+        const vals = [p.nome, p.codigo, p.descricao, p.preco, p.preco_custo, p.estoque, p.estoque_minimo, p.categoria, p.ncm, p.cfop, p.unidade, p.origem, origemId, consumo, tipo, controla, fracionado, p.marca || null, p.referencia || null, p.localizacao || null];
         if (row) {
           const anterior = getEstoque.get(row.id)?.estoque || 0;
           upd.run(...vals, row.id);
@@ -945,6 +990,60 @@ function validarEstoqueOrigem(origemId, consumo, produtoId) {
   return { estoque_origem_id: origem, estoque_consumo: cons };
 }
 
+function validarComposicao(itens, produtoId) {
+  if (!Array.isArray(itens) || !itens.length) throw new Error('Informe ao menos um item na composição do kit');
+  const seen = new Set();
+  const out = [];
+  for (const raw of itens) {
+    const itemId = parseInt(raw.item_id || raw.id, 10);
+    const qtd = Number(raw.quantidade);
+    if (!itemId || !Number.isFinite(qtd) || qtd <= 0) throw new Error('Composição inválida: informe produto e quantidade');
+    if (produtoId && itemId === Number(produtoId)) throw new Error('O kit não pode conter a si mesmo');
+    if (seen.has(itemId)) throw new Error('Item repetido na composição');
+    const item = db.prepare('SELECT id, tipo, ativo, estoque_origem_id FROM produtos WHERE id = ?').get(itemId);
+    if (!item || !item.ativo) throw new Error('Item da composição não encontrado');
+    if (produtosTipos.normalizarTipo(item.tipo) === 'kit') throw new Error('Kit não pode conter outro kit');
+    seen.add(itemId);
+    out.push({ item_id: itemId, quantidade: produtosTipos.arred(qtd) });
+  }
+  return out;
+}
+
+function salvarComposicao(produtoId, itens) {
+  db.prepare('DELETE FROM produto_composicao WHERE produto_id = ?').run(produtoId);
+  const ins = db.prepare('INSERT INTO produto_composicao (produto_id, item_id, quantidade) VALUES (?,?,?)');
+  for (const it of itens) ins.run(produtoId, it.item_id, it.quantidade);
+}
+
+function camposProduto(body, produtoId) {
+  const tipo = produtosTipos.normalizarTipo(body.tipo);
+  const controla = tipo === 'servico' ? 0 : produtosTipos.flagOn(body.controla_estoque, true);
+  const fracionado = tipo === 'pesavel' ? 1 : produtosTipos.flagOn(body.fracionado, false);
+  const unidadePadrao = tipo === 'pesavel' ? 'KG' : (tipo === 'servico' ? 'UN' : 'UN');
+  let origem = { estoque_origem_id: null, estoque_consumo: 0 };
+  if (tipo === 'produto') {
+    origem = validarEstoqueOrigem(body.estoque_origem_id, body.estoque_consumo, produtoId);
+  }
+  let composicao = [];
+  if (tipo === 'kit') composicao = validarComposicao(body.composicao || [], produtoId);
+  return {
+    tipo,
+    controla_estoque: controla,
+    fracionado,
+    marca: body.marca || null,
+    referencia: body.referencia || null,
+    localizacao: body.localizacao || null,
+    comissao: Number(body.comissao) || 0,
+    tempo_servico: parseInt(body.tempo_servico, 10) || 0,
+    garantia_dias: parseInt(body.garantia_dias, 10) || 0,
+    unidade: body.unidade || unidadePadrao,
+    estoque: tipo === 'servico' || tipo === 'kit' ? 0 : (body.estoque == null || body.estoque === '' ? 0 : Number(body.estoque) || 0),
+    estoque_origem_id: origem.estoque_origem_id,
+    estoque_consumo: origem.estoque_consumo,
+    composicao
+  };
+}
+
 app.get('/api/produtos/:id', (req, res) => {
   const row = db.prepare(`
     SELECT p.*, o.nome as estoque_origem_nome, o.estoque as estoque_origem_qtd
@@ -952,26 +1051,51 @@ app.get('/api/produtos/:id', (req, res) => {
     WHERE p.id = ?
   `).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Produto não encontrado' });
-  res.json({ ...row, estoque_disponivel: estoqueDisponivelProduto(row) });
+  res.json(enriquecerProduto(row));
 });
 
 app.post('/api/produtos', (req, res) => {
-  const { nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem } = req.body;
+  const { nome, codigo, descricao, preco, preco_custo, foto, estoque_minimo, categoria, fornecedor_id, ncm, cfop, origem } = req.body;
   if (!nome) return res.status(400).json({ error: 'Nome é obrigatório' });
-  let comp;
-  try { comp = validarEstoqueOrigem(req.body.estoque_origem_id, req.body.estoque_consumo); }
+  let extra;
+  try { extra = camposProduto(req.body); }
   catch (err) { return res.status(400).json({ error: err.message }); }
-  const result = db.prepare('INSERT INTO produtos (nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem, estoque_origem_id, estoque_consumo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null, ncm || '00000000', cfop || '5102', unidade || 'UN', origem || '0', comp.estoque_origem_id, comp.estoque_consumo);
-  res.json({ id: result.lastInsertRowid });
+  const txn = db.transaction(() => {
+    const result = db.prepare(`INSERT INTO produtos
+      (nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem,
+       estoque_origem_id, estoque_consumo, tipo, controla_estoque, fracionado, marca, referencia, localizacao, comissao, tempo_servico, garantia_dias)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, extra.estoque, estoque_minimo || 0, categoria, fornecedor_id || null,
+      ncm || '00000000', cfop || '5102', extra.unidade, origem || '0', extra.estoque_origem_id, extra.estoque_consumo,
+      extra.tipo, extra.controla_estoque, extra.fracionado, extra.marca, extra.referencia, extra.localizacao,
+      extra.comissao, extra.tempo_servico, extra.garantia_dias
+    );
+    if (extra.tipo === 'kit') salvarComposicao(result.lastInsertRowid, extra.composicao);
+    return result.lastInsertRowid;
+  });
+  try { res.json({ id: txn() }); }
+  catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.put('/api/produtos/:id', (req, res) => {
-  const { nome, codigo, descricao, preco, preco_custo, foto, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem } = req.body;
-  let comp;
-  try { comp = validarEstoqueOrigem(req.body.estoque_origem_id, req.body.estoque_consumo, req.params.id); }
+  const { nome, codigo, descricao, preco, preco_custo, foto, estoque_minimo, categoria, fornecedor_id, ncm, cfop, origem } = req.body;
+  let extra;
+  try { extra = camposProduto(req.body, req.params.id); }
   catch (err) { return res.status(400).json({ error: err.message }); }
-  db.prepare('UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, foto=?, estoque=?, estoque_minimo=?, categoria=?, fornecedor_id=?, ncm=?, cfop=?, unidade=?, origem=?, estoque_origem_id=?, estoque_consumo=? WHERE id=?').run(nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, estoque || 0, estoque_minimo || 0, categoria, fornecedor_id || null, ncm || '00000000', cfop || '5102', unidade || 'UN', origem || '0', comp.estoque_origem_id, comp.estoque_consumo, req.params.id);
-  res.json({ message: 'Produto atualizado' });
+  const txn = db.transaction(() => {
+    db.prepare(`UPDATE produtos SET nome=?, codigo=?, descricao=?, preco=?, preco_custo=?, foto=?, estoque=?, estoque_minimo=?, categoria=?,
+      fornecedor_id=?, ncm=?, cfop=?, unidade=?, origem=?, estoque_origem_id=?, estoque_consumo=?, tipo=?, controla_estoque=?, fracionado=?,
+      marca=?, referencia=?, localizacao=?, comissao=?, tempo_servico=?, garantia_dias=? WHERE id=?`).run(
+      nome, codigo, descricao, preco || 0, preco_custo || 0, foto || null, extra.estoque, estoque_minimo || 0, categoria, fornecedor_id || null,
+      ncm || '00000000', cfop || '5102', extra.unidade, origem || '0', extra.estoque_origem_id, extra.estoque_consumo,
+      extra.tipo, extra.controla_estoque, extra.fracionado, extra.marca, extra.referencia, extra.localizacao,
+      extra.comissao, extra.tempo_servico, extra.garantia_dias, req.params.id
+    );
+    if (extra.tipo === 'kit') salvarComposicao(req.params.id, extra.composicao);
+    else db.prepare('DELETE FROM produto_composicao WHERE produto_id = ?').run(req.params.id);
+  });
+  try { txn(); res.json({ message: 'Produto atualizado' }); }
+  catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.delete('/api/produtos/:id', (req, res) => {
@@ -982,6 +1106,10 @@ app.delete('/api/produtos/:id', (req, res) => {
 app.post('/api/produtos/:id/estoque', (req, res) => {
   const produto = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) return res.status(404).json({ error: 'Produto não encontrado' });
+  const tipoProd = produtosTipos.normalizarTipo(produto.tipo);
+  if (tipoProd === 'servico' || tipoProd === 'kit' || !produtosTipos.controlaEstoque(produto, tipoProd)) {
+    return res.status(400).json({ error: 'Este item não controla estoque próprio' });
+  }
   const { tipo, quantidade, observacao } = req.body;
   const usuario_id = req.usuario.id;
   const qtd = Number(quantidade);
@@ -1266,17 +1394,15 @@ function registrarMovimentoEstoque({ produtoId, tipo, quantidade, anterior, novo
   );
 }
 
-function baixarEstoqueItem(item, quantidade, usuarioId, observacao) {
-  const prod = db.prepare('SELECT id, estoque, estoque_origem_id, estoque_consumo FROM produtos WHERE id = ?').get(item.produto_id);
-  if (!prod) throw new Error('Produto não encontrado');
+function baixarUnidadeEstoque(prod, quantidade, usuarioId, observacao) {
   const consumo = Number(prod.estoque_consumo) || 0;
   const origemId = prod.estoque_origem_id && consumo > 0 ? prod.estoque_origem_id : null;
   const alvoId = origemId || prod.id;
-  const qtdBaixa = Math.round((origemId ? quantidade * consumo : quantidade) * 10000) / 10000;
+  const qtdBaixa = produtosTipos.arred(origemId ? quantidade * consumo : quantidade);
   const alvo = db.prepare('SELECT estoque FROM produtos WHERE id = ?').get(alvoId);
   const anterior = Number(alvo?.estoque) || 0;
   if (anterior + 1e-9 < qtdBaixa) throw new Error('Estoque insuficiente');
-  const novo = Math.round((anterior - qtdBaixa) * 10000) / 10000;
+  const novo = produtosTipos.arred(anterior - qtdBaixa);
   db.prepare('UPDATE produtos SET estoque = ? WHERE id = ?').run(novo, alvoId);
   registrarMovimentoEstoque({
     produtoId: alvoId,
@@ -1287,30 +1413,76 @@ function baixarEstoqueItem(item, quantidade, usuarioId, observacao) {
     observacao,
     usuarioId
   });
-  return { estoque_origem_id: origemId, estoque_consumo: origemId ? consumo : 0 };
+  return { estoque_origem_id: origemId, estoque_consumo: origemId ? consumo : 0, quantidade: qtdBaixa };
+}
+
+function baixarEstoqueItem(item, quantidade, usuarioId, observacao) {
+  const prod = db.prepare('SELECT id, estoque, tipo, controla_estoque, fracionado, estoque_origem_id, estoque_consumo FROM produtos WHERE id = ?').get(item.produto_id);
+  if (!prod) throw new Error('Produto não encontrado');
+  const tipo = produtosTipos.normalizarTipo(prod.tipo);
+  if (!produtosTipos.controlaEstoque(prod, tipo)) {
+    return { estoque_origem_id: null, estoque_consumo: 0, tipo, composicao: null };
+  }
+  if (tipo === 'kit') {
+    const itens = itensComposicao(prod.id);
+    if (!itens.length) throw new Error('Kit sem composição');
+    const snapshot = [];
+    for (const it of itens) {
+      snapshot.push({ item_id: it.id, quantidade: Number(it.quantidade) || 0 });
+      if (!produtosTipos.controlaEstoque(it)) continue;
+      const qtd = produtosTipos.arred(quantidade * (Number(it.quantidade) || 0));
+      baixarUnidadeEstoque(it, qtd, usuarioId, `${observacao} · kit ${prod.id}`);
+    }
+    return { estoque_origem_id: null, estoque_consumo: 0, tipo, composicao: JSON.stringify(snapshot) };
+  }
+  const baixa = baixarUnidadeEstoque(prod, quantidade, usuarioId, observacao);
+  return { ...baixa, tipo, composicao: null };
+}
+
+function devolverUnidadeEstoque(alvoId, qtdDevolve, usuarioId, observacao) {
+  const prod = db.prepare('SELECT estoque FROM produtos WHERE id = ?').get(alvoId);
+  const anterior = Number(prod?.estoque) || 0;
+  const novo = produtosTipos.arred(anterior + qtdDevolve);
+  db.prepare('UPDATE produtos SET estoque = ? WHERE id = ?').run(novo, alvoId);
+  registrarMovimentoEstoque({
+    produtoId: alvoId,
+    tipo: 'Entrada',
+    quantidade: qtdDevolve,
+    anterior,
+    novo,
+    observacao,
+    usuarioId
+  });
 }
 
 function devolverEstoqueVenda(itens, usuarioId, observacao) {
   for (const item of itens) {
     if (!item.produto_id) continue;
+    const tipo = produtosTipos.normalizarTipo(item.tipo);
+    if (tipo === 'servico') continue;
+    const atual = db.prepare('SELECT tipo, controla_estoque FROM produtos WHERE id = ?').get(item.produto_id);
+    if (atual && tipo !== 'kit' && !produtosTipos.controlaEstoque(atual)) continue;
+    const qtdItem = Number(item.quantidade) || 0;
+    if (tipo === 'kit') {
+      let parts = [];
+      try { parts = item.composicao ? JSON.parse(item.composicao) : []; } catch { parts = []; }
+      if (!parts.length) parts = itensComposicao(item.produto_id).map(it => ({ item_id: it.id, quantidade: it.quantidade }));
+      for (const part of parts) {
+        const comp = db.prepare('SELECT id, tipo, controla_estoque, estoque_origem_id, estoque_consumo FROM produtos WHERE id = ?').get(part.item_id);
+        if (!comp || !produtosTipos.controlaEstoque(comp)) continue;
+        const consumo = Number(comp.estoque_consumo) || 0;
+        const origemId = comp.estoque_origem_id && consumo > 0 ? comp.estoque_origem_id : null;
+        const alvoId = origemId || comp.id;
+        const qtdDevolve = produtosTipos.arred(qtdItem * (Number(part.quantidade) || 0) * (origemId ? consumo : 1));
+        devolverUnidadeEstoque(alvoId, qtdDevolve, usuarioId, observacao);
+      }
+      continue;
+    }
     const origemId = item.estoque_origem_id || null;
     const consumo = Number(item.estoque_consumo) || 0;
-    const qtdItem = Number(item.quantidade) || 0;
     const alvoId = origemId && consumo > 0 ? origemId : item.produto_id;
-    const qtdDevolve = Math.round((origemId && consumo > 0 ? qtdItem * consumo : qtdItem) * 10000) / 10000;
-    const prod = db.prepare('SELECT estoque FROM produtos WHERE id = ?').get(alvoId);
-    const anterior = Number(prod?.estoque) || 0;
-    const novo = Math.round((anterior + qtdDevolve) * 10000) / 10000;
-    db.prepare('UPDATE produtos SET estoque = ? WHERE id = ?').run(novo, alvoId);
-    registrarMovimentoEstoque({
-      produtoId: alvoId,
-      tipo: 'Entrada',
-      quantidade: qtdDevolve,
-      anterior,
-      novo,
-      observacao,
-      usuarioId
-    });
+    const qtdDevolve = produtosTipos.arred(origemId && consumo > 0 ? qtdItem * consumo : qtdItem);
+    devolverUnidadeEstoque(alvoId, qtdDevolve, usuarioId, observacao);
   }
 }
 
@@ -1628,7 +1800,7 @@ app.post('/api/vendas', async (req, res) => {
     : 'Visitante';
   const insertVenda = db.prepare(`INSERT INTO vendas (cliente_id, total, desconto, forma_pagamento, usuario_id, valor_recebido, troco, parcelas, taxa_cartao)
     VALUES (?,?,?,?,?,?,?,?,?)`);
-  const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, descricao, quantidade, preco_unitario, subtotal, os_id, preco_custo, estoque_origem_id, estoque_consumo) VALUES (?,?,?,?,?,?,?,?,?,?)');
+  const insertItem = db.prepare('INSERT INTO venda_itens (venda_id, produto_id, descricao, quantidade, preco_unitario, subtotal, os_id, preco_custo, estoque_origem_id, estoque_consumo, tipo, composicao) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
   const insertCaixa = db.prepare(`INSERT INTO caixa (tipo, descricao, valor, forma_pagamento, cliente_nome, desconto, desconto_percent, venda_id, usuario_id)
     VALUES (?,?,?,?,?,?,?,?,?)`);
   const marcarOS = db.prepare("UPDATE ordens_servico SET status='Entregue', data_entrega=datetime('now','localtime') WHERE id=? AND status NOT IN ('Entregue','Cancelada')");
@@ -1654,13 +1826,13 @@ app.post('/api/vendas', async (req, res) => {
       if ((!custo || Number.isNaN(custo)) && item.produto_id) {
         custo = Number(db.prepare('SELECT preco_custo FROM produtos WHERE id = ?').get(item.produto_id)?.preco_custo) || 0;
       }
-      let baixa = { estoque_origem_id: null, estoque_consumo: 0 };
+      let baixa = { estoque_origem_id: null, estoque_consumo: 0, tipo: null, composicao: null };
       if (item.produto_id) {
         baixa = baixarEstoqueItem(item, quantidade, usuario_id, `Venda #${venda.lastInsertRowid}`);
       }
       insertItem.run(venda.lastInsertRowid, item.produto_id || null, item.descricao || null,
         quantidade, preco, quantidade * preco, item.os_id || null, custo || 0,
-        baixa.estoque_origem_id, baixa.estoque_consumo);
+        baixa.estoque_origem_id, baixa.estoque_consumo, baixa.tipo, baixa.composicao);
       if (item.os_id) {
         const os = db.prepare('SELECT id, status FROM ordens_servico WHERE id = ?').get(item.os_id);
         if (!os) throw new Error(`Ordem de serviço #${item.os_id} não encontrada`);
@@ -2064,7 +2236,7 @@ app.get('/api/relatorio', (req, res) => {
              CASE WHEN p.estoque_origem_id IS NOT NULL AND IFNULL(p.estoque_consumo,0) > 0 THEN 0
              ELSE p.estoque * COALESCE(p.preco,0) END
            ),0) as valor,
-           SUM(CASE WHEN (
+            SUM(CASE WHEN IFNULL(p.tipo,'produto') NOT IN ('servico','kit') AND IFNULL(p.controla_estoque,1)=1 AND (
              CASE WHEN p.estoque_origem_id IS NOT NULL AND IFNULL(p.estoque_consumo,0) > 0
                THEN CAST((IFNULL(o.estoque,0) / p.estoque_consumo) AS INTEGER)
                ELSE p.estoque END

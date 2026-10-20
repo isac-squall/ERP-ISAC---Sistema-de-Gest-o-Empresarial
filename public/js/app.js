@@ -704,11 +704,11 @@ function renderProdutosRows(data) {
   return data.map((p, i) => `<tr>
     <td>${i + 1}</td>
     <td>${produtoFotoHtml(p)}</td>
-    <td>${escapeHtml(p.nome)}${p.promocao_ativa ? ' <span class="promo-tag">promo</span>' : ''}${p.estoque_origem_id ? ' <span class="promo-tag">dose</span>' : ''}</td>
+    <td>${escapeHtml(p.nome)}${p.promocao_ativa ? ' <span class="promo-tag">promo</span>' : ''}${produtoTipoTag(p)}</td>
     <td>${escapeHtml(p.codigo || '-')}</td>
     <td>${formatCurrency(p.preco)}</td>
     <td>${formatCurrency(p.preco_custo)}</td>
-    <td>${p.estoque_origem_id ? `${estoqueDisponivel(p)} <small class="muted">doses</small>` : p.estoque}</td>
+    <td>${formatEstoqueLista(p)}</td>
     <td>${p.estoque_minimo || 0}</td>
     <td class="actions-cell">
       <div class="action-menu-wrap">
@@ -720,10 +720,11 @@ function renderProdutosRows(data) {
           <button type="button" onclick="imprimirPrecoProduto(${p.id})"><i class="fas fa-print menu-print"></i> Imprimir preço</button>
           <button type="button" onclick="imprimirCodigoBarras(${p.id})"><i class="fas fa-barcode menu-barcode"></i> Código de barras</button>
           <button type="button" onclick="showProdutoPromocao(${p.id})"><i class="fas fa-percent menu-promo"></i> Promoção do produto</button>
+          ${produtoTipo(p) !== 'servico' && produtoTipo(p) !== 'kit' ? `
           <div class="action-sep"></div>
           <button type="button" onclick="showEstoqueMovimento(${p.id}, 'entrada')"><i class="fas fa-cart-plus menu-in"></i> Compra/entrada</button>
           <button type="button" onclick="showEstoqueMovimento(${p.id}, 'ajuste')"><i class="fas fa-sync-alt menu-ajuste"></i> Ajustar estoque</button>
-          <button type="button" onclick="showEstoqueMovimento(${p.id}, 'inventario')"><i class="fas fa-clipboard-check menu-inv"></i> Inventário</button>
+          <button type="button" onclick="showEstoqueMovimento(${p.id}, 'inventario')"><i class="fas fa-clipboard-check menu-inv"></i> Inventário</button>` : ''}
           <div class="action-sep"></div>
           <button type="button" class="danger" onclick="deleteProduto(${p.id})"><i class="fas fa-trash"></i> Excluir produto</button>
         </div>
@@ -779,15 +780,68 @@ function bindProdutoFoto() {
   };
 }
 
+function produtoTipo(p) {
+  return String(p?.tipo || 'produto').toLowerCase();
+}
+
+function produtoControlaEstoque(p) {
+  if (!p) return true;
+  if (produtoTipo(p) === 'servico') return false;
+  return Number(p.controla_estoque) !== 0;
+}
+
+function produtoFracionado(p) {
+  const t = produtoTipo(p);
+  return t === 'pesavel' || Number(p?.fracionado) === 1;
+}
+
+function produtoTipoTag(p) {
+  if (p?.estoque_origem_id) return ' <span class="promo-tag">dose</span>';
+  const t = produtoTipo(p);
+  if (t === 'servico') return ' <span class="promo-tag tipo-servico">serviço</span>';
+  if (t === 'kit') return ' <span class="promo-tag tipo-kit">kit</span>';
+  if (t === 'pesavel') return ' <span class="promo-tag tipo-pesavel">pesável</span>';
+  return '';
+}
+
+function formatEstoqueLista(p) {
+  if (!produtoControlaEstoque(p) || produtoTipo(p) === 'servico') return '—';
+  if (produtoTipo(p) === 'kit') {
+    const n = estoqueDisponivel(p);
+    return Number.isFinite(n) ? `${n} <small class="muted">kit</small>` : '—';
+  }
+  if (p.estoque_origem_id) return `${estoqueDisponivel(p)} <small class="muted">doses</small>`;
+  if (produtoFracionado(p)) return Number(p.estoque || 0).toFixed(3);
+  return p.estoque;
+}
+
 function estoqueDisponivel(p) {
+  if (!produtoControlaEstoque(p)) return Infinity;
+  if (produtoTipo(p) === 'kit' && p?.estoque_disponivel == null) return Infinity;
   if (p?.estoque_disponivel != null && Number.isFinite(Number(p.estoque_disponivel))) {
-    return Math.floor(Number(p.estoque_disponivel) + 1e-9);
+    const n = Number(p.estoque_disponivel);
+    if (produtoFracionado(p)) return n;
+    return Math.floor(n + 1e-9);
   }
   const consumo = Number(p?.estoque_consumo) || 0;
   if (p?.estoque_origem_id && consumo > 0) {
     return Math.floor(((Number(p.estoque_origem_qtd) || 0) + 1e-9) / consumo);
   }
-  return Math.floor((Number(p?.estoque) || 0) + 1e-9);
+  const saldo = Number(p?.estoque) || 0;
+  if (produtoFracionado(p)) return Math.round(saldo * 10000) / 10000;
+  return Math.floor(saldo + 1e-9);
+}
+
+function formatPosEstoque(p) {
+  if (!produtoControlaEstoque(p) || !Number.isFinite(estoqueDisponivel(p))) {
+    if (produtoTipo(p) === 'servico') return 'Serviço';
+    if (produtoTipo(p) === 'kit') return 'Kit';
+    return '—';
+  }
+  const n = estoqueDisponivel(p);
+  if (produtoTipo(p) === 'kit') return `Est. ${n} kit`;
+  if (produtoFracionado(p)) return `Est. ${Number(n).toFixed(3)}`;
+  return `Est. ${n}`;
 }
 
 async function showProdutoForm(id) {
@@ -795,10 +849,30 @@ async function showProdutoForm(id) {
   let data = {};
   if (id) data = await API.produtos.get(id);
   const fornecedores = await API.fornecedores.all();
-  const origens = (await API.produtos.all()).filter(p => !p.estoque_origem_id && (!id || p.id !== id));
+  const todos = await API.produtos.all();
+  const origens = todos.filter(p => !p.estoque_origem_id && produtoTipo(p) !== 'kit' && produtoTipo(p) !== 'servico' && (!id || p.id !== id));
+  const kitItensDisp = todos.filter(p => produtoTipo(p) !== 'kit' && (!id || p.id !== id));
   const foto = data.foto || '';
+  const tipo = produtoTipo(data) || 'produto';
+  const composicao = Array.isArray(data.composicao) ? data.composicao : [];
+  document.querySelector('.modal-box')?.classList.add('wide');
   openModal(id ? 'Editar produto' : 'Adicionar produto', `
     <form id="entity-form">
+      <div class="form-group">
+        <label>Tipo</label>
+        <div class="tipo-opcoes" id="produto-tipo-opcoes">
+          ${[
+            ['produto', 'Produto', 'fa-box'],
+            ['servico', 'Serviço', 'fa-wrench'],
+            ['kit', 'Kit', 'fa-cubes'],
+            ['pesavel', 'Pesável', 'fa-weight-hanging']
+          ].map(([v, l, ico]) => `
+            <label class="tipo-opt ${tipo === v ? 'active' : ''}">
+              <input type="radio" name="tipo" value="${v}" ${tipo === v ? 'checked' : ''}>
+              <i class="fas ${ico}"></i> ${l}
+            </label>`).join('')}
+        </div>
+      </div>
       <div class="form-group">
         <label>Foto</label>
         <div class="foto-upload">
@@ -813,47 +887,200 @@ async function showProdutoForm(id) {
         <div class="form-group"><label>Código de barras</label><input name="codigo" value="${escapeHtml(data.codigo || '')}"></div>
         <div class="form-group"><label>Categoria</label><input name="categoria" value="${escapeHtml(data.categoria || '')}"></div>
       </div>
+      <div class="form-row">
+        <div class="form-group"><label>Marca</label><input name="marca" value="${escapeHtml(data.marca || '')}"></div>
+        <div class="form-group"><label>Referência</label><input name="referencia" value="${escapeHtml(data.referencia || '')}"></div>
+      </div>
       <div class="form-group"><label>Descrição</label><textarea name="descricao" rows="2">${escapeHtml(data.descricao || '')}</textarea></div>
       <div class="form-row">
         <div class="form-group"><label>Preço venda</label><input name="preco" type="number" step="0.01" value="${data.preco || 0}"></div>
         <div class="form-group"><label>Preço custo</label><input name="preco_custo" type="number" step="0.01" value="${data.preco_custo || 0}"></div>
       </div>
-      <div class="form-row">
+      <div class="form-row" id="produto-estoque-row">
         <div class="form-group"><label>Estoque (qtd)</label><input name="estoque" type="number" step="0.0001" value="${data.estoque || 0}"></div>
-        <div class="form-group"><label>Estoque mínimo</label><input name="estoque_minimo" type="number" value="${data.estoque_minimo || 0}"></div>
+        <div class="form-group"><label>Estoque mínimo</label><input name="estoque_minimo" type="number" step="0.0001" value="${data.estoque_minimo || 0}"></div>
+      </div>
+      <div class="form-row" id="produto-flags-row">
+        <div class="form-group"><label class="check-label"><input type="checkbox" id="produto-controla" ${Number(data.controla_estoque) !== 0 ? 'checked' : ''}> Controla estoque</label></div>
+        <div class="form-group"><label class="check-label"><input type="checkbox" id="produto-fracionado" ${Number(data.fracionado) === 1 || tipo === 'pesavel' ? 'checked' : ''}> Quantidade fracionada</label></div>
+      </div>
+      <div class="form-row hidden" id="produto-servico-row">
+        <div class="form-group"><label>Tempo (min)</label><input name="tempo_servico" type="number" min="0" value="${data.tempo_servico || 0}"></div>
+        <div class="form-group"><label>Garantia (dias)</label><input name="garantia_dias" type="number" min="0" value="${data.garantia_dias || 0}"></div>
       </div>
       <div class="form-group"><label>Fornecedor</label>
         <select name="fornecedor_id"><option value="">Nenhum</option>
           ${fornecedores.map(f => `<option value="${f.id}" ${data.fornecedor_id == f.id ? 'selected' : ''}>${escapeHtml(f.nome)}</option>`).join('')}
         </select></div>
       <div class="form-row">
+        <div class="form-group"><label>Localização</label><input name="localizacao" value="${escapeHtml(data.localizacao || '')}" placeholder="Ex.: Prateleira A3"></div>
+        <div class="form-group"><label>Comissão %</label><input name="comissao" type="number" step="0.01" min="0" value="${data.comissao || 0}"></div>
+      </div>
+      <div class="form-row">
         <div class="form-group"><label>NCM</label><input name="ncm" value="${escapeHtml(data.ncm || '00000000')}" maxlength="8" placeholder="00000000"></div>
         <div class="form-group"><label>CFOP</label><input name="cfop" value="${escapeHtml(data.cfop || '5102')}" maxlength="4"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Unidade</label><input name="unidade" value="${escapeHtml(data.unidade || 'UN')}" maxlength="6"></div>
+        <div class="form-group"><label>Unidade</label><input name="unidade" id="produto-unidade" value="${escapeHtml(data.unidade || 'UN')}" maxlength="6"></div>
         <div class="form-group"><label>Origem ICMS</label>
           <select name="origem">
             ${['0 - Nacional','1 - Estrangeira (importacao direta)','2 - Estrangeira (mercado interno)'].map((o, i) =>
               `<option value="${i}" ${String(data.origem || '0') === String(i) ? 'selected' : ''}>${o}</option>`).join('')}
           </select></div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label>Produzido a partir de</label>
-          <select name="estoque_origem_id">
-            <option value="">Estoque próprio</option>
-            ${origens.map(p => `<option value="${p.id}" ${data.estoque_origem_id == p.id ? 'selected' : ''}>${escapeHtml(p.nome)}${p.codigo ? ' · ' + escapeHtml(p.codigo) : ''}</option>`).join('')}
-          </select>
+      <div id="produto-dose-box">
+        <div class="form-row">
+          <div class="form-group"><label>Produzido a partir de</label>
+            <select name="estoque_origem_id">
+              <option value="">Estoque próprio</option>
+              ${origens.map(p => `<option value="${p.id}" ${data.estoque_origem_id == p.id ? 'selected' : ''}>${escapeHtml(p.nome)}${p.codigo ? ' · ' + escapeHtml(p.codigo) : ''}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group"><label>Consumo por unidade</label>
+            <input name="estoque_consumo" type="number" step="0.0001" min="0" value="${data.estoque_consumo || 0}" placeholder="Ex: 0.05 (20 doses/garrafa)">
+          </div>
         </div>
-        <div class="form-group"><label>Consumo por unidade</label>
-          <input name="estoque_consumo" type="number" step="0.0001" min="0" value="${data.estoque_consumo || 0}" placeholder="Ex: 0.05 (20 doses/garrafa)">
-        </div>
+        <p class="muted">Para dose: escolha a garrafa e o consumo (1/doses por garrafa). Ex.: 20 doses = 0,05. O estoque da garrafa baixa na venda.</p>
       </div>
-      <p class="muted">Para dose: escolha a garrafa e o consumo (1/doses por garrafa). Ex.: 20 doses = 0,05. O estoque da garrafa baixa na venda.</p>
+      <div id="produto-kit-box" class="hidden">
+        <label>Composição do kit</label>
+        <table class="data-table kit-table">
+          <thead><tr><th>Item</th><th>Qtd</th><th></th></tr></thead>
+          <tbody id="kit-itens"></tbody>
+        </table>
+        <div class="form-row" style="margin-top:8px">
+          <div class="form-group">
+            <select id="kit-add-prod">
+              <option value="">Selecionar item</option>
+              ${kitItensDisp.map(p => `<option value="${p.id}" data-nome="${escapeHtml(p.nome)}">${escapeHtml(p.nome)}${p.codigo ? ' · ' + escapeHtml(p.codigo) : ''}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="max-width:120px"><input id="kit-add-qtd" type="number" step="0.0001" min="0.0001" value="1"></div>
+        </div>
+        <button type="button" class="btn btn-outline" id="kit-add-btn"><i class="fas fa-plus"></i> Adicionar ao kit</button>
+        <p class="muted" style="margin-top:8px">Na venda, o estoque de cada item da composição é baixado.</p>
+      </div>
     </form>`,
     `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
-  bindEntitySave(id, 'produtos', renderProdutos);
   bindProdutoFoto();
+  bindProdutoTipoForm(composicao, kitItensDisp);
+  bindProdutoSave(id);
+}
+
+function bindProdutoTipoForm(composicaoInicial, kitItensDisp) {
+  let kitItens = (composicaoInicial || []).map(it => ({
+    id: it.id || it.item_id,
+    nome: it.nome || kitItensDisp.find(p => p.id === (it.id || it.item_id))?.nome || ('#' + (it.id || it.item_id)),
+    quantidade: Number(it.quantidade) || 1
+  }));
+
+  const renderKit = () => {
+    const tbody = document.getElementById('kit-itens');
+    if (!tbody) return;
+    tbody.innerHTML = kitItens.length
+      ? kitItens.map((it, i) => `<tr>
+          <td>${escapeHtml(it.nome)}</td>
+          <td><input class="kit-qtd" data-i="${i}" type="number" step="0.0001" min="0.0001" value="${it.quantidade}"></td>
+          <td><button type="button" class="btn-icon-square kit-del" data-i="${i}" title="Remover"><i class="fas fa-times"></i></button></td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="3">Nenhum item no kit</td></tr>';
+    tbody.querySelectorAll('.kit-qtd').forEach(inp => {
+      inp.onchange = () => { kitItens[+inp.dataset.i].quantidade = parseFloat(inp.value) || 1; };
+    });
+    tbody.querySelectorAll('.kit-del').forEach(btn => {
+      btn.onclick = () => { kitItens.splice(+btn.dataset.i, 1); renderKit(); };
+    });
+  };
+
+  document.getElementById('kit-add-btn').onclick = () => {
+    const sel = document.getElementById('kit-add-prod');
+    const id = parseInt(sel.value, 10);
+    if (!id) { showToast('Selecione um item', 'error'); return; }
+    if (kitItens.some(it => it.id === id)) { showToast('Item já está no kit', 'error'); return; }
+    const qtd = parseFloat(document.getElementById('kit-add-qtd').value) || 1;
+    const opt = sel.selectedOptions[0];
+    kitItens.push({ id, nome: opt?.dataset.nome || opt?.textContent || ('#' + id), quantidade: qtd });
+    sel.value = '';
+    renderKit();
+  };
+
+  const aplicarTipo = (tipo) => {
+    document.querySelectorAll('#produto-tipo-opcoes .tipo-opt').forEach(el => {
+      el.classList.toggle('active', el.querySelector('input')?.value === tipo);
+    });
+    const estoqueRow = document.getElementById('produto-estoque-row');
+    const flagsRow = document.getElementById('produto-flags-row');
+    const servicoRow = document.getElementById('produto-servico-row');
+    const doseBox = document.getElementById('produto-dose-box');
+    const kitBox = document.getElementById('produto-kit-box');
+    const unidade = document.getElementById('produto-unidade');
+    const controla = document.getElementById('produto-controla');
+    const fracionado = document.getElementById('produto-fracionado');
+    estoqueRow.classList.toggle('hidden', tipo === 'servico' || tipo === 'kit');
+    flagsRow.classList.toggle('hidden', tipo === 'servico' || tipo === 'kit' || tipo === 'pesavel');
+    servicoRow.classList.toggle('hidden', tipo !== 'servico');
+    doseBox.classList.toggle('hidden', tipo !== 'produto');
+    kitBox.classList.toggle('hidden', tipo !== 'kit');
+    if (tipo === 'servico') {
+      controla.checked = false;
+      fracionado.checked = false;
+      if (!unidade.value || unidade.value === 'KG') unidade.value = 'UN';
+    } else if (tipo === 'kit') {
+      controla.checked = true;
+      fracionado.checked = false;
+    } else if (tipo === 'pesavel') {
+      controla.checked = true;
+      fracionado.checked = true;
+      if (!unidade.value || unidade.value === 'UN') unidade.value = 'KG';
+    } else if (unidade.value === 'KG' && !fracionado.checked) {
+      unidade.value = 'UN';
+    }
+  };
+
+  document.querySelectorAll('#produto-tipo-opcoes input[name="tipo"]').forEach(inp => {
+    inp.onchange = () => aplicarTipo(inp.value);
+  });
+  aplicarTipo(document.querySelector('#produto-tipo-opcoes input[name="tipo"]:checked')?.value || 'produto');
+  renderKit();
+  document.getElementById('entity-form')._kitItens = () => kitItens;
+}
+
+function bindProdutoSave(id) {
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('entity-save').onclick = async () => {
+    const form = document.getElementById('entity-form');
+    if (form && !form.reportValidity()) return;
+    const fd = new FormData(form);
+    const body = Object.fromEntries(fd);
+    const tipo = body.tipo || 'produto';
+    body.preco = parseFloat(body.preco) || 0;
+    body.preco_custo = parseFloat(body.preco_custo) || 0;
+    body.estoque = parseFloat(body.estoque) || 0;
+    body.estoque_minimo = parseFloat(body.estoque_minimo) || 0;
+    body.estoque_consumo = parseFloat(body.estoque_consumo) || 0;
+    body.estoque_origem_id = body.estoque_origem_id || null;
+    body.fornecedor_id = body.fornecedor_id || null;
+    body.comissao = parseFloat(body.comissao) || 0;
+    body.tempo_servico = parseInt(body.tempo_servico, 10) || 0;
+    body.garantia_dias = parseInt(body.garantia_dias, 10) || 0;
+    body.controla_estoque = document.getElementById('produto-controla')?.checked ? 1 : 0;
+    body.fracionado = document.getElementById('produto-fracionado')?.checked ? 1 : 0;
+    if (tipo === 'servico') { body.controla_estoque = 0; body.estoque = 0; body.estoque_origem_id = null; body.estoque_consumo = 0; }
+    if (tipo === 'kit') {
+      body.controla_estoque = 1;
+      body.estoque = 0;
+      body.estoque_origem_id = null;
+      body.estoque_consumo = 0;
+      body.composicao = (form._kitItens ? form._kitItens() : []).map(it => ({ item_id: it.id, quantidade: it.quantidade }));
+      if (!body.composicao.length) { showToast('Informe a composição do kit', 'error'); return; }
+    }
+    if (tipo === 'pesavel') { body.fracionado = 1; body.controla_estoque = 1; }
+    try {
+      if (id) await API.produtos.update(id, body);
+      else await API.produtos.create(body);
+      closeModal(); showToast('Salvo com sucesso!', 'success'); renderProdutos();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
 }
 
 async function deleteProduto(id) {
@@ -1092,6 +1319,10 @@ function showProdutosImportar() {
 async function showEstoqueMovimento(id, tipo) {
   closeProdutoMenus();
   const p = await API.produtos.get(id);
+  if (produtoTipo(p) === 'servico' || produtoTipo(p) === 'kit' || !produtoControlaEstoque(p)) {
+    showToast('Este item não controla estoque próprio', 'error');
+    return;
+  }
   const titulos = { entrada: 'Compra/entrada', ajuste: 'Ajustar estoque', inventario: 'Inventário' };
   const hints = {
     entrada: 'Informe a quantidade comprada. O estoque será somado.',
@@ -1696,7 +1927,7 @@ async function mostrarPosResultados(term) {
   box.innerHTML = achados.map(p => `
     <div class="pos-result" data-id="${p.id}">
       <div><strong>${escapeHtml(p.nome)}</strong><br><small>${escapeHtml(p.codigo || p.categoria || 'sem código')}</small></div>
-        <div class="pos-result-right">${formatCurrency(p.preco)}<br><small>Est. ${estoqueDisponivel(p)}</small></div>
+        <div class="pos-result-right">${formatCurrency(p.preco)}<br><small>${formatPosEstoque(p)}</small></div>
       </div>`).join('');
     box.classList.remove('hidden');
   box.querySelectorAll('.pos-result').forEach(el => {
@@ -1747,23 +1978,49 @@ function posAdicionarOS(os) {
   showToast(`OS ${os.id} adicionada`, 'success');
 }
 
+function posPedirQuantidade(produto, padrao) {
+  const frac = produtoFracionado(produto);
+  const step = frac ? '0.001' : '1';
+  const unidade = produto.unidade || (produtoTipo(produto) === 'pesavel' ? 'KG' : 'UN');
+  const v = window.prompt(`Quantidade (${unidade}) de ${produto.nome}:`, padrao != null ? String(padrao) : (frac ? '0.100' : '1'));
+  if (v == null) return null;
+  const n = Number(String(v).replace(',', '.'));
+  if (!Number.isFinite(n) || n <= 0) { showToast('Quantidade inválida', 'error'); return null; }
+  return frac ? Math.round(n * 10000) / 10000 : Math.max(1, Math.floor(n));
+}
+
 function posAdicionarItem(produto, quantidade) {
   if (!produto) return;
+  const controla = produtoControlaEstoque(produto);
   const disponivel = estoqueDisponivel(produto);
-  if (disponivel <= 0) { showToast('Produto sem estoque', 'error'); return; }
+  if (controla && disponivel <= 0) { showToast('Produto sem estoque', 'error'); return; }
+  const frac = produtoFracionado(produto);
+  const perguntar = frac || produtoTipo(produto) === 'pesavel';
+  let qtd = quantidade;
+  if (qtd == null) {
+    if (perguntar) {
+      qtd = posPedirQuantidade(produto);
+      if (qtd == null) return;
+    } else {
+      qtd = 1;
+    }
+  } else {
+    qtd = frac ? Number(qtd) || 0 : Math.max(1, parseInt(quantidade, 10) || 1);
+  }
+  if (qtd <= 0) { showToast('Quantidade inválida', 'error'); return; }
   const tab = posTabAtual();
-  const qtd = Math.max(1, parseInt(quantidade, 10) || 1);
   const existente = tab.itens.find(i => i.produto_id === produto.id);
   if (existente) {
-    if (existente.quantidade + qtd > disponivel) { showToast('Estoque insuficiente', 'error'); return; }
-    existente.quantidade += qtd;
+    if (controla && existente.quantidade + qtd > disponivel + 1e-9) { showToast('Estoque insuficiente', 'error'); return; }
+    existente.quantidade = Math.round((existente.quantidade + qtd) * 10000) / 10000;
   } else {
-    if (qtd > disponivel) { showToast('Estoque insuficiente', 'error'); return; }
+    if (controla && qtd > disponivel + 1e-9) { showToast('Estoque insuficiente', 'error'); return; }
     tab.itens.push({
       produto_id: produto.id, nome: produto.nome, codigo: produto.codigo || '',
       preco_unitario: Number(produto.preco) || 0,
       preco_custo: Number(produto.preco_custo) || 0,
-      quantidade: qtd, estoque: disponivel
+      quantidade: qtd, estoque: controla ? disponivel : null,
+      tipo: produtoTipo(produto), fracionado: frac ? 1 : 0, servico: produtoTipo(produto) === 'servico'
     });
   }
   salvarPosTabs();
@@ -1787,13 +2044,13 @@ function renderPosRows() {
   }
   return tab.itens.map((item, idx) => `<tr>
     <td>${idx + 1}</td>
-    <td>${escapeHtml(item.nome)}${item.os_id ? ' <span class="promo-tag">OS</span>' : item.servico ? ' <span class="promo-tag">serviço</span>' : ''}</td>
+    <td>${escapeHtml(item.nome)}${item.os_id ? ' <span class="promo-tag">OS</span>' : (item.servico || item.tipo === 'servico') ? ' <span class="promo-tag tipo-servico">serviço</span>' : item.tipo === 'kit' ? ' <span class="promo-tag tipo-kit">kit</span>' : item.tipo === 'pesavel' ? ' <span class="promo-tag tipo-pesavel">pesável</span>' : ''}</td>
     <td>${escapeHtml(item.codigo || '-')}</td>
     <td>
       <div class="pos-qty">
         ${item.os_id ? `<span>${item.quantidade}</span>` : `
         <button type="button" data-qty="${idx}" data-delta="-1">-</button>
-        <span>${item.quantidade}</span>
+        <span>${item.fracionado || item.tipo === 'pesavel' ? Number(item.quantidade).toFixed(3) : item.quantidade}</span>
         <button type="button" data-qty="${idx}" data-delta="1">+</button>`}
         <button type="button" class="pos-row-del" data-remove="${idx}" title="Remover"><i class="fas fa-times"></i></button>
       </div>
@@ -1838,15 +2095,16 @@ function updatePosUI() {
 function posAlterarQtd(idx, delta) {
   const item = posTabAtual().itens[idx];
   if (!item) return;
-  const nova = item.quantidade + delta;
+  const step = item.fracionado || item.tipo === 'pesavel' ? 0.1 : 1;
+  const nova = Math.round((item.quantidade + delta * step) * 10000) / 10000;
   if (nova <= 0) { posRemoverItem(idx); return; }
   if (item.os_id) {
     showToast('A ordem de serviço é cobrada em quantidade 1', 'error');
     return;
   }
-  if (item.servico) {
+  if (item.servico || item.tipo === 'servico' || item.estoque == null) {
     item.quantidade = nova;
-  } else if (nova > item.estoque) {
+  } else if (nova > item.estoque + 1e-9) {
     showToast('Estoque insuficiente', 'error');
     return;
   } else {
@@ -1965,7 +2223,7 @@ function posProdutoServico() {
     box.innerHTML = lista.length ? lista.map(p => `
       <div class="pos-result" data-id="${p.id}">
         <div><strong>${escapeHtml(p.nome)}</strong><br><small>${escapeHtml(p.codigo || 'sem código')}</small></div>
-        <div class="pos-result-right">${formatCurrency(p.preco)}<br><small>Est. ${estoqueDisponivel(p)}</small></div>
+        <div class="pos-result-right">${formatCurrency(p.preco)}<br><small>${formatPosEstoque(p)}</small></div>
       </div>`).join('') : '<p class="muted" style="padding:12px">Nenhum produto encontrado</p>';
     box.querySelectorAll('.pos-result').forEach(el => {
       el.onclick = () => {
