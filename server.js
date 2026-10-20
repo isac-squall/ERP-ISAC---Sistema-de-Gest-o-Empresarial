@@ -1129,6 +1129,7 @@ function ecomSecret(plataforma) {
   if (p === 'shopify') return cfg.ecommerce_shopify_secret || '';
   if (p === 'nuvemshop') return cfg.ecommerce_nuvemshop_token || '';
   if (p === 'vtex') return cfg.ecommerce_vtex_token || '';
+  if (p === 'mercadolivre') return cfg.ecommerce_ml_token || '';
   return cfg.ecommerce_api_secret || '';
 }
 
@@ -1154,6 +1155,26 @@ function autenticarWebhook(req, plataforma) {
     const err = new Error('Token de API invalido');
     err.status = 401;
     throw err;
+  }
+  if (p === 'mercadolivre') {
+    const secret = ecomSecret(p);
+    if (!secret) {
+      const err = new Error('Token Mercado Livre nao configurado');
+      err.status = 401;
+      throw err;
+    }
+    try {
+      ecomMod.verificarAssinatura({
+        plataforma: p,
+        secret,
+        rawBody: req.rawBody || Buffer.from(JSON.stringify(req.body || {})),
+        headers
+      });
+      return { via: 'hmac' };
+    } catch (err) {
+      if (err.status === 401 && /nao configurado/i.test(err.message)) throw err;
+      return { via: 'ml-token', token: secret };
+    }
   }
   ecomMod.verificarAssinatura({
     plataforma: p,
@@ -1247,11 +1268,20 @@ function processarPedidoEcommerce(plataforma, body) {
   }
 }
 
-app.post('/api/webhooks/:plataforma', (req, res) => {
+app.post('/api/webhooks/:plataforma', async (req, res) => {
   const plataforma = ecomMod.normalizarPlataforma(req.params.plataforma);
   try {
     autenticarWebhook(req, plataforma);
-    const r = processarPedidoEcommerce(plataforma, req.body || {});
+    let body = req.body || {};
+    if (plataforma === 'mercadolivre') {
+      const topic = String(body.topic || '');
+      if (topic && !/order/i.test(topic)) {
+        registrarWebhookLog({ plataforma, evento: 'ignorado', ok: 1, payload: JSON.stringify({ topic }).slice(0, 500) });
+        return res.json({ ok: true, ignored: true, topic });
+      }
+      body = await ecomMod.enriquecerPedidoMercadoLivre(ecomSecret('mercadolivre'), body);
+    }
+    const r = processarPedidoEcommerce(plataforma, body);
     registrarWebhookLog({
       plataforma,
       evento: r.cancelled ? 'cancelado' : (r.duplicate ? 'duplicado' : 'pedido'),
@@ -1282,18 +1312,21 @@ app.get('/api/ecommerce/config', (req, res) => {
     shopify_secret: ecomMod.mascarar(cfg.ecommerce_shopify_secret),
     nuvemshop_token: ecomMod.mascarar(cfg.ecommerce_nuvemshop_token),
     vtex_token: ecomMod.mascarar(cfg.ecommerce_vtex_token),
+    ml_token: ecomMod.mascarar(cfg.ecommerce_ml_token),
     api_secret: ecomMod.mascarar(cfg.ecommerce_api_secret),
     tem_woo: !!cfg.ecommerce_woo_secret,
     tem_shopify: !!cfg.ecommerce_shopify_secret,
     tem_nuvemshop: !!cfg.ecommerce_nuvemshop_token,
     tem_vtex: !!cfg.ecommerce_vtex_token,
+    tem_ml: !!cfg.ecommerce_ml_token,
     tem_api: !!cfg.ecommerce_api_secret,
     urls: {
       generico: `${base}/api/webhooks/generico`,
       woocommerce: `${base}/api/webhooks/woocommerce`,
       shopify: `${base}/api/webhooks/shopify`,
       nuvemshop: `${base}/api/webhooks/nuvemshop`,
-      vtex: `${base}/api/webhooks/vtex`
+      vtex: `${base}/api/webhooks/vtex`,
+      mercadolivre: `${base}/api/webhooks/mercadolivre`
     }
   });
 });
@@ -1315,6 +1348,9 @@ app.put('/api/ecommerce/config', (req, res) => {
   }
   if (body.vtex_token != null && String(body.vtex_token).trim() && !String(body.vtex_token).includes('**')) {
     map.ecommerce_vtex_token = String(body.vtex_token).trim();
+  }
+  if (body.ml_token != null && String(body.ml_token).trim() && !String(body.ml_token).includes('**')) {
+    map.ecommerce_ml_token = String(body.ml_token).trim();
   }
   if (body.api_secret != null && String(body.api_secret).trim() && !String(body.api_secret).includes('**')) {
     map.ecommerce_api_secret = String(body.api_secret).trim();

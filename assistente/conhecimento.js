@@ -295,13 +295,14 @@ module.exports = [
     modulo: 'Loja online',
     sessao: 'API e webhooks',
     pagina: 'ecommerce',
-    titulo: 'Integrar WooCommerce, Shopify, Nuvemshop ou VTEX',
-    keywords: 'ecommerce loja virtual webhook api shopify woocommerce nuvemshop vtex estoque pedido cliente sincronizar',
-    conteudo: `Loja online recebe pedidos da vitrine (WooCommerce, Shopify, Nuvemshop, VTEX ou API generica). Pedido pago cadastra/atualiza o cliente, gera venda no ERP e baixa o estoque. O SKU da loja deve ser o codigo de barras do produto (ou o campo sku_ecommerce). Cancelamento/estorno devolve o estoque. O mesmo id externo nao gera venda duplicada. Autenticacao: HMAC/secret da plataforma ou Bearer erp_live_.... Nao exige caixa aberto. Acesso: Administrador e Gerente.`,
+    titulo: 'Integrar WooCommerce, Shopify, Nuvemshop, VTEX ou Mercado Livre',
+    keywords: 'ecommerce loja virtual webhook api shopify woocommerce nuvemshop vtex mercadolivre mercado livre meli estoque pedido cliente sincronizar',
+    conteudo: `Loja online recebe pedidos da vitrine (WooCommerce, Shopify, Nuvemshop, VTEX, Mercado Livre ou API generica). Pedido pago cadastra/atualiza o cliente, gera venda no ERP e baixa o estoque. O SKU da loja deve ser o codigo de barras do produto (ou o campo sku_ecommerce). Cancelamento/estorno devolve o estoque. O mesmo id externo nao gera venda duplicada. Autenticacao: HMAC/secret da plataforma ou Bearer erp_live_.... Mercado Livre: cole o Access Token; a notificacao so traz o id — o ERP consulta GET /orders/{id} na API. Nao exige caixa aberto. Acesso: Administrador e Gerente.`,
     passos: [
       'Abra Loja online no menu.',
-      'Cole o segredo da plataforma e Salvar conexao.',
+      'Cole o segredo da plataforma (ou o Access Token do Mercado Livre) e Salvar conexao.',
       'Cadastre o webhook na loja apontando para a URL exibida.',
+      'No Mercado Livre, use POST /api/webhooks/mercadolivre (topico orders_v2).',
       'Ou gere um token Bearer e envie POST /api/webhooks/generico.',
       'Confira Pedidos e o log de webhooks.'
     ]

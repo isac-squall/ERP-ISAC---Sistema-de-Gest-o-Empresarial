@@ -15,7 +15,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Estoque** — Busca de itens (nome, codigo, marca, local), filtros por categoria/situacao/tipo, saldo, minimo, valor a custo e movimento (entrada, ajuste, inventario)
 - **Pedidos de compras** — Lista estilo SimpleDot (Todos / Aguardando / Aprovados / Recusados / Recebidos); novo pedido com itens; aprovar, recusar e receber (entra estoque e conta a pagar)
 - **R.H.** — Submenu: Funcionarios, Folhas de Ponto e Grades Horarias (cadastro no estilo SimpleDot)
-- **Loja online / API** — Webhooks WooCommerce, Shopify, Nuvemshop e VTEX: pedido pago vira venda, cadastra cliente e baixa estoque
+- **Loja online / API** — Webhooks WooCommerce, Shopify, Nuvemshop, VTEX e Mercado Livre: pedido pago vira venda, cadastra cliente e baixa estoque
 - **Ordens de servico** — Status, cliente, Servicos/Equipamentos, valor previsto; cobranca no PDV
 - **Usuarios** — Acessos e niveis (Administrador, Gerente, Vendedor, Caixa)
 - **Fornecedores** — Cadastro vinculado a produtos e contas a pagar
@@ -51,7 +51,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Aba Estoque: pesquisa de itens no estilo SimpleDot (stock_items/search), com cards de quantidade, valor a custo, estoque baixo e zerado; filtros de categoria, situacao e tipo; acoes de compra, ajuste e inventario.
 - Pedidos de compras: tela Pedidos de compras (SimpleDot purchase_orders) com abas Todos/Aguardando/Aprovados/Recusados/Recebidos; colunas #, Status, Fornecedor, Data, Valor, Pagamento e Acoes; ao receber, entra estoque (custo atualizado) e lanca Despesa Estoque no Financeiro (fora do DRE / CMV). Teste: `npm run test:compras`.
 - R.H.: Funcionarios (cargo, salario, grade, admissao), Folhas de ponto (batidas e saldo previsto/trabalhado/extra/banco) e Grades horarias no estilo SimpleDot (Nome, Status, Tipo Comercial/Flexivel, horas dia/semana/mes, limite, intervalo, banco de horas, exigir localizacao/perto). Grade em uso por funcionario ativo nao exclui. Acesso: Administrador e Gerente. Teste: `npm run test:rh`.
-- Loja online / API: webhooks em `/api/webhooks/{woocommerce|shopify|nuvemshop|vtex|generico}`. Pedido pago faz upsert do cliente, cria venda (`origem=ecommerce`) e baixa estoque pelo SKU (codigo de barras). Cancelamento devolve estoque. Idempotencia por plataforma + id externo. Tokens Bearer `erp_live_...`. Acesso: Administrador e Gerente. Teste: `npm run test:ecommerce`.
+- Loja online / API: webhooks em `/api/webhooks/{woocommerce|shopify|nuvemshop|vtex|mercadolivre|generico}`. Pedido pago faz upsert do cliente, cria venda (`origem=ecommerce`) e baixa estoque pelo SKU (codigo de barras). Cancelamento devolve estoque. Idempotencia por plataforma + id externo. Tokens Bearer `erp_live_...`. Mercado Livre: cole o Access Token; a notificacao nao traz itens — o ERP busca o pedido em `GET /orders/{id}`. Acesso: Administrador e Gerente. Teste: `npm run test:ecommerce`.
 
 ## Produtos: importar e exportar
 

@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const PLATAFORMAS = ['generico', 'woocommerce', 'shopify', 'nuvemshop', 'vtex'];
+const PLATAFORMAS = ['generico', 'woocommerce', 'shopify', 'nuvemshop', 'vtex', 'mercadolivre'];
 const STATUS_PEDIDO = ['pago', 'cancelado', 'pendente'];
 
 function fail(msg, status) {
@@ -25,6 +25,7 @@ function normalizarPlataforma(v) {
   if (t === 'shopify') return 'shopify';
   if (t === 'nuvemshop' || t === 'nuvem' || t === 'tiendanube') return 'nuvemshop';
   if (t === 'vtex') return 'vtex';
+  if (t === 'mercadolivre' || t === 'mercado livre' || t === 'mercadolibre' || t === 'ml' || t === 'meli') return 'mercadolivre';
   return 'generico';
 }
 
@@ -44,9 +45,9 @@ function normalizarEvento(status) {
   const t = String(status || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().trim();
-  if (['cancelled', 'canceled', 'refunded', 'cancelado', 'estornado', 'devolvido'].includes(t)) return 'cancelado';
-  if (['pending', 'on-hold', 'waiting', 'pendente', 'aguardando'].includes(t)) return 'pendente';
-  if (['paid', 'pago', 'processing', 'completed', 'invoiced', 'faturado', 'autorizado', 'approved'].includes(t)) return 'pago';
+  if (['cancelled', 'canceled', 'refunded', 'cancelado', 'estornado', 'devolvido', 'invalid'].includes(t)) return 'cancelado';
+  if (['pending', 'on-hold', 'waiting', 'pendente', 'aguardando', 'payment_required', 'payment_in_process'].includes(t)) return 'pendente';
+  if (['paid', 'pago', 'processing', 'completed', 'invoiced', 'faturado', 'autorizado', 'approved', 'confirmed'].includes(t)) return 'pago';
   return 'pago';
 }
 
@@ -92,6 +93,22 @@ function verificarAssinatura({ plataforma, secret, rawBody, headers }) {
     if (!secret) fail('AppToken VTEX nao configurado', 401);
     if (!timingSafeEqual(secret, tok) && !timingSafeEqual(secret, key)) fail('Credencial VTEX invalida', 401);
     return true;
+  }
+  if (p === 'mercadolivre') {
+    if (!secret) fail('Token Mercado Livre nao configurado', 401);
+    const bearer = String(h.authorization || '').replace(/^Bearer\s+/i, '');
+    const sig = String(h['x-signature'] || '');
+    if (bearer && timingSafeEqual(secret, bearer)) return true;
+    if (sig) {
+      const ts = (sig.match(/ts=([^,]+)/) || [])[1] || '';
+      const v1 = (sig.match(/v1=([^,]+)/) || [])[1] || '';
+      const requestId = h['x-request-id'] || h['x-requestid'] || '';
+      const manifest = `id:${requestId};request-id:${requestId};ts:${ts};`;
+      const esperado = crypto.createHmac('sha256', String(secret)).update(manifest).digest('hex');
+      if (v1 && timingSafeEqual(esperado, v1)) return true;
+    }
+    if (timingSafeEqual(secret, bearer)) return true;
+    fail('Assinatura Mercado Livre invalida', 401);
   }
   return false;
 }
@@ -242,12 +259,91 @@ function parseVtex(body) {
   });
 }
 
+function parseMercadoLivre(body) {
+  const src = body || {};
+  const order = src.order || src;
+  const buyer = order.buyer || {};
+  const billing = buyer.billing_info || {};
+  const payments = order.payments || [];
+  const pay = payments.find(p => String(p.status || '').toLowerCase() === 'approved') || payments[0] || {};
+  const payType = String(pay.payment_type || pay.payment_method_id || order.payments?.[0]?.payment_type || '');
+  const items = (order.order_items || order.items || []).map(it => {
+    const item = it.item || it;
+    return {
+      sku: item.seller_sku || item.seller_custom_field || it.seller_sku || item.id,
+      nome: item.title || item.name,
+      quantity: it.quantity || item.quantity,
+      price: it.unit_price != null ? it.unit_price : item.price
+    };
+  });
+  const nome = [buyer.first_name, buyer.last_name].filter(Boolean).join(' ') || buyer.nickname || 'Cliente Mercado Livre';
+  let status = order.status;
+  if (!status && src.topic && /order/i.test(String(src.topic))) status = 'paid';
+  const phone = typeof buyer.phone === 'object'
+    ? [buyer.phone.area_code, buyer.phone.number].filter(Boolean).join('')
+    : (buyer.phone || '');
+  return parsePedidoGenerico({
+    external_id: order.id || src.id || (String(src.resource || '').match(/orders\/(\d+)/) || [])[1],
+    status,
+    forma_pagamento: payType,
+    cliente: {
+      nome,
+      cpf_cnpj: billing.doc_number || billing.identification || '',
+      telefone: phone,
+      email: buyer.email || '',
+      endereco: '',
+      cidade: '',
+      estado: ''
+    },
+    itens: items
+  });
+}
+
+function notificacaoMercadoLivre(body) {
+  const src = body || {};
+  const resource = String(src.resource || '');
+  const m = resource.match(/orders\/(\d+)/i);
+  if (m) return m[1];
+  if (src.topic && /order/i.test(String(src.topic)) && src.resource) {
+    const n = String(src.resource).replace(/^\//, '').split('/').pop();
+    if (/^\d+$/.test(n)) return n;
+  }
+  if (src.id && /^\d+$/.test(String(src.id)) && !(src.order_items || src.items)) return String(src.id);
+  return '';
+}
+
+async function buscarPedidoMercadoLivre(token, orderId) {
+  if (!token) fail('Token Mercado Livre nao configurado', 401);
+  if (!orderId) fail('Pedido Mercado Livre sem id');
+  const url = `https://api.mercadolibre.com/orders/${encodeURIComponent(orderId)}`;
+  let res;
+  try {
+    res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  } catch (e) {
+    fail('Falha ao consultar Mercado Livre: ' + (e.message || 'rede'));
+  }
+  if (res.status === 401 || res.status === 403) fail('Token Mercado Livre invalido ou expirado', 401);
+  if (!res.ok) fail(`Mercado Livre recusou o pedido ${orderId} (${res.status})`);
+  return res.json();
+}
+
+async function enriquecerPedidoMercadoLivre(token, body) {
+  const src = body || {};
+  if (Array.isArray(src.order_items) && src.order_items.length) return src;
+  if (Array.isArray(src.items) && src.items.length && src.buyer) return src;
+  if (src.order && (src.order.order_items || src.order.items)) return src.order;
+  const orderId = notificacaoMercadoLivre(src);
+  if (!orderId) return src;
+  return buscarPedidoMercadoLivre(token, orderId);
+}
+
 function parsePedido(plataforma, body) {
   const p = normalizarPlataforma(plataforma);
   if (p === 'woocommerce') return parseWoo(body);
   if (p === 'shopify') return parseShopify(body);
   if (p === 'nuvemshop') return parseNuvemshop(body);
   if (p === 'vtex') return parseVtex(body);
+  if (p === 'mercadolivre') return parseMercadoLivre(body);
   return parsePedidoGenerico(body);
 }
 
@@ -351,6 +447,10 @@ module.exports = {
   parseShopify,
   parseNuvemshop,
   parseVtex,
+  parseMercadoLivre,
+  notificacaoMercadoLivre,
+  buscarPedidoMercadoLivre,
+  enriquecerPedidoMercadoLivre,
   parsePedido,
   validarPedido,
   gerarToken,
