@@ -335,6 +335,7 @@ body {
   background: #90A4AE; color: white;
 }
 .btn-icon-square:hover { background: #78909C; }
+a.btn-icon-square { text-decoration: none; }
 .btn-menu { background: var(--primary); }
 .btn-menu:hover { background: var(--primary-dark); }
 

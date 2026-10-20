@@ -149,13 +149,14 @@ module.exports = [
     sessao: 'Cadastro',
     pagina: 'clientes',
     titulo: 'Cadastrar e pesquisar clientes',
-    keywords: 'cliente cadastro cpf telefone email endereco pesquisar editar excluir',
-    conteudo: `Em Clientes voce cadastra nome, CPF/CNPJ, telefone, e-mail e endereco. A lista tem busca e paginacao. O cliente pode ser selecionado no PDV no botao Visitante. Ordens de servico e contas a receber tambem usam o cadastro de clientes.`,
+    keywords: 'cliente cadastro cpf telefone whatsapp email endereco pesquisar editar excluir',
+    conteudo: `Em Clientes voce cadastra nome, CPF/CNPJ, telefone (WhatsApp), e-mail e endereco. A lista tem busca e paginacao. O icone do WhatsApp ao lado do telefone abre a conversa com o cliente. O cliente pode ser selecionado no PDV no botao Visitante. Ordens de servico e contas a receber tambem usam o cadastro de clientes.`,
     passos: [
       'Abra Clientes.',
       'Clique em Novo Cliente.',
-      'Preencha os dados e salve.',
+      'Preencha os dados, inclusive o telefone/WhatsApp, e salve.',
       'Use a busca para localizar e editar.',
+      'Clique no icone do WhatsApp para falar com o cliente.',
       'No PDV, clique em Visitante para vincular o cliente a venda.'
     ]
   },
@@ -194,6 +195,22 @@ module.exports = [
       'Clique em Nova categoria e informe o nome.',
       'No cadastro do produto, escolha a categoria no select.',
       'Na lista de produtos, use o filtro Todas as categorias.'
+    ]
+  },
+  {
+    id: 'loja',
+    modulo: 'Loja digital',
+    sessao: 'Catalogo e WhatsApp',
+    pagina: 'configuracoes',
+    titulo: 'Site para anunciar produtos e pedir no WhatsApp',
+    keywords: 'loja site vitrine catalogo digital whatsapp pedido carrinho produto anunciar',
+    conteudo: `A loja digital fica em /loja (sem login). Mostra os produtos ativos com foto, preco, promocao e categorias. O cliente monta o carrinho, informa nome e WhatsApp e envia o pedido para o WhatsApp da loja cadastrado em Configuracoes. Kits nao entram na vitrine. No cadastro de Clientes, o icone do WhatsApp abre conversa com o telefone do cliente.`,
+    passos: [
+      'Em Configuracoes, preencha o WhatsApp da loja e Salvar empresa.',
+      'Cadastre produtos com foto, preco e categoria.',
+      'Abra /loja (link Site da loja em Configuracoes).',
+      'O cliente adiciona itens, preenche nome e WhatsApp e clica em Pedir no WhatsApp.',
+      'Para falar com um cliente cadastrado, use o icone do WhatsApp em Clientes.'
     ]
   },
   {
@@ -389,11 +406,12 @@ module.exports = [
     sessao: 'Cupom e PDV',
     pagina: 'configuracoes',
     titulo: 'Personalizar cupom e taxas',
-    keywords: 'configuracao cupom taxa cartao credito debito quantidade pdv nfce certificado csc sefaz zona critica apagar banco dados licenca empresa loja logo cnpj',
-    conteudo: `Configuracoes comeca com Editar empresa: nome da loja, logo (PNG/JPG ate 2MB), telefone, e-mail, Instagram, cidade, estado, endereco e CNPJ. Esses dados aparecem no login, na sidebar e no cupom. Abaixo vem cupom, taxas do PDV e NFC-e. A Zona critica no rodape apaga vendas, clientes, produtos, usuarios e configuracoes; a licenca e os dados da empresa sao preservados. So o administrador, digitando APAGAR e a senha, consegue executar.`,
+    keywords: 'configuracao cupom taxa cartao credito debito quantidade pdv nfce certificado csc sefaz zona critica apagar banco dados licenca empresa loja logo cnpj whatsapp vitrine site catalogo',
+    conteudo: `Configuracoes comeca com Editar empresa: nome da loja, logo (PNG/JPG ate 2MB), telefone, WhatsApp da loja, e-mail, Instagram, cidade, estado, endereco e CNPJ. Esses dados aparecem no login, na sidebar, no cupom e na vitrine publica /loja. O WhatsApp da loja recebe os pedidos do catalogo digital. Abaixo vem cupom, taxas do PDV e NFC-e. A Zona critica no rodape apaga vendas, clientes, produtos, usuarios e configuracoes; a licenca e os dados da empresa sao preservados. So o administrador, digitando APAGAR e a senha, consegue executar.`,
     passos: [
       'Clique na engrenagem ou em Configuracoes.',
-      'Em Editar empresa, preencha nome, logo, telefone, e-mail, Instagram, endereco e CNPJ e clique em Salvar empresa.',
+      'Em Editar empresa, preencha nome, logo, telefone, WhatsApp da loja, e-mail, Instagram, endereco e CNPJ e clique em Salvar empresa.',
+      'Abra o Site da loja (/loja) para ver o catalogo publico.',
       'Ajuste o texto do cupom e as taxas.',
       'Preencha os dados fiscais da NFC-e.',
       'Envie o certificado A1 e o CSC.',

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <title>Loja</title>
+  <link rel="stylesheet" href="css/loja.css?v=28">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <header class="loja-header">
+    <div class="loja-brand">
+      <img id="loja-logo" class="hidden" alt="">
+      <div id="loja-logo-ph" class="loja-logo-ph"><i class="fas fa-store"></i></div>
+      <div>
+        <strong id="loja-nome">Loja</strong>
+        <span id="loja-local"></span>
+      </div>
+    </div>
+    <button type="button" class="loja-cart-btn" id="loja-cart-open" title="Carrinho">
+      <i class="fas fa-shopping-bag"></i>
+      <span id="loja-cart-count" class="hidden">0</span>
+    </button>
+  </header>
+
+  <section class="loja-hero">
+    <h1 id="loja-hero-title">Nossos produtos</h1>
+    <p id="loja-hero-sub">Escolha os itens e peca pelo WhatsApp</p>
+    <div class="loja-search">
+      <i class="fas fa-search"></i>
+      <input id="loja-q" type="search" placeholder="Buscar produto..." autocomplete="off">
+    </div>
+  </section>
+
+  <nav class="loja-cats" id="loja-cats"></nav>
+  <main class="loja-grid" id="loja-grid"></main>
+  <p class="loja-empty hidden" id="loja-empty">Nenhum produto encontrado</p>
+
+  <a id="loja-wa-float" class="loja-wa-float hidden" target="_blank" rel="noopener" title="WhatsApp">
+    <i class="fab fa-whatsapp"></i>
+  </a>
+
+  <aside class="loja-drawer" id="loja-drawer">
+    <div class="loja-drawer-overlay" id="loja-drawer-close"></div>
+    <div class="loja-drawer-box">
+      <div class="loja-drawer-head">
+        <h2>Seu pedido</h2>
+        <button type="button" id="loja-drawer-x">&times;</button>
+      </div>
+      <div id="loja-cart-items" class="loja-cart-items"></div>
+      <div class="loja-cart-total">Total <strong id="loja-cart-total">R$ 0,00</strong></div>
+      <form id="loja-pedido" class="loja-pedido">
+        <input id="loja-cli-nome" name="nome" placeholder="Seu nome" required>
+        <input id="loja-cli-fone" name="fone" placeholder="Seu WhatsApp" required>
+        <textarea id="loja-cli-obs" name="obs" rows="2" placeholder="Observacao (opcional)"></textarea>
+        <button type="submit" class="loja-btn-wa" id="loja-enviar"><i class="fab fa-whatsapp"></i> Pedir no WhatsApp</button>
+        <p class="loja-pedido-hint" id="loja-wa-hint"></p>
+      </form>
+    </div>
+  </aside>
+
+  <footer class="loja-footer" id="loja-footer"></footer>
+  <script src="js/loja.js?v=28"></script>
+</body>
+</html>

@@ -8,7 +8,8 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Realizar vendas** — PDV com carrinho, abas, lupa (Produto / Categoria / Ordem de servico), F7, NFC-e e cupom
 - **Gerenciar caixa** — Abertura, entrada (suprimento), saida (sangria), fechamento e historico
 - **Financeiro** — Contas a pagar e receber, vencidos, saldo previsto e previsao em 7/15/30 dias
-- **Clientes** — Cadastro com busca e paginacao; vinculo no PDV (Visitante)
+- **Clientes** — Cadastro com busca e paginacao; vinculo no PDV (Visitante); botao WhatsApp no telefone
+- **Loja digital** — Vitrine publica em `/loja` com produtos, categorias, carrinho e pedido pelo WhatsApp da loja
 - **Produtos** — Tipos Produto/Servico/Kit/Pesavel, estoque, precos, codigo de barras, promocao, foto, NCM/CFOP, importacao/exportacao e dose (baixa da garrafa)
 - **Categorias** — Cadastro de categorias de estoque (CRUD); vinculo no produto e filtro na lista
 - **Ordens de servico** — Status, cliente, Servicos/Equipamentos, valor previsto; cobranca no PDV
@@ -32,7 +33,8 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Relatorio geral e permissoes por cargo
 - Instalador Windows offline `dist/ERP-ISAC-Setup.exe`
 - Zona critica em Configuracoes: apaga vendas, clientes, produtos, usuarios, configuracoes e imagens; a licenca atual e preservada
-- Cadastro da empresa: logo, nome da loja, telefone, e-mail, Instagram, cidade, estado, endereco e CNPJ (login, sidebar e cupom)
+- Cadastro da empresa: logo, nome da loja, telefone, WhatsApp, e-mail, Instagram, cidade, estado, endereco e CNPJ (login, sidebar, cupom e vitrine)
+- Loja digital em `/loja`: catalogo publico (preco, foto, promocao, filtro por categoria), carrinho e envio do pedido no WhatsApp da loja. No cadastro do cliente, o telefone abre o WhatsApp.
 - Gerenciar Backup: realizar backup completo (ZIP) ou so do banco, baixar, restaurar (com senha do admin) e excluir; verificar atualizacao do app
 - Impressoras: conexao Wi-Fi/Bluetooth/USB, modo termica ou jato de tinta, papel 58mm/80mm/A4, escala do cupom e NFC-e
 - Contador: listar NFC-e, relatorio de compras, ZIP de XMLs, extrato TXT/CSV e SPED Fiscal (EFD ICMS/IPI simplificado)

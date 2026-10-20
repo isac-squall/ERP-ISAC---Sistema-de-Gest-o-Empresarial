@@ -153,6 +153,7 @@ function rotaPublica(req) {
   if (p === '/api/licenca' && m === 'GET') return true;
   if ((p === '/api/licenca/ativar' || p === '/api/licenca/validar') && m === 'POST') return true;
   if (p === '/api/empresa' && m === 'GET') return true;
+  if (p.startsWith('/api/loja') && m === 'GET') return true;
   return false;
 }
 
@@ -490,10 +491,24 @@ function isPreservedConfigKey(chave) {
   return isLicencaKey(chave) || String(chave || '').startsWith('empresa_');
 }
 
+function onlyDigits(v) {
+  return String(v || '').replace(/\D/g, '');
+}
+
+function whatsappNumero(cfg) {
+  const n = onlyDigits(cfg.empresa_whatsapp || cfg.empresa_telefone || cfg.nfce_telefone || '');
+  if (!n) return '';
+  if (n.startsWith('55') && n.length >= 12) return n;
+  if (n.length >= 10 && n.length <= 11) return '55' + n;
+  return n;
+}
+
 function empresaPublica(cfg) {
+  const whatsapp = whatsappNumero(cfg);
   return {
     nome: cfg.empresa_nome || 'ERP ISAC',
     telefone: cfg.empresa_telefone || '',
+    whatsapp,
     email: cfg.empresa_email || '',
     instagram: cfg.empresa_instagram || '',
     cidade: cfg.empresa_cidade || '',
@@ -517,6 +532,7 @@ app.put('/api/empresa', (req, res) => {
   const dados = {
     empresa_nome: String(body.nome || body.empresa_nome || '').trim() || 'ERP ISAC',
     empresa_telefone: String(body.telefone || body.empresa_telefone || '').trim(),
+    empresa_whatsapp: String(body.whatsapp || body.empresa_whatsapp || '').trim(),
     empresa_email: String(body.email || body.empresa_email || '').trim(),
     empresa_instagram: String(body.instagram || body.empresa_instagram || '').trim(),
     empresa_cidade: String(body.cidade || body.empresa_cidade || '').trim(),
@@ -540,6 +556,71 @@ app.put('/api/empresa', (req, res) => {
   });
   tx();
   res.json({ message: 'Empresa salva', ...empresaPublica(nfce.loadConfig()) });
+});
+
+function precoLoja(p) {
+  const base = Number(p.preco) || 0;
+  const promo = db.prepare(`
+    SELECT tipo, valor FROM promocoes
+    WHERE produto_id = ? AND ativo = 1
+      AND (data_inicio IS NULL OR date(data_inicio) <= date('now','localtime'))
+      AND (data_fim IS NULL OR date(data_fim) >= date('now','localtime'))
+    ORDER BY id DESC LIMIT 1
+  `).get(p.id);
+  if (!promo) return { preco: base, preco_original: null, promocao: false };
+  let final = base;
+  if (promo.tipo === 'valor') final = Math.max(0, base - Number(promo.valor || 0));
+  else final = Math.max(0, base * (1 - Number(promo.valor || 0) / 100));
+  return { preco: Math.round(final * 100) / 100, preco_original: base, promocao: true };
+}
+
+function produtoLojaPublico(p) {
+  const precos = precoLoja(p);
+  return {
+    id: p.id,
+    nome: p.nome,
+    codigo: p.codigo || '',
+    descricao: p.descricao || '',
+    categoria: p.categoria || '',
+    foto: p.foto || '',
+    unidade: p.unidade || 'UN',
+    tipo: produtosTipos.normalizarTipo(p.tipo),
+    preco: precos.preco,
+    preco_original: precos.preco_original,
+    promocao: precos.promocao,
+    em_estoque: produtosTipos.normalizarTipo(p.tipo) === 'servico' ? true : Number(p.estoque) > 0 || Number(p.estoque_disponivel) > 0
+  };
+}
+
+app.get('/api/loja', (req, res) => {
+  const { search = '', categoria = '' } = req.query;
+  const empresa = empresaPublica(nfce.loadConfig());
+  let query = `SELECT p.id, p.nome, p.codigo, p.descricao, p.preco, p.foto, p.categoria, p.unidade, p.tipo, p.estoque
+    FROM produtos p WHERE p.ativo = 1 AND IFNULL(p.tipo,'produto') != 'kit'`;
+  const params = [];
+  if (search) {
+    query += ' AND (p.nome LIKE ? OR p.codigo LIKE ? OR IFNULL(p.descricao,\'\') LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s);
+  }
+  if (categoria) {
+    query += ' AND lower(IFNULL(p.categoria,\'\')) = lower(?)';
+    params.push(String(categoria).trim());
+  }
+  query += ' ORDER BY p.nome ASC LIMIT 200';
+  const produtos = db.prepare(query).all(...params).map(produtoLojaPublico);
+  const categorias = db.prepare(`
+    SELECT c.nome FROM produto_categorias c WHERE c.ativo = 1
+      AND EXISTS (SELECT 1 FROM produtos p WHERE p.ativo = 1 AND lower(IFNULL(p.categoria,'')) = lower(c.nome))
+    ORDER BY c.nome
+  `).all().map(r => r.nome);
+  res.json({ empresa, produtos, categorias });
+});
+
+app.get('/api/loja/produto/:id', (req, res) => {
+  const p = db.prepare('SELECT id, nome, codigo, descricao, preco, foto, categoria, unidade, tipo, estoque FROM produtos WHERE id = ? AND ativo = 1').get(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Produto nao encontrado' });
+  res.json({ empresa: empresaPublica(nfce.loadConfig()), produto: produtoLojaPublico(p) });
 });
 
 app.post('/api/config/apagar-banco', limitarAcaoCritica, (req, res) => {
@@ -2744,6 +2825,9 @@ app.post('/api/assistente', async (req, res) => {
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api')) {
     return res.status(404).json({ error: 'Rota não encontrada' });
+  }
+  if (req.path === '/loja' || req.path.startsWith('/loja/')) {
+    return res.sendFile(path.join(__dirname, 'public', 'loja.html'));
   }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
