@@ -12,6 +12,7 @@ const PAGES = {
   categorias: { title: 'Categorias de estoque', breadcrumb: 'Dashboard / Categorias' },
   estoque: { title: 'Estoque', breadcrumb: 'Dashboard / Estoque' },
   compras: { title: 'Pedidos de compras', breadcrumb: 'Dashboard / Pedidos de compras' },
+  ecommerce: { title: 'Loja online / API', breadcrumb: 'Dashboard / Loja online' },
   'rh-funcionarios': { title: 'Funcionários', breadcrumb: 'Dashboard / R.H. / Funcionários' },
   'rh-pontos': { title: 'Folhas de ponto', breadcrumb: 'Dashboard / R.H. / Folhas de ponto' },
   'rh-grades': { title: 'Grades horárias', breadcrumb: 'Dashboard / R.H. / Grades horárias' },
@@ -181,7 +182,7 @@ function userPermissoes() {
   let allowed;
   if (Array.isArray(list) && list.length) allowed = [...list];
   else if (currentUser?.cargo === 'Administrador') {
-    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque', 'compras', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, ...RH_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
+    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque', 'compras', 'ecommerce', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, ...RH_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
   } else {
     allowed = ['dashboard', 'manual'];
   }
@@ -192,6 +193,7 @@ function userPermissoes() {
     for (const k of RH_PAGES) {
       if (!allowed.includes(k)) allowed.push(k);
     }
+    if (!allowed.includes('ecommerce')) allowed.push('ecommerce');
   }
   return allowed;
 }
@@ -331,6 +333,7 @@ async function renderPage() {
     categorias: renderCategorias,
     estoque: renderEstoque,
     compras: renderCompras,
+    ecommerce: renderEcommerce,
     'rh-funcionarios': renderRhFuncionarios,
     'rh-pontos': renderRhPontos,
     'rh-grades': renderRhGrades,
@@ -2418,6 +2421,169 @@ async function deleteRhGrade(id) {
     await API.rh.grades.delete(id);
     showToast('Grade excluida', 'success');
     renderRhGrades();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function renderEcommerce() {
+  const st = pageState.ecommerce;
+  st.tab = st.tab || 'config';
+  const [cfg, tokens, pedidos, log] = await Promise.all([
+    API.ecommerce.config(),
+    API.ecommerce.tokens(),
+    API.ecommerce.pedidos({ search: st.search, page: st.page, limit: st.limit }),
+    API.ecommerce.log({ page: 1, limit: 15 })
+  ]);
+  const tabs = [
+    ['config', 'Conexao'],
+    ['pedidos', 'Pedidos'],
+    ['log', 'Webhooks']
+  ];
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Loja online / API', 'Dashboard / Loja online')}
+    <div class="fin-tabs">
+      ${tabs.map(([k, l]) => `<button class="fin-tab ${st.tab === k ? 'active' : ''}" data-ecom-tab="${k}">${l}</button>`).join('')}
+    </div>
+    <div id="ecom-tab-body"></div>`;
+  document.querySelectorAll('[data-ecom-tab]').forEach(btn => {
+    btn.onclick = () => { st.tab = btn.dataset.ecomTab; renderEcommerce(); };
+  });
+  const body = document.getElementById('ecom-tab-body');
+  if (st.tab === 'pedidos') {
+    body.innerHTML = `
+      ${renderTableToolbar(st.search, `Total de pedidos: ${pedidos.total}`, '')}
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead><tr><th>#</th><th>Plataforma</th><th>Pedido loja</th><th>Cliente</th><th>Venda</th><th>Total</th><th>Status</th><th>Quando</th></tr></thead>
+          <tbody id="table-body">${renderEcommercePedidosRows(pedidos.data)}</tbody>
+        </table>
+        <div id="table-pagination"></div>
+      </div>`;
+    document.getElementById('table-new')?.classList.add('hidden');
+    bindTableEvents('ecommerce', pedidos, loadEcommercePedidos);
+    return;
+  }
+  if (st.tab === 'log') {
+    body.innerHTML = `
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead><tr><th>#</th><th>Plataforma</th><th>Evento</th><th>Ok</th><th>Erro</th><th>Quando</th></tr></thead>
+          <tbody>${(log.data || []).map(l => `<tr>
+            <td>${l.id}</td><td>${escapeHtml(l.plataforma || '-')}</td>
+            <td>${escapeHtml(l.evento || '-')}</td>
+            <td>${l.ok ? 'Sim' : 'Nao'}</td>
+            <td>${escapeHtml(l.erro || '-')}</td>
+            <td>${formatDateTime(l.criado_em)}</td>
+          </tr>`).join('') || '<tr class="empty-row"><td colspan="6">Nenhum webhook ainda</td></tr>'}</tbody>
+        </table>
+      </div>`;
+    return;
+  }
+  body.innerHTML = `
+    <div class="rh-form-card">
+      <h3>Sincronizacao</h3>
+      <p class="muted">Pedidos pagos da loja virtual entram no ERP, cadastram o cliente e baixam o estoque. SKU da loja = codigo de barras do produto (ou sku_ecommerce).</p>
+      <form id="ecom-cfg-form">
+        <div class="form-group"><label>Baixa automatica de estoque</label>
+          <select name="auto_baixa">
+            <option value="1" ${cfg.auto_baixa ? 'selected' : ''}>Sim</option>
+            <option value="0" ${!cfg.auto_baixa ? 'selected' : ''}>Nao</option>
+          </select>
+        </div>
+        <div class="rh-form-grid">
+          <div class="form-group"><label>Segredo WooCommerce</label>
+            <input name="woo_secret" placeholder="${escapeHtml(cfg.woo_secret || 'Webhook secret')}">
+            <div class="ecom-url">${escapeHtml(cfg.urls.woocommerce)}</div>
+          </div>
+          <div class="form-group"><label>Segredo Shopify</label>
+            <input name="shopify_secret" placeholder="${escapeHtml(cfg.shopify_secret || 'HMAC secret')}">
+            <div class="ecom-url">${escapeHtml(cfg.urls.shopify)}</div>
+          </div>
+          <div class="form-group"><label>Token Nuvemshop</label>
+            <input name="nuvemshop_token" placeholder="${escapeHtml(cfg.nuvemshop_token || 'App token')}">
+            <div class="ecom-url">${escapeHtml(cfg.urls.nuvemshop)}</div>
+          </div>
+          <div class="form-group"><label>AppToken VTEX</label>
+            <input name="vtex_token" placeholder="${escapeHtml(cfg.vtex_token || 'AppToken')}">
+            <div class="ecom-url">${escapeHtml(cfg.urls.vtex)}</div>
+          </div>
+        </div>
+        <div class="form-group"><label>Token API generica (Bearer)</label>
+          <input name="api_secret" placeholder="${escapeHtml(cfg.api_secret || 'erp_live_... ou segredo')}">
+          <div class="ecom-url">${escapeHtml(cfg.urls.generico)}</div>
+        </div>
+        <button type="submit" class="btn btn-primary">Salvar conexao</button>
+      </form>
+    </div>
+    <div class="rh-form-card">
+      <div class="rh-page-head">
+        <div><h3 style="margin:0">Tokens da API</h3><p>Use Bearer no header Authorization. O valor so aparece na criacao.</p></div>
+        <button class="btn btn-primary" id="ecom-new-token">Novo token</button>
+      </div>
+      <div id="ecom-token-once"></div>
+      <table class="data-table">
+        <thead><tr><th>Nome</th><th>Plataforma</th><th>Prefixo</th><th>Status</th><th></th></tr></thead>
+        <tbody>${(tokens.data || []).map(t => `<tr>
+          <td>${escapeHtml(t.nome)}</td>
+          <td>${escapeHtml(t.plataforma)}</td>
+          <td>${escapeHtml(t.prefixo || '-')}</td>
+          <td><span class="status-badge ${t.ativo ? 'ativo' : 'inativo'}">${t.ativo ? 'Ativo' : 'Inativo'}</span></td>
+          <td class="actions-cell">${t.ativo ? `<button class="btn-icon delete" onclick="desativarEcomToken(${t.id})"><i class="fas fa-ban"></i></button>` : ''}</td>
+        </tr>`).join('') || '<tr class="empty-row"><td colspan="5">Nenhum token</td></tr>'}</tbody>
+      </table>
+    </div>`;
+  document.getElementById('ecom-cfg-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target));
+    body.auto_baixa = body.auto_baixa === '1';
+    try {
+      await API.ecommerce.saveConfig(body);
+      showToast('Conexao salva', 'success');
+      renderEcommerce();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+  document.getElementById('ecom-new-token').onclick = async () => {
+    const nome = prompt('Nome do token (ex.: WooCommerce producao)');
+    if (!nome) return;
+    try {
+      const r = await API.ecommerce.criarToken({ nome, plataforma: 'generico' });
+      document.getElementById('ecom-token-once').innerHTML =
+        `<div class="ecom-token-once"><strong>Copie agora:</strong> ${escapeHtml(r.token)}</div>`;
+      showToast(r.message, 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+function renderEcommercePedidosRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="8">Nenhum pedido da loja</td></tr>';
+  return data.map(p => `<tr>
+    <td>${p.id}</td>
+    <td>${escapeHtml(p.plataforma)}</td>
+    <td>${escapeHtml(p.external_id)}</td>
+    <td>${escapeHtml(p.cliente_nome || '-')}</td>
+    <td>${p.venda_id || '-'}</td>
+    <td>${formatCurrency(p.total || p.venda_total)}</td>
+    <td><span class="status-badge ecom-${escapeHtml(p.status || 'pago')}">${escapeHtml(p.status || '-')}</span></td>
+    <td>${formatDateTime(p.criado_em)}</td>
+  </tr>`).join('');
+}
+
+async function loadEcommercePedidos() {
+  const st = pageState.ecommerce;
+  const result = await API.ecommerce.pedidos({ search: st.search, page: st.page, limit: st.limit });
+  document.getElementById('table-body').innerHTML = renderEcommercePedidosRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadEcommercePedidos();
+  });
+  const info = document.querySelector('.toolbar-info');
+  if (info) info.textContent = `Total de pedidos: ${result.total}`;
+}
+
+async function desativarEcomToken(id) {
+  if (!confirm('Desativar este token?')) return;
+  try {
+    await API.ecommerce.deleteToken(id);
+    showToast('Token desativado', 'success');
+    renderEcommerce();
   } catch (err) { showToast(err.message, 'error'); }
 }
 

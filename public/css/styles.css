@@ -465,6 +465,11 @@ a.btn-icon-square { text-decoration: none; }
 .rh-page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
 .rh-page-head h2 { font-size: 20px; margin: 0; }
 .rh-page-head p { color: var(--text-muted); margin: 4px 0 0; font-size: 13px; }
+.ecom-url { font-family: ui-monospace, monospace; font-size: 12px; background: var(--bg-body); padding: 8px 10px; border-radius: 6px; word-break: break-all; }
+.ecom-token-once { background: #E8F5E9; border: 1px solid #A5D6A7; padding: 12px; border-radius: 8px; margin: 10px 0; word-break: break-all; }
+.status-badge.ecom-pago { background: #E8F5E9; color: #2E7D32; }
+.status-badge.ecom-cancelado { background: #FFEBEE; color: #C62828; }
+.status-badge.ecom-pendente { background: #FFF8E1; color: #F57F17; }
 @media (max-width: 900px) {
   .rh-form-grid, .rh-form-grid-4 { grid-template-columns: 1fr; }
 }

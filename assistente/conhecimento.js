@@ -291,6 +291,22 @@ module.exports = [
     ]
   },
   {
+    id: 'ecommerce',
+    modulo: 'Loja online',
+    sessao: 'API e webhooks',
+    pagina: 'ecommerce',
+    titulo: 'Integrar WooCommerce, Shopify, Nuvemshop ou VTEX',
+    keywords: 'ecommerce loja virtual webhook api shopify woocommerce nuvemshop vtex estoque pedido cliente sincronizar',
+    conteudo: `Loja online recebe pedidos da vitrine (WooCommerce, Shopify, Nuvemshop, VTEX ou API generica). Pedido pago cadastra/atualiza o cliente, gera venda no ERP e baixa o estoque. O SKU da loja deve ser o codigo de barras do produto (ou o campo sku_ecommerce). Cancelamento/estorno devolve o estoque. O mesmo id externo nao gera venda duplicada. Autenticacao: HMAC/secret da plataforma ou Bearer erp_live_.... Nao exige caixa aberto. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Abra Loja online no menu.',
+      'Cole o segredo da plataforma e Salvar conexao.',
+      'Cadastre o webhook na loja apontando para a URL exibida.',
+      'Ou gere um token Bearer e envie POST /api/webhooks/generico.',
+      'Confira Pedidos e o log de webhooks.'
+    ]
+  },
+  {
     id: 'ordens-servico',
     modulo: 'Ordens de servico',
     sessao: 'Gestao de OS',
@@ -565,7 +581,7 @@ module.exports = [
     pagina: 'usuarios',
     titulo: 'O que cada nivel pode ver',
     keywords: 'permissao menu escondido cargo nivel acesso sem permissao',
-    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo, inclusive Contador, Gerenciar Backup e Impressoras. Gerente nao acessa Usuarios, Backup nem Configuracoes (acessa Contador, Impressoras, Pedidos de compras e R.H.). Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio, Contador, Backup, Impressoras, Compras, R.H. nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Admin, Gerente e Vendedor acessam Categorias e Estoque. Sem permissao a tela avisa Sem permissao para esta pagina.`,
+    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo, inclusive Contador, Gerenciar Backup e Impressoras. Gerente nao acessa Usuarios, Backup nem Configuracoes (acessa Contador, Impressoras, Pedidos de compras, R.H. e Loja online). Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio, Contador, Backup, Impressoras, Compras, R.H., Loja online nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Admin, Gerente e Vendedor acessam Categorias e Estoque. Sem permissao a tela avisa Sem permissao para esta pagina.`,
     passos: [
       'Faca login com o usuario do cargo desejado.',
       'Confira o menu lateral filtrado.',
