@@ -25,7 +25,7 @@ function classificar({ tipo, categoria, descricao, origem }) {
   // Classifica pela categoria; usa a descricao apenas quando nao houver categoria.
   const texto = cat || normalize(descricao);
 
-  if (org === 'suprimento' || cat === 'suprimento') return 'ignorar';
+  if (org === 'compra' || org === 'suprimento' || cat === 'suprimento') return 'ignorar';
   if (org === 'sangria' || cat === 'sangria') return 'administrativa';
   if (org === 'taxa-operadora' || cat === 'taxa operadora') return 'comercial';
   if (cat.startsWith('estorno venda') || cat.startsWith('estorno da venda')) return 'estorno_venda';

@@ -13,6 +13,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Produtos** — Tipos Produto/Servico/Kit/Pesavel, estoque, precos, codigo de barras, promocao, foto, NCM/CFOP, importacao/exportacao e dose (baixa da garrafa)
 - **Categorias** — Cadastro de categorias de estoque (CRUD); vinculo no produto e filtro na lista
 - **Estoque** — Busca de itens (nome, codigo, marca, local), filtros por categoria/situacao/tipo, saldo, minimo, valor a custo e movimento (entrada, ajuste, inventario)
+- **Pedidos de compras** — Lista estilo SimpleDot (Todos / Aguardando / Aprovados / Recusados / Recebidos); novo pedido com itens; aprovar, recusar e receber (entra estoque e conta a pagar)
 - **Ordens de servico** — Status, cliente, Servicos/Equipamentos, valor previsto; cobranca no PDV
 - **Usuarios** — Acessos e niveis (Administrador, Gerente, Vendedor, Caixa)
 - **Fornecedores** — Cadastro vinculado a produtos e contas a pagar
@@ -46,6 +47,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Cadastro de itens: tipo Produto, Servico (sem estoque), Kit (baixa a composicao) e Pesavel (quantidade decimal, unidade KG)
 - Categorias de estoque: tela propria (nome, descricao, produtos vinculados); no cadastro do produto a categoria e um select; a lista de produtos filtra por categoria. Nomes ja usados sao migrados. Ao renomear, os produtos acompanham; so exclui se nenhum produto ativo usar.
 - Aba Estoque: pesquisa de itens no estilo SimpleDot (stock_items/search), com cards de quantidade, valor a custo, estoque baixo e zerado; filtros de categoria, situacao e tipo; acoes de compra, ajuste e inventario.
+- Pedidos de compras: tela Pedidos de compras (SimpleDot purchase_orders) com abas Todos/Aguardando/Aprovados/Recusados/Recebidos; colunas #, Status, Fornecedor, Data, Valor, Pagamento e Acoes; ao receber, entra estoque (custo atualizado) e lanca Despesa Estoque no Financeiro (fora do DRE / CMV). Teste: `npm run test:compras`.
 
 ## Produtos: importar e exportar
 

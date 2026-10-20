@@ -11,6 +11,7 @@ const PAGES = {
   produtos: { title: 'Produtos', breadcrumb: 'Dashboard / Produtos' },
   categorias: { title: 'Categorias de estoque', breadcrumb: 'Dashboard / Categorias' },
   estoque: { title: 'Estoque', breadcrumb: 'Dashboard / Estoque' },
+  compras: { title: 'Pedidos de compras', breadcrumb: 'Dashboard / Pedidos de compras' },
   'ordens-servico': { title: 'Ordens de serviço', breadcrumb: 'Dashboard / Ordens de serviço' },
   usuarios: { title: 'Usuários', breadcrumb: 'Dashboard / Usuários' },
   fornecedores: { title: 'Fornecedores', breadcrumb: 'Dashboard / Fornecedores' },
@@ -176,7 +177,7 @@ function userPermissoes() {
   let allowed;
   if (Array.isArray(list) && list.length) allowed = [...list];
   else if (currentUser?.cargo === 'Administrador') {
-    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
+    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque', 'compras', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
   } else {
     allowed = ['dashboard', 'manual'];
   }
@@ -322,6 +323,7 @@ async function renderPage() {
     produtos: renderProdutos,
     categorias: renderCategorias,
     estoque: renderEstoque,
+    compras: renderCompras,
     'ordens-servico': renderOrdensServico,
     usuarios: renderUsuarios,
     fornecedores: renderFornecedores,
@@ -1700,6 +1702,308 @@ async function deleteFornecedor(id) {
   try {
     await API.fornecedores.delete(id);
     showToast('Fornecedor excluído', 'success'); renderFornecedores();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+// ===================== COMPRAS =====================
+const COMPRA_TABS = [
+  { key: '', label: 'Todos' },
+  { key: 'Aguardando', label: 'Aguardando' },
+  { key: 'Aprovado', label: 'Aprovados' },
+  { key: 'Recusado', label: 'Recusados' },
+  { key: 'Recebido', label: 'Recebidos' }
+];
+const COMPRA_FORMAS = ['Boleto', 'Dinheiro', 'PIX', 'Cartao Debito', 'Cartao Credito', 'Prazo', 'Transferencia'];
+let compraFormItens = [];
+
+async function renderCompras() {
+  const st = pageState.compras;
+  st.status = st.status || '';
+  const result = await API.compras.list({ search: st.search, page: st.page, limit: st.limit, status: st.status });
+  const r = result.resumo || { total: 0, aguardando: 0, aprovados: 0, recusados: 0, recebidos: 0, valor: 0 };
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Pedidos de compras', 'Dashboard / Pedidos de compras')}
+    <div class="stats-row stats-row-4">
+      <div class="stat-card teal"><h4>Pedidos</h4><div class="stat-value">${r.total || 0}</div></div>
+      <div class="stat-card orange"><h4>Aguardando</h4><div class="stat-value">${r.aguardando || 0}</div></div>
+      <div class="stat-card blue"><h4>Aprovados</h4><div class="stat-value">${r.aprovados || 0}</div></div>
+      <div class="stat-card green"><h4>Valor (ativos)</h4><div class="stat-value">${formatCurrency(r.valor || 0)}</div></div>
+    </div>
+    <div class="fin-tabs">
+      ${COMPRA_TABS.map(t => {
+        const count = t.key === '' ? r.total : t.key === 'Aguardando' ? r.aguardando : t.key === 'Aprovado' ? r.aprovados : t.key === 'Recusado' ? r.recusados : r.recebidos;
+        return `<button class="fin-tab ${st.status === t.key ? 'active' : ''}" data-compra-tab="${t.key}">
+          ${escapeHtml(t.label)} <span class="fin-tab-count">${count || 0}</span>
+        </button>`;
+      }).join('')}
+    </div>
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Numero, fornecedor, pagamento..." value="${escapeHtml(st.search || '')}" id="table-search">
+      </div>
+      <span class="toolbar-info">Total de pedidos: ${result.total}</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-outline" id="compras-fornecedores"><i class="fas fa-truck"></i> Fornecedores</button>
+      <button class="btn btn-primary" id="table-new"><i class="fas fa-plus"></i> Novo Pedido de Compra</button>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr>
+          <th>#</th><th>Status</th><th>Fornecedor</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Acoes</th>
+        </tr></thead>
+        <tbody id="table-body">${renderComprasRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('compras', result, loadCompras);
+  document.getElementById('table-new').onclick = () => showCompraForm();
+  document.getElementById('compras-fornecedores').onclick = () => navigate('fornecedores');
+  document.querySelectorAll('[data-compra-tab]').forEach(btn => {
+    btn.onclick = () => {
+      st.status = btn.dataset.compraTab;
+      st.page = 1;
+      renderCompras();
+    };
+  });
+}
+
+function renderComprasRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="7">Nenhum pedido encontrado</td></tr>';
+  return data.map(c => `<tr>
+    <td>${c.id}</td>
+    <td><span class="status-badge ${statusClass(c.status)}">${escapeHtml(c.status || '-')}</span></td>
+    <td>${escapeHtml(c.fornecedor_nome || '-')}</td>
+    <td>${formatDate(c.data_pedido || c.criado_em)}</td>
+    <td>${formatCurrency(c.valor)}</td>
+    <td>${escapeHtml(c.forma_pagamento || '-')}</td>
+    <td class="actions-cell">
+      <div class="action-menu-wrap">
+        <button class="btn-icon-square btn-menu" onclick="toggleProdutoMenu(event, 'c${c.id}')" title="Acoes">
+          <i class="fas fa-ellipsis-v"></i>
+        </button>
+        <div class="action-dropdown" id="produto-menu-c${c.id}">
+          <button type="button" onclick="verCompra(${c.id})"><i class="fas fa-eye menu-edit"></i> Ver pedido</button>
+          ${c.status === 'Aguardando' ? `<button type="button" onclick="showCompraForm(${c.id})"><i class="fas fa-edit menu-edit"></i> Editar</button>
+          <div class="action-sep"></div>
+          <button type="button" onclick="aprovarCompra(${c.id})"><i class="fas fa-check menu-in"></i> Aprovar</button>
+          <button type="button" class="danger" onclick="recusarCompra(${c.id})"><i class="fas fa-times"></i> Recusar</button>
+          <button type="button" class="danger" onclick="deleteCompra(${c.id})"><i class="fas fa-trash"></i> Excluir</button>` : ''}
+          ${c.status === 'Aprovado' ? `<div class="action-sep"></div>
+          <button type="button" onclick="receberCompra(${c.id})"><i class="fas fa-dolly menu-in"></i> Receber</button>
+          <button type="button" class="danger" onclick="recusarCompra(${c.id})"><i class="fas fa-times"></i> Recusar</button>` : ''}
+          ${c.status === 'Recusado' ? `<button type="button" class="danger" onclick="deleteCompra(${c.id})"><i class="fas fa-trash"></i> Excluir</button>` : ''}
+        </div>
+      </div>
+    </td></tr>`).join('');
+}
+
+async function loadCompras() {
+  const st = pageState.compras;
+  const result = await API.compras.list({ search: st.search, page: st.page, limit: st.limit, status: st.status || '' });
+  document.getElementById('table-body').innerHTML = renderComprasRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadCompras();
+  });
+  document.querySelector('.toolbar-info').textContent = `Total de pedidos: ${result.total}`;
+}
+
+function compraItensTotal() {
+  return (compraFormItens || []).reduce((s, it) => s + (Number(it.quantidade) || 0) * (Number(it.preco_unitario) || 0), 0);
+}
+
+function renderCompraItensEditor(produtos) {
+  const opts = produtos.map(p => `<option value="${p.id}">${escapeHtml(p.nome)}${p.codigo ? ' · ' + escapeHtml(p.codigo) : ''}</option>`).join('');
+  const rows = compraFormItens.length
+    ? compraFormItens.map((it, i) => `<tr>
+        <td>${escapeHtml(it.descricao || '-')}</td>
+        <td><input type="number" min="0.0001" step="0.0001" value="${it.quantidade}" onchange="alterarItemCompra(${i},'quantidade',this.value)"></td>
+        <td><input type="number" min="0" step="0.01" value="${it.preco_unitario}" onchange="alterarItemCompra(${i},'preco_unitario',this.value)"></td>
+        <td>${formatCurrency((Number(it.quantidade) || 0) * (Number(it.preco_unitario) || 0))}</td>
+        <td><button type="button" class="btn-icon delete" onclick="removerItemCompra(${i})"><i class="fas fa-trash"></i></button></td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="5">Nenhum item</td></tr>';
+  return `
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label>Adicionar produto</label>
+        <select id="compra-add-prod"><option value="">Selecione...</option>${opts}</select>
+      </div>
+      <div class="form-group"><label>&nbsp;</label>
+        <button type="button" class="btn btn-outline" id="compra-add-btn"><i class="fas fa-plus"></i> Incluir</button>
+      </div>
+    </div>
+    <table class="data-table compra-itens-table">
+      <thead><tr><th>Item</th><th>Qtd</th><th>Custo</th><th>Subtotal</th><th></th></tr></thead>
+      <tbody id="compra-itens-body">${rows}</tbody>
+    </table>
+    <p class="toolbar-info" style="margin-top:8px">Total: <strong id="compra-total">${formatCurrency(compraItensTotal())}</strong></p>`;
+}
+
+function atualizarCompraItensView(produtos) {
+  const wrap = document.getElementById('compra-itens-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = renderCompraItensEditor(produtos);
+  document.getElementById('compra-add-btn').onclick = () => {
+    const sel = document.getElementById('compra-add-prod');
+    const id = Number(sel.value);
+    if (!id) { showToast('Selecione um produto', 'error'); return; }
+    const p = produtos.find(x => Number(x.id) === id);
+    if (!p) return;
+    compraFormItens.push({
+      produto_id: p.id,
+      descricao: p.nome,
+      quantidade: 1,
+      preco_unitario: Number(p.preco_custo) || 0
+    });
+    atualizarCompraItensView(produtos);
+  };
+}
+
+function alterarItemCompra(i, campo, valor) {
+  if (!compraFormItens[i]) return;
+  compraFormItens[i][campo] = parseFloat(valor) || 0;
+  const tot = document.getElementById('compra-total');
+  if (tot) tot.textContent = formatCurrency(compraItensTotal());
+  const row = document.querySelectorAll('#compra-itens-body tr')[i];
+  if (row && row.children[3]) {
+    const it = compraFormItens[i];
+    row.children[3].textContent = formatCurrency((Number(it.quantidade) || 0) * (Number(it.preco_unitario) || 0));
+  }
+}
+
+function removerItemCompra(i) {
+  compraFormItens.splice(i, 1);
+  const wrap = document.getElementById('compra-itens-wrap');
+  if (!wrap) return;
+  const produtos = window._compraProdutos || [];
+  atualizarCompraItensView(produtos);
+}
+
+async function showCompraForm(id) {
+  const [fornecedores, produtos] = await Promise.all([
+    API.fornecedores.all(),
+    API.produtos.all()
+  ]);
+  window._compraProdutos = produtos.filter(p => {
+    const t = String(p.tipo || 'produto').toLowerCase();
+    return t !== 'servico' && t !== 'kit' && !p.estoque_origem_id;
+  });
+  let data = { status: 'Aguardando', forma_pagamento: 'Boleto', data_pedido: hojeLocalIso() };
+  compraFormItens = [];
+  if (id) {
+    data = await API.compras.get(id);
+    compraFormItens = (data.itens || []).map(it => ({
+      produto_id: it.produto_id,
+      descricao: it.descricao || it.produto_nome,
+      quantidade: Number(it.quantidade) || 1,
+      preco_unitario: Number(it.preco_unitario) || 0
+    }));
+  }
+  document.querySelector('.modal-box')?.classList.add('wide');
+  openModal(id ? `Editar pedido #${id}` : 'Novo Pedido de Compra', `
+    <form id="compra-form">
+      <div class="form-row">
+        <div class="form-group"><label>Fornecedor *</label>
+          <select name="fornecedor_id" required>
+            <option value="">Selecione...</option>
+            ${fornecedores.map(f => `<option value="${f.id}" ${data.fornecedor_id == f.id ? 'selected' : ''}>${escapeHtml(f.nome)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>Data</label>
+          <input name="data_pedido" type="date" value="${toInputDate(data.data_pedido) || hojeLocalIso()}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Pagamento</label>
+          <select name="forma_pagamento">
+            ${COMPRA_FORMAS.map(f => `<option ${data.forma_pagamento === f ? 'selected' : ''}>${f}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>Observacao</label>
+          <input name="observacao" value="${escapeHtml(data.observacao || '')}">
+        </div>
+      </div>
+      <div id="compra-itens-wrap">${renderCompraItensEditor(window._compraProdutos)}</div>
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button>
+     <button class="btn btn-primary" id="compra-save">Salvar</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  atualizarCompraItensView(window._compraProdutos);
+  document.getElementById('compra-save').onclick = async () => {
+    const form = document.getElementById('compra-form');
+    if (!form.reportValidity()) return;
+    if (!compraFormItens.length) { showToast('Inclua ao menos um item', 'error'); return; }
+    const fd = new FormData(form);
+    const body = {
+      fornecedor_id: fd.get('fornecedor_id'),
+      data_pedido: fd.get('data_pedido'),
+      forma_pagamento: fd.get('forma_pagamento'),
+      observacao: fd.get('observacao'),
+      itens: compraFormItens
+    };
+    try {
+      if (id) await API.compras.update(id, body);
+      else await API.compras.create(body);
+      closeModal(); showToast('Pedido salvo', 'success'); renderCompras();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function verCompra(id) {
+  const c = await API.compras.get(id);
+  const itens = (c.itens || []).map(it => `<tr>
+    <td>${escapeHtml(it.descricao || it.produto_nome || '-')}</td>
+    <td>${it.quantidade}</td>
+    <td>${formatCurrency(it.preco_unitario)}</td>
+    <td>${formatCurrency(it.subtotal)}</td>
+  </tr>`).join('') || '<tr class="empty-row"><td colspan="4">Sem itens</td></tr>';
+  openModal(`Pedido #${c.id}`, `
+    <p><span class="status-badge ${statusClass(c.status)}">${escapeHtml(c.status)}</span>
+       · ${escapeHtml(c.fornecedor_nome || '-')} · ${formatDate(c.data_pedido)} · ${escapeHtml(c.forma_pagamento || '-')}</p>
+    ${c.observacao ? `<p class="muted">${escapeHtml(c.observacao)}</p>` : ''}
+    <table class="data-table" style="margin-top:12px">
+      <thead><tr><th>Item</th><th>Qtd</th><th>Custo</th><th>Subtotal</th></tr></thead>
+      <tbody>${itens}</tbody>
+    </table>
+    <p style="margin-top:10px;text-align:right"><strong>Total ${formatCurrency(c.valor)}</strong></p>`,
+    `<button class="btn btn-outline modal-close-btn">Fechar</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+}
+
+async function aprovarCompra(id) {
+  if (!confirm('Aprovar este pedido de compra?')) return;
+  try {
+    await API.compras.aprovar(id);
+    showToast('Pedido aprovado', 'success');
+    renderCompras();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function recusarCompra(id) {
+  if (!confirm('Recusar este pedido de compra?')) return;
+  try {
+    await API.compras.recusar(id);
+    showToast('Pedido recusado', 'success');
+    renderCompras();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function receberCompra(id) {
+  if (!confirm('Receber este pedido? O estoque sera atualizado e uma conta a pagar sera lancada.')) return;
+  try {
+    await API.compras.receber(id);
+    showToast('Pedido recebido. Estoque e financeiro atualizados.', 'success');
+    renderCompras();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function deleteCompra(id) {
+  if (!confirm('Excluir este pedido de compra?')) return;
+  try {
+    await API.compras.delete(id);
+    showToast('Pedido excluido', 'success');
+    renderCompras();
   } catch (err) { showToast(err.message, 'error'); }
 }
 
