@@ -269,6 +269,10 @@ ensureColumn('produtos', 'ncm', "TEXT DEFAULT '00000000'");
 ensureColumn('produtos', 'cfop', "TEXT DEFAULT '5102'");
 ensureColumn('produtos', 'unidade', "TEXT DEFAULT 'UN'");
 ensureColumn('produtos', 'origem', "TEXT DEFAULT '0'");
+ensureColumn('produtos', 'estoque_origem_id', 'INTEGER');
+ensureColumn('produtos', 'estoque_consumo', 'REAL DEFAULT 0');
+ensureColumn('venda_itens', 'estoque_origem_id', 'INTEGER');
+ensureColumn('venda_itens', 'estoque_consumo', 'REAL DEFAULT 0');
 ensureColumn('vendas', 'nfce_id', 'INTEGER');
 ensureColumn('financeiro', 'venda_id', 'INTEGER');
 ensureColumn('financeiro', 'caixa_id', 'INTEGER');
@@ -302,6 +306,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ordens_servico_status ON ordens_servico(status);
   CREATE INDEX IF NOT EXISTS idx_nfce_venda ON nfce(venda_id);
   CREATE INDEX IF NOT EXISTS idx_produtos_codigo ON produtos(codigo);
+  CREATE INDEX IF NOT EXISTS idx_produtos_estoque_origem ON produtos(estoque_origem_id);
   CREATE INDEX IF NOT EXISTS idx_sessoes_token ON sessoes(token_hash);
   CREATE INDEX IF NOT EXISTS idx_sessoes_expira ON sessoes(expira_em);
 `);

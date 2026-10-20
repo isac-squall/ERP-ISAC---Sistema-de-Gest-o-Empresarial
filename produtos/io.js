@@ -12,7 +12,9 @@ const COLUNAS = [
   { key: 'ncm', aliases: ['ncm'] },
   { key: 'cfop', aliases: ['cfop'] },
   { key: 'unidade', aliases: ['unidade', 'un', 'und'] },
-  { key: 'origem', aliases: ['origem', 'origem_icms'] }
+  { key: 'origem', aliases: ['origem', 'origem_icms'] },
+  { key: 'estoque_origem_codigo', aliases: ['estoque_origem_codigo', 'origem_codigo', 'garrafa', 'produzido_de', 'kit_de'] },
+  { key: 'estoque_consumo', aliases: ['estoque_consumo', 'consumo', 'fator_dose', 'doses', 'ml_dose'] }
 ];
 
 const FORMATOS = [
@@ -323,7 +325,7 @@ function toXlsx(produtos) {
   const sheetRows = rows.map((r, ri) => {
     const cells = r.map((v, ci) => {
       const ref = colLetter(ci + 1) + (ri + 1);
-      const num = ri > 0 && ['preco', 'preco_custo', 'estoque', 'estoque_minimo', 'origem'].includes(cols[ci]) && v !== '' && !Number.isNaN(Number(v));
+      const num = ri > 0 && ['preco', 'preco_custo', 'estoque', 'estoque_minimo', 'origem', 'estoque_consumo'].includes(cols[ci]) && v !== '' && !Number.isNaN(Number(v));
       if (num) return `<c r="${ref}"><v>${Number(v)}</v></c>`;
       return `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(v)}</t></is></c>`;
     }).join('');
@@ -421,7 +423,7 @@ function toSql(produtos) {
   const lines = ['-- ERP ISAC produtos', 'BEGIN;'];
   for (const p of produtos) {
     const vals = headers().map(k => {
-      if (['preco', 'preco_custo', 'estoque', 'estoque_minimo', 'origem'].includes(k)) {
+      if (['preco', 'preco_custo', 'estoque', 'estoque_minimo', 'origem', 'estoque_consumo'].includes(k)) {
         const n = Number(p[k]);
         return Number.isFinite(n) ? String(n) : '0';
       }
@@ -454,7 +456,7 @@ function toXls(produtos) {
   const body = produtos.map(p => {
     const cells = headers().map(k => {
       const v = p[k];
-      const num = ['preco', 'preco_custo', 'estoque', 'estoque_minimo', 'origem'].includes(k) && v !== '' && !Number.isNaN(Number(v));
+      const num = ['preco', 'preco_custo', 'estoque', 'estoque_minimo', 'origem', 'estoque_consumo'].includes(k) && v !== '' && !Number.isNaN(Number(v));
       return num
         ? `<Cell><Data ss:Type="Number">${Number(v)}</Data></Cell>`
         : `<Cell><Data ss:Type="String">${xmlEscape(v)}</Data></Cell>`;
@@ -520,7 +522,7 @@ function normalizar(item) {
   const nome = String(item.nome || '').trim();
   const codigo = String(item.codigo || '').trim();
   const preco = Number(String(item.preco || '0').replace(',', '.')) || 0;
-  const estoque = parseInt(String(item.estoque || '0').replace(',', '.'), 10);
+  const estoque = Number(String(item.estoque || '0').replace(',', '.'));
   const erros = [];
   if (!nome) erros.push('nome obrigatorio');
   if (!codigo) erros.push('codigo de barras obrigatorio');
@@ -539,6 +541,8 @@ function normalizar(item) {
     cfop: String(item.cfop || '5102').trim() || '5102',
     unidade: String(item.unidade || 'UN').trim() || 'UN',
     origem: String(item.origem || '0').trim() || '0',
+    estoque_origem_codigo: String(item.estoque_origem_codigo || '').trim(),
+    estoque_consumo: Number(String(item.estoque_consumo || '0').replace(',', '.')) || 0,
     erros
   };
 }
@@ -556,7 +560,9 @@ function modelo(formato) {
     ncm: '22021000',
     cfop: '5102',
     unidade: 'UN',
-    origem: '0'
+    origem: '0',
+    estoque_origem_codigo: '',
+    estoque_consumo: 0
   }], formato);
 }
 

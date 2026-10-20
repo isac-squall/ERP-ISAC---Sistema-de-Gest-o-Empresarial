@@ -704,11 +704,11 @@ function renderProdutosRows(data) {
   return data.map((p, i) => `<tr>
     <td>${i + 1}</td>
     <td>${produtoFotoHtml(p)}</td>
-    <td>${escapeHtml(p.nome)}${p.promocao_ativa ? ' <span class="promo-tag">promo</span>' : ''}</td>
+    <td>${escapeHtml(p.nome)}${p.promocao_ativa ? ' <span class="promo-tag">promo</span>' : ''}${p.estoque_origem_id ? ' <span class="promo-tag">dose</span>' : ''}</td>
     <td>${escapeHtml(p.codigo || '-')}</td>
     <td>${formatCurrency(p.preco)}</td>
     <td>${formatCurrency(p.preco_custo)}</td>
-    <td>${p.estoque}</td>
+    <td>${p.estoque_origem_id ? `${estoqueDisponivel(p)} <small class="muted">doses</small>` : p.estoque}</td>
     <td>${p.estoque_minimo || 0}</td>
     <td class="actions-cell">
       <div class="action-menu-wrap">
@@ -779,11 +779,23 @@ function bindProdutoFoto() {
   };
 }
 
+function estoqueDisponivel(p) {
+  if (p?.estoque_disponivel != null && Number.isFinite(Number(p.estoque_disponivel))) {
+    return Math.floor(Number(p.estoque_disponivel) + 1e-9);
+  }
+  const consumo = Number(p?.estoque_consumo) || 0;
+  if (p?.estoque_origem_id && consumo > 0) {
+    return Math.floor(((Number(p.estoque_origem_qtd) || 0) + 1e-9) / consumo);
+  }
+  return Math.floor((Number(p?.estoque) || 0) + 1e-9);
+}
+
 async function showProdutoForm(id) {
   closeProdutoMenus();
   let data = {};
   if (id) data = await API.produtos.get(id);
   const fornecedores = await API.fornecedores.all();
+  const origens = (await API.produtos.all()).filter(p => !p.estoque_origem_id && (!id || p.id !== id));
   const foto = data.foto || '';
   openModal(id ? 'Editar produto' : 'Adicionar produto', `
     <form id="entity-form">
@@ -807,7 +819,7 @@ async function showProdutoForm(id) {
         <div class="form-group"><label>Preço custo</label><input name="preco_custo" type="number" step="0.01" value="${data.preco_custo || 0}"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Estoque (qtd)</label><input name="estoque" type="number" value="${data.estoque || 0}"></div>
+        <div class="form-group"><label>Estoque (qtd)</label><input name="estoque" type="number" step="0.0001" value="${data.estoque || 0}"></div>
         <div class="form-group"><label>Estoque mínimo</label><input name="estoque_minimo" type="number" value="${data.estoque_minimo || 0}"></div>
       </div>
       <div class="form-group"><label>Fornecedor</label>
@@ -826,6 +838,18 @@ async function showProdutoForm(id) {
               `<option value="${i}" ${String(data.origem || '0') === String(i) ? 'selected' : ''}>${o}</option>`).join('')}
           </select></div>
       </div>
+      <div class="form-row">
+        <div class="form-group"><label>Produzido a partir de</label>
+          <select name="estoque_origem_id">
+            <option value="">Estoque próprio</option>
+            ${origens.map(p => `<option value="${p.id}" ${data.estoque_origem_id == p.id ? 'selected' : ''}>${escapeHtml(p.nome)}${p.codigo ? ' · ' + escapeHtml(p.codigo) : ''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>Consumo por unidade</label>
+          <input name="estoque_consumo" type="number" step="0.0001" min="0" value="${data.estoque_consumo || 0}" placeholder="Ex: 0.05 (20 doses/garrafa)">
+        </div>
+      </div>
+      <p class="muted">Para dose: escolha a garrafa e o consumo (1/doses por garrafa). Ex.: 20 doses = 0,05. O estoque da garrafa baixa na venda.</p>
     </form>`,
     `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
   bindEntitySave(id, 'produtos', renderProdutos);
@@ -1074,13 +1098,17 @@ async function showEstoqueMovimento(id, tipo) {
     ajuste: 'Informe um valor positivo para entrada ou negativo para saída.',
     inventario: 'Informe a quantidade real contada. O estoque será substituído.'
   };
+  const alvoId = p.estoque_origem_id || id;
+  const saldo = p.estoque_origem_id ? (p.estoque_origem_qtd || 0) : p.estoque;
   openModal(titulos[tipo] || 'Estoque', `
     <p style="margin-bottom:8px"><strong>${escapeHtml(p.nome)}</strong></p>
-    <p class="muted" style="margin-bottom:14px">Estoque atual: <strong>${p.estoque}</strong> · Mínimo: ${p.estoque_minimo || 0}</p>
-    <p class="muted" style="margin-bottom:14px">${hints[tipo]}</p>
+    <p class="muted" style="margin-bottom:14px">${p.estoque_origem_id
+      ? `Dose de ${escapeHtml(p.estoque_origem_nome || 'garrafa')} · ${estoqueDisponivel(p)} doses · garrafa: <strong>${saldo}</strong>`
+      : `Estoque atual: <strong>${p.estoque}</strong> · Mínimo: ${p.estoque_minimo || 0}`}</p>
+    <p class="muted" style="margin-bottom:14px">${p.estoque_origem_id ? 'O movimento altera a garrafa, não a dose.' : hints[tipo]}</p>
     <form id="estoque-form">
       <div class="form-group"><label>${tipo === 'inventario' ? 'Quantidade contada' : 'Quantidade'}</label>
-        <input name="quantidade" type="number" ${tipo === 'entrada' ? 'min="1"' : ''} value="${tipo === 'inventario' ? p.estoque : 1}" required>
+        <input name="quantidade" type="number" step="0.0001" ${tipo === 'entrada' ? 'min="0.0001"' : ''} value="${tipo === 'inventario' ? saldo : 1}" required>
       </div>
       <div class="form-group"><label>Observação</label><input name="observacao" placeholder="Opcional"></div>
     </form>`,
@@ -1091,9 +1119,9 @@ async function showEstoqueMovimento(id, tipo) {
     if (!form.reportValidity()) return;
     const fd = new FormData(form);
     try {
-      await API.produtos.estoque(id, {
+      await API.produtos.estoque(alvoId, {
         tipo,
-        quantidade: parseInt(fd.get('quantidade'), 10),
+        quantidade: parseFloat(fd.get('quantidade')),
         observacao: fd.get('observacao'),
         usuario_id: currentUser && currentUser.id
       });
@@ -1668,9 +1696,9 @@ async function mostrarPosResultados(term) {
   box.innerHTML = achados.map(p => `
     <div class="pos-result" data-id="${p.id}">
       <div><strong>${escapeHtml(p.nome)}</strong><br><small>${escapeHtml(p.codigo || p.categoria || 'sem código')}</small></div>
-      <div class="pos-result-right">${formatCurrency(p.preco)}<br><small>Est. ${p.estoque}</small></div>
-    </div>`).join('');
-  box.classList.remove('hidden');
+        <div class="pos-result-right">${formatCurrency(p.preco)}<br><small>Est. ${estoqueDisponivel(p)}</small></div>
+      </div>`).join('');
+    box.classList.remove('hidden');
   box.querySelectorAll('.pos-result').forEach(el => {
     el.onclick = () => {
       const p = posProdutos.find(x => x.id === +el.dataset.id);
@@ -1721,20 +1749,21 @@ function posAdicionarOS(os) {
 
 function posAdicionarItem(produto, quantidade) {
   if (!produto) return;
-  if (produto.estoque <= 0) { showToast('Produto sem estoque', 'error'); return; }
+  const disponivel = estoqueDisponivel(produto);
+  if (disponivel <= 0) { showToast('Produto sem estoque', 'error'); return; }
   const tab = posTabAtual();
   const qtd = Math.max(1, parseInt(quantidade, 10) || 1);
   const existente = tab.itens.find(i => i.produto_id === produto.id);
   if (existente) {
-    if (existente.quantidade + qtd > produto.estoque) { showToast('Estoque insuficiente', 'error'); return; }
+    if (existente.quantidade + qtd > disponivel) { showToast('Estoque insuficiente', 'error'); return; }
     existente.quantidade += qtd;
   } else {
-    if (qtd > produto.estoque) { showToast('Estoque insuficiente', 'error'); return; }
+    if (qtd > disponivel) { showToast('Estoque insuficiente', 'error'); return; }
     tab.itens.push({
       produto_id: produto.id, nome: produto.nome, codigo: produto.codigo || '',
       preco_unitario: Number(produto.preco) || 0,
       preco_custo: Number(produto.preco_custo) || 0,
-      quantidade: qtd, estoque: produto.estoque
+      quantidade: qtd, estoque: disponivel
     });
   }
   salvarPosTabs();
@@ -1936,7 +1965,7 @@ function posProdutoServico() {
     box.innerHTML = lista.length ? lista.map(p => `
       <div class="pos-result" data-id="${p.id}">
         <div><strong>${escapeHtml(p.nome)}</strong><br><small>${escapeHtml(p.codigo || 'sem código')}</small></div>
-        <div class="pos-result-right">${formatCurrency(p.preco)}<br><small>Est. ${p.estoque}</small></div>
+        <div class="pos-result-right">${formatCurrency(p.preco)}<br><small>Est. ${estoqueDisponivel(p)}</small></div>
       </div>`).join('') : '<p class="muted" style="padding:12px">Nenhum produto encontrado</p>';
     box.querySelectorAll('.pos-result').forEach(el => {
       el.onclick = () => {
@@ -1998,7 +2027,7 @@ async function posHistoricoPedido() {
         for (const item of venda.itens || []) {
           if (item.produto_id) {
             const p = posProdutos.find(x => x.id === item.produto_id);
-            if (p && p.estoque > 0) posAdicionarItem(p, item.quantidade);
+            if (p && estoqueDisponivel(p) > 0) posAdicionarItem(p, item.quantidade);
           } else {
             posAdicionarServico(item.produto_nome || item.descricao || 'Serviço', item.preco_unitario, item.quantidade);
           }
@@ -4565,8 +4594,10 @@ function bindEntitySave(id, apiKey, rerender, transform) {
     catch (err) { showToast(err.message, 'error'); return; }
     if (body.preco !== undefined) body.preco = parseFloat(body.preco);
     if (body.preco_custo !== undefined) body.preco_custo = parseFloat(body.preco_custo);
-    if (body.estoque !== undefined) body.estoque = parseInt(body.estoque);
+    if (body.estoque !== undefined) body.estoque = parseFloat(body.estoque);
     if (body.estoque_minimo !== undefined) body.estoque_minimo = parseInt(body.estoque_minimo);
+    if (body.estoque_consumo !== undefined) body.estoque_consumo = parseFloat(body.estoque_consumo) || 0;
+    if (body.estoque_origem_id !== undefined) body.estoque_origem_id = body.estoque_origem_id || null;
     if (body.fornecedor_id !== undefined) body.fornecedor_id = body.fornecedor_id || null;
     if (body.cliente_id !== undefined) body.cliente_id = body.cliente_id || null;
     try {
