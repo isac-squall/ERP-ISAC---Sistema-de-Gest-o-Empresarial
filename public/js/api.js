@@ -133,6 +133,19 @@ const API = {
     folha: (p) => API.request(`/rh/folhas?${new URLSearchParams(p || {})}`)
   },
 
+  gerencia: {
+    orcamentos: (p) => API.request(`/gerencia/orcamentos?${new URLSearchParams(p || {})}`),
+    orcamento: (id) => API.request(`/gerencia/orcamentos/${id}`),
+    aprovarOrcamento: (id) => API.request(`/gerencia/orcamentos/${id}/aprovar`, { method: 'POST', body: {} }),
+    recusarOrcamento: (id) => API.request(`/gerencia/orcamentos/${id}/recusar`, { method: 'POST', body: {} }),
+    converterOrcamento: (id, d) => API.request(`/gerencia/orcamentos/${id}/converter`, { method: 'POST', body: d || {} }),
+    fechamentos: (p) => API.request(`/gerencia/fechamentos?${new URLSearchParams(p || {})}`),
+    conferirFechamento: (id, d) => API.request(`/gerencia/fechamentos/${id}/conferir`, { method: 'POST', body: d || {} }),
+    inventario: (p) => API.request(`/gerencia/inventario?${new URLSearchParams(p || {})}`),
+    salvarInventario: (d) => API.request('/gerencia/inventario', { method: 'POST', body: d }),
+    estoque: (p) => API.request(`/gerencia/estoque?${new URLSearchParams(p || {})}`)
+  },
+
   produtos: {
     list: (p) => API.request(`/produtos?${new URLSearchParams(p)}`),
     all: () => API.request('/produtos/all'),
@@ -308,7 +321,8 @@ function statusClass(status) {
     'Cancelada': 'cancelada', 'Pendente': 'pendente',
     'Pago': 'pago', 'Concluída': 'pago',
     'Aguardando': 'compra-aguardando', 'Aprovado': 'compra-aprovado',
-    'Recusado': 'compra-recusado', 'Recebido': 'compra-recebido'
+    'Recusado': 'compra-recusado', 'Recebido': 'compra-recebido',
+    'Aberto': 'compra-aguardando', 'Convertido': 'compra-recebido'
   };
   return map[status] || 'aberta';
 }

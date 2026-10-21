@@ -10,7 +10,8 @@
     "test:produtos": "node produtos/test.js",
     "test:compras": "node compras/test.js",
     "test:rh": "node rh/test.js",
-    "test:ecommerce": "node ecommerce/test.js"
+    "test:ecommerce": "node ecommerce/test.js",
+    "test:gerencia": "node gerencia/test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

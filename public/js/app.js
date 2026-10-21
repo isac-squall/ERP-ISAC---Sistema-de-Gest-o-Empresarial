@@ -16,6 +16,11 @@ const PAGES = {
   'rh-funcionarios': { title: 'Funcionários', breadcrumb: 'Dashboard / R.H. / Funcionários' },
   'rh-pontos': { title: 'Folhas de ponto', breadcrumb: 'Dashboard / R.H. / Folhas de ponto' },
   'rh-grades': { title: 'Grades horárias', breadcrumb: 'Dashboard / R.H. / Grades horárias' },
+  'gerencia-aprovacao-vendas': { title: 'Aprovação Vendas', breadcrumb: 'Dashboard / Gerência / Aprovação Vendas' },
+  'gerencia-compras': { title: 'Compras', breadcrumb: 'Dashboard / Gerência / Compras' },
+  'gerencia-fechamento-caixas': { title: 'Fechamento Caixas', breadcrumb: 'Dashboard / Gerência / Fechamento Caixas' },
+  'gerencia-inventario': { title: 'Inventário', breadcrumb: 'Dashboard / Gerência / Inventário' },
+  'gerencia-consulta-estoque': { title: 'Consulta Estoque', breadcrumb: 'Dashboard / Gerência / Consulta Estoque' },
   'ordens-servico': { title: 'Ordens de serviço', breadcrumb: 'Dashboard / Ordens de serviço' },
   usuarios: { title: 'Usuários', breadcrumb: 'Dashboard / Usuários' },
   fornecedores: { title: 'Fornecedores', breadcrumb: 'Dashboard / Fornecedores' },
@@ -176,13 +181,20 @@ function bindGlobalEvents() {
 
 const CONTADOR_PAGES = ['contador-nfe', 'contador-compras', 'contador-xml', 'contador-extrato', 'contador-sped'];
 const RH_PAGES = ['rh-funcionarios', 'rh-pontos', 'rh-grades'];
+const GERENCIA_PAGES = [
+  'gerencia-aprovacao-vendas',
+  'gerencia-compras',
+  'gerencia-fechamento-caixas',
+  'gerencia-inventario',
+  'gerencia-consulta-estoque'
+];
 
 function userPermissoes() {
   const list = currentUser?.permissoes;
   let allowed;
   if (Array.isArray(list) && list.length) allowed = [...list];
   else if (currentUser?.cargo === 'Administrador') {
-    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque', 'compras', 'ecommerce', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, ...RH_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
+    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque', 'compras', 'ecommerce', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, ...RH_PAGES, ...GERENCIA_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
   } else {
     allowed = ['dashboard', 'manual'];
   }
@@ -191,6 +203,9 @@ function userPermissoes() {
       if (!allowed.includes(k)) allowed.push(k);
     }
     for (const k of RH_PAGES) {
+      if (!allowed.includes(k)) allowed.push(k);
+    }
+    for (const k of GERENCIA_PAGES) {
       if (!allowed.includes(k)) allowed.push(k);
     }
     if (!allowed.includes('ecommerce')) allowed.push('ecommerce');
@@ -337,6 +352,11 @@ async function renderPage() {
     'rh-funcionarios': renderRhFuncionarios,
     'rh-pontos': renderRhPontos,
     'rh-grades': renderRhGrades,
+    'gerencia-aprovacao-vendas': renderGerenciaAprovacaoVendas,
+    'gerencia-compras': renderGerenciaCompras,
+    'gerencia-fechamento-caixas': renderGerenciaFechamentoCaixas,
+    'gerencia-inventario': renderGerenciaInventario,
+    'gerencia-consulta-estoque': renderGerenciaConsultaEstoque,
     'ordens-servico': renderOrdensServico,
     usuarios: renderUsuarios,
     fornecedores: renderFornecedores,
@@ -1734,8 +1754,9 @@ async function renderCompras() {
   st.status = st.status || '';
   const result = await API.compras.list({ search: st.search, page: st.page, limit: st.limit, status: st.status });
   const r = result.resumo || { total: 0, aguardando: 0, aprovados: 0, recusados: 0, recebidos: 0, valor: 0 };
+  const viaGerencia = currentPage === 'gerencia-compras';
   document.getElementById('content').innerHTML = `
-    ${pageHeader('Pedidos de compras', 'Dashboard / Pedidos de compras')}
+    ${pageHeader(viaGerencia ? 'Compras' : 'Pedidos de compras', viaGerencia ? 'Dashboard / Gerência / Compras' : 'Dashboard / Pedidos de compras')}
     <div class="stats-row stats-row-4">
       <div class="stat-card teal"><h4>Pedidos</h4><div class="stat-value">${r.total || 0}</div></div>
       <div class="stat-card orange"><h4>Aguardando</h4><div class="stat-value">${r.aguardando || 0}</div></div>
@@ -1769,14 +1790,21 @@ async function renderCompras() {
       </table>
       <div id="table-pagination"></div>
     </div>`;
-  bindTableEvents('compras', result, loadCompras);
+  bindTableEvents(viaGerencia ? 'gerencia-compras' : 'compras', result, viaGerencia ? loadGerenciaComprasLista : loadCompras);
   document.getElementById('table-new').onclick = () => showCompraForm();
+  if (viaGerencia) document.getElementById('table-new')?.classList.add('hidden');
   document.getElementById('compras-fornecedores').onclick = () => navigate('fornecedores');
   document.querySelectorAll('[data-compra-tab]').forEach(btn => {
     btn.onclick = () => {
       st.status = btn.dataset.compraTab;
       st.page = 1;
-      renderCompras();
+      if (viaGerencia) {
+        pageState['gerencia-compras'].status = st.status;
+        pageState['gerencia-compras'].page = 1;
+        renderGerenciaCompras();
+      } else {
+        renderCompras();
+      }
     };
   });
 }
@@ -1984,12 +2012,17 @@ async function verCompra(id) {
   document.querySelector('.modal-close-btn').onclick = closeModal;
 }
 
+function recarregarCompras() {
+  if (currentPage === 'gerencia-compras') return renderGerenciaCompras();
+  return renderCompras();
+}
+
 async function aprovarCompra(id) {
   if (!confirm('Aprovar este pedido de compra?')) return;
   try {
     await API.compras.aprovar(id);
     showToast('Pedido aprovado', 'success');
-    renderCompras();
+    recarregarCompras();
   } catch (err) { showToast(err.message, 'error'); }
 }
 
@@ -1998,7 +2031,7 @@ async function recusarCompra(id) {
   try {
     await API.compras.recusar(id);
     showToast('Pedido recusado', 'success');
-    renderCompras();
+    recarregarCompras();
   } catch (err) { showToast(err.message, 'error'); }
 }
 
@@ -2007,7 +2040,7 @@ async function receberCompra(id) {
   try {
     await API.compras.receber(id);
     showToast('Pedido recebido. Estoque e financeiro atualizados.', 'success');
-    renderCompras();
+    recarregarCompras();
   } catch (err) { showToast(err.message, 'error'); }
 }
 
@@ -2016,7 +2049,7 @@ async function deleteCompra(id) {
   try {
     await API.compras.delete(id);
     showToast('Pedido excluido', 'success');
-    renderCompras();
+    recarregarCompras();
   } catch (err) { showToast(err.message, 'error'); }
 }
 
@@ -2422,6 +2455,431 @@ async function deleteRhGrade(id) {
     showToast('Grade excluida', 'success');
     renderRhGrades();
   } catch (err) { showToast(err.message, 'error'); }
+}
+
+// ===================== GERENCIA =====================
+const ORC_TABS = [
+  { key: '', label: 'Todos' },
+  { key: 'Aberto', label: 'Aguardando' },
+  { key: 'Aprovado', label: 'Aprovados' },
+  { key: 'Recusado', label: 'Recusados' },
+  { key: 'Convertido', label: 'Convertidos' }
+];
+
+async function renderGerenciaAprovacaoVendas() {
+  const st = pageState['gerencia-aprovacao-vendas'];
+  st.status = st.status || '';
+  const result = await API.gerencia.orcamentos({ search: st.search, page: st.page, limit: st.limit, status: st.status });
+  const r = result.resumo || { total: 0, abertos: 0, aprovados: 0, recusados: 0, convertidos: 0, valor: 0 };
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Aprovação Vendas', 'Dashboard / Gerência / Aprovação Vendas')}
+    <div class="stats-row stats-row-4">
+      <div class="stat-card teal"><h4>Orcamentos</h4><div class="stat-value">${r.total || 0}</div></div>
+      <div class="stat-card orange"><h4>Aguardando</h4><div class="stat-value">${r.abertos || 0}</div></div>
+      <div class="stat-card blue"><h4>Aprovados</h4><div class="stat-value">${r.aprovados || 0}</div></div>
+      <div class="stat-card green"><h4>Valor (ativos)</h4><div class="stat-value">${formatCurrency(r.valor || 0)}</div></div>
+    </div>
+    <div class="fin-tabs">
+      ${ORC_TABS.map(t => {
+        const count = t.key === '' ? r.total : t.key === 'Aberto' ? r.abertos : t.key === 'Aprovado' ? r.aprovados : t.key === 'Recusado' ? r.recusados : r.convertidos;
+        return `<button class="fin-tab ${st.status === t.key ? 'active' : ''}" data-orc-tab="${t.key}">
+          ${escapeHtml(t.label)} <span class="fin-tab-count">${count || 0}</span>
+        </button>`;
+      }).join('')}
+    </div>
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Numero, cliente, observacao..." value="${escapeHtml(st.search || '')}" id="table-search">
+      </div>
+      <span class="toolbar-info">Total de orcamentos: ${result.total}</span>
+      <div class="toolbar-spacer"></div>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr>
+          <th>#</th><th>Status</th><th>Cliente</th><th>Vendedor</th><th>Data</th><th>Total</th><th>Acoes</th>
+        </tr></thead>
+        <tbody id="table-body">${renderGerenciaOrcRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('gerencia-aprovacao-vendas', result, loadGerenciaOrcamentos);
+  document.getElementById('table-new')?.classList.add('hidden');
+  document.querySelectorAll('[data-orc-tab]').forEach(btn => {
+    btn.onclick = () => {
+      st.status = btn.dataset.orcTab;
+      st.page = 1;
+      renderGerenciaAprovacaoVendas();
+    };
+  });
+}
+
+function renderGerenciaOrcRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="7">Nenhum orcamento encontrado</td></tr>';
+  return data.map(o => `<tr>
+    <td>${o.id}</td>
+    <td><span class="status-badge ${statusClass(o.status)}">${escapeHtml(o.status || '-')}</span></td>
+    <td>${escapeHtml(o.cliente_nome || 'Visitante')}</td>
+    <td>${escapeHtml(o.usuario_nome || '-')}</td>
+    <td>${formatDateTime(o.criado_em)}</td>
+    <td>${formatCurrency(o.total)}</td>
+    <td class="actions-cell">
+      <div class="action-menu-wrap">
+        <button class="btn-icon-square btn-menu" onclick="toggleProdutoMenu(event, 'orc${o.id}')" title="Acoes">
+          <i class="fas fa-ellipsis-v"></i>
+        </button>
+        <div class="action-dropdown" id="produto-menu-orc${o.id}">
+          <button type="button" onclick="verGerenciaOrcamento(${o.id})"><i class="fas fa-eye menu-edit"></i> Ver orcamento</button>
+          ${o.status === 'Aberto' ? `<div class="action-sep"></div>
+          <button type="button" onclick="aprovarGerenciaOrcamento(${o.id})"><i class="fas fa-check menu-in"></i> Aprovar</button>
+          <button type="button" class="danger" onclick="recusarGerenciaOrcamento(${o.id})"><i class="fas fa-times"></i> Recusar</button>` : ''}
+          ${o.status === 'Aprovado' ? `<div class="action-sep"></div>
+          <button type="button" onclick="converterGerenciaOrcamento(${o.id})"><i class="fas fa-exchange-alt menu-in"></i> Converter em venda</button>
+          <button type="button" class="danger" onclick="recusarGerenciaOrcamento(${o.id})"><i class="fas fa-times"></i> Recusar</button>` : ''}
+        </div>
+      </div>
+    </td></tr>`).join('');
+}
+
+async function loadGerenciaOrcamentos() {
+  const st = pageState['gerencia-aprovacao-vendas'];
+  const result = await API.gerencia.orcamentos({ search: st.search, page: st.page, limit: st.limit, status: st.status || '' });
+  document.getElementById('table-body').innerHTML = renderGerenciaOrcRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadGerenciaOrcamentos();
+  });
+  const info = document.querySelector('.toolbar-info');
+  if (info) info.textContent = `Total de orcamentos: ${result.total}`;
+}
+
+async function verGerenciaOrcamento(id) {
+  const o = await API.gerencia.orcamento(id);
+  openModal(`Orcamento #${o.id}`, `
+    <p><strong>Cliente:</strong> ${escapeHtml(o.cliente_nome || 'Visitante')}</p>
+    <p><strong>Status:</strong> ${escapeHtml(o.status)} | <strong>Total:</strong> ${formatCurrency(o.total)}</p>
+    <p><strong>Desconto:</strong> ${formatCurrency(o.desconto)} | <strong>Venda:</strong> ${o.venda_id || '-'}</p>
+    <p><strong>Observacao:</strong> ${escapeHtml(o.observacao || '-')}</p>
+    <table class="data-table" style="margin-top:12px">
+      <thead><tr><th>Item</th><th>Qtd</th><th>Preco</th><th>Subtotal</th></tr></thead>
+      <tbody>${(o.itens || []).map(i => `<tr>
+        <td>${escapeHtml(i.descricao || i.nome || '-')}</td>
+        <td>${i.quantidade}</td>
+        <td>${formatCurrency(i.preco_unitario)}</td>
+        <td>${formatCurrency((Number(i.quantidade) || 0) * (Number(i.preco_unitario) || 0))}</td>
+      </tr>`).join('') || '<tr class="empty-row"><td colspan="4">Sem itens</td></tr>'}</tbody>
+    </table>`,
+    '<button class="btn btn-outline modal-close-btn">Fechar</button>');
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+}
+
+async function aprovarGerenciaOrcamento(id) {
+  if (!confirm('Aprovar este orcamento?')) return;
+  try {
+    await API.gerencia.aprovarOrcamento(id);
+    showToast('Orcamento aprovado', 'success');
+    renderGerenciaAprovacaoVendas();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function recusarGerenciaOrcamento(id) {
+  if (!confirm('Recusar este orcamento?')) return;
+  try {
+    await API.gerencia.recusarOrcamento(id);
+    showToast('Orcamento recusado', 'success');
+    renderGerenciaAprovacaoVendas();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function converterGerenciaOrcamento(id) {
+  const forma = prompt('Forma de pagamento da venda (PIX, Dinheiro, Cartao Credito...)', 'PIX');
+  if (!forma) return;
+  try {
+    const r = await API.gerencia.converterOrcamento(id, { forma_pagamento: forma });
+    showToast(r.message || 'Convertido em venda', 'success');
+    renderGerenciaAprovacaoVendas();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function renderGerenciaCompras() {
+  const st = pageState['gerencia-compras'];
+  st.status = st.status || 'Aguardando';
+  pageState.compras = pageState.compras || { page: 1, limit: 15, search: '' };
+  pageState.compras.status = st.status;
+  pageState.compras.search = st.search || '';
+  pageState.compras.page = st.page || 1;
+  pageState.compras.limit = st.limit || 15;
+  await renderCompras();
+}
+
+async function loadGerenciaComprasLista() {
+  const st = pageState['gerencia-compras'];
+  pageState.compras = pageState.compras || { page: 1, limit: 15, search: '' };
+  pageState.compras.search = st.search;
+  pageState.compras.page = st.page;
+  pageState.compras.limit = st.limit;
+  pageState.compras.status = st.status || pageState.compras.status;
+  await loadCompras();
+}
+
+async function renderGerenciaFechamentoCaixas() {
+  const st = pageState['gerencia-fechamento-caixas'];
+  st.conferido = st.conferido || '';
+  const [status, result] = await Promise.all([
+    API.caixa.status().catch(() => ({})),
+    API.gerencia.fechamentos({ search: st.search, page: st.page, limit: st.limit, conferido: st.conferido })
+  ]);
+  const r = result.resumo || { total: 0, pendentes: 0, conferidos: 0, saldo: 0 };
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Fechamento Caixas', 'Dashboard / Gerência / Fechamento Caixas')}
+    <div class="stats-row stats-row-4">
+      <div class="stat-card ${status.aberto ? 'green' : 'orange'}"><h4>Caixa atual</h4><div class="stat-value">${status.aberto ? 'Aberto' : 'Fechado'}</div></div>
+      <div class="stat-card teal"><h4>Fechamentos</h4><div class="stat-value">${r.total || 0}</div></div>
+      <div class="stat-card orange"><h4>Pendentes</h4><div class="stat-value">${r.pendentes || 0}</div></div>
+      <div class="stat-card blue"><h4>Saldo acumulado</h4><div class="stat-value">${formatCurrency(r.saldo || 0)}</div></div>
+    </div>
+    <div class="fin-tabs">
+      <button class="fin-tab ${st.conferido === '' ? 'active' : ''}" data-fech-tab="">Todos</button>
+      <button class="fin-tab ${st.conferido === '0' ? 'active' : ''}" data-fech-tab="0">Pendentes <span class="fin-tab-count">${r.pendentes || 0}</span></button>
+      <button class="fin-tab ${st.conferido === '1' ? 'active' : ''}" data-fech-tab="1">Conferidos <span class="fin-tab-count">${r.conferidos || 0}</span></button>
+    </div>
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Operador, observacao..." value="${escapeHtml(st.search || '')}" id="table-search">
+      </div>
+      <span class="toolbar-info">Total de fechamentos: ${result.total}</span>
+      <div class="toolbar-spacer"></div>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr>
+          <th>#</th><th>Aberto em</th><th>Fechado em</th><th>Abertura</th><th>Vendas</th><th>Entradas</th><th>Saidas</th><th>Saldo</th><th>Status</th><th>Acoes</th>
+        </tr></thead>
+        <tbody id="table-body">${renderGerenciaFechRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('gerencia-fechamento-caixas', result, loadGerenciaFechamentos);
+  document.getElementById('table-new')?.classList.add('hidden');
+  document.querySelectorAll('[data-fech-tab]').forEach(btn => {
+    btn.onclick = () => {
+      st.conferido = btn.dataset.fechTab;
+      st.page = 1;
+      renderGerenciaFechamentoCaixas();
+    };
+  });
+}
+
+function renderGerenciaFechRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="10">Nenhum fechamento registrado. Feche o caixa em Gerenciar caixa.</td></tr>';
+  return data.map(f => `<tr>
+    <td>${f.id}</td>
+    <td>${formatDateTime(f.aberto_em)}</td>
+    <td>${formatDateTime(f.fechado_em)}</td>
+    <td>${formatCurrency(f.valor_inicial)}</td>
+    <td>${formatCurrency(f.total_vendas)}</td>
+    <td>${formatCurrency(f.entradas)}</td>
+    <td>${formatCurrency(f.saidas)}</td>
+    <td>${formatCurrency(f.saldo)}</td>
+    <td><span class="status-badge ${f.conferido ? 'compra-recebido' : 'compra-aguardando'}">${f.conferido ? 'Conferido' : 'Pendente'}</span></td>
+    <td class="actions-cell">
+      ${f.conferido ? escapeHtml(f.conferido_nome || '-') : `<button class="btn btn-primary" onclick="conferirGerenciaFechamento(${f.id})">Conferir</button>`}
+    </td>
+  </tr>`).join('');
+}
+
+async function loadGerenciaFechamentos() {
+  const st = pageState['gerencia-fechamento-caixas'];
+  const result = await API.gerencia.fechamentos({ search: st.search, page: st.page, limit: st.limit, conferido: st.conferido || '' });
+  document.getElementById('table-body').innerHTML = renderGerenciaFechRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadGerenciaFechamentos();
+  });
+  const info = document.querySelector('.toolbar-info');
+  if (info) info.textContent = `Total de fechamentos: ${result.total}`;
+}
+
+async function conferirGerenciaFechamento(id) {
+  if (!confirm('Marcar este fechamento como conferido?')) return;
+  try {
+    await API.gerencia.conferirFechamento(id);
+    showToast('Fechamento conferido', 'success');
+    renderGerenciaFechamentoCaixas();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function renderGerenciaInventario() {
+  const st = pageState['gerencia-inventario'];
+  st.categoria = st.categoria || '';
+  const [result, categorias] = await Promise.all([
+    API.gerencia.inventario({ search: st.search, page: st.page, limit: st.limit, categoria: st.categoria }),
+    API.categorias.all().catch(() => [])
+  ]);
+  const r = result.resumo || { itens: 0, valor: 0, baixo: 0, zerado: 0 };
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Inventário', 'Dashboard / Gerência / Inventário')}
+    <div class="stats-row stats-row-4">
+      <div class="stat-card teal"><h4>Itens</h4><div class="stat-value">${r.itens || 0}</div></div>
+      <div class="stat-card green"><h4>Valor (custo)</h4><div class="stat-value">${formatCurrency(r.valor || 0)}</div></div>
+      <div class="stat-card orange"><h4>Estoque baixo</h4><div class="stat-value">${r.baixo || 0}</div></div>
+      <div class="stat-card red"><h4>Sem estoque</h4><div class="stat-value">${r.zerado || 0}</div></div>
+    </div>
+    <p class="muted">Informe a quantidade contada e salve. O saldo do produto e substituido (mesmo efeito do inventario na tela Estoque).</p>
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Nome, codigo, local..." value="${escapeHtml(st.search || '')}" id="table-search">
+      </div>
+      <select id="ger-inv-categoria" class="toolbar-select">
+        <option value="">Todas as categorias</option>
+        ${categorias.map(c => `<option value="${escapeHtml(c.nome)}" ${st.categoria === c.nome ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
+      </select>
+      <span class="toolbar-info">Total de itens: ${result.total}</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-primary" id="ger-inv-salvar"><i class="fas fa-save"></i> Salvar contagem</button>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr>
+          <th>#</th><th>Item</th><th>Codigo</th><th>Local</th><th>Saldo</th><th>Minimo</th><th>Contado</th>
+        </tr></thead>
+        <tbody id="table-body">${renderGerenciaInvRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('gerencia-inventario', result, loadGerenciaInventario);
+  document.getElementById('table-new')?.classList.add('hidden');
+  document.getElementById('ger-inv-categoria').onchange = () => {
+    st.categoria = document.getElementById('ger-inv-categoria').value;
+    st.page = 1;
+    renderGerenciaInventario();
+  };
+  document.getElementById('ger-inv-salvar').onclick = salvarGerenciaInventario;
+}
+
+function renderGerenciaInvRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="7">Nenhum item para inventariar</td></tr>';
+  return data.map(p => `<tr data-inv-id="${p.id}">
+    <td>${p.id}</td>
+    <td>${escapeHtml(p.nome)}</td>
+    <td>${escapeHtml(p.codigo || '-')}</td>
+    <td>${escapeHtml(p.localizacao || '-')}</td>
+    <td>${p.estoque_origem_id ? (p.estoque_origem_qtd || 0) : (p.estoque || 0)}</td>
+    <td>${p.estoque_minimo || 0}</td>
+    <td><input type="number" min="0" step="0.0001" class="ger-inv-contado" data-id="${p.id}" value="${p.estoque_origem_id ? (p.estoque_origem_qtd || 0) : (p.estoque || 0)}"></td>
+  </tr>`).join('');
+}
+
+async function loadGerenciaInventario() {
+  const st = pageState['gerencia-inventario'];
+  const result = await API.gerencia.inventario({ search: st.search, page: st.page, limit: st.limit, categoria: st.categoria || '' });
+  document.getElementById('table-body').innerHTML = renderGerenciaInvRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadGerenciaInventario();
+  });
+  const info = document.querySelector('.toolbar-info');
+  if (info) info.textContent = `Total de itens: ${result.total}`;
+}
+
+async function salvarGerenciaInventario() {
+  const inputs = [...document.querySelectorAll('.ger-inv-contado')];
+  const itens = inputs.map(el => ({ produto_id: Number(el.dataset.id), contado: parseFloat(el.value) }));
+  if (!itens.length) { showToast('Nenhum item na pagina', 'error'); return; }
+  if (!confirm('Substituir o estoque pela quantidade contada desta pagina?')) return;
+  try {
+    const r = await API.gerencia.salvarInventario({ itens, observacao: 'Inventario gerencia' });
+    showToast(r.message || 'Inventario salvo', 'success');
+    renderGerenciaInventario();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function renderGerenciaConsultaEstoque() {
+  const st = pageState['gerencia-consulta-estoque'];
+  st.categoria = st.categoria || '';
+  st.situacao = st.situacao || '';
+  st.tipo = st.tipo || '';
+  const [result, categorias] = await Promise.all([
+    API.gerencia.estoque({ search: st.search, page: st.page, limit: st.limit, categoria: st.categoria, situacao: st.situacao, tipo: st.tipo }),
+    API.categorias.all().catch(() => [])
+  ]);
+  const r = result.resumo || { itens: 0, valor: 0, baixo: 0, zerado: 0 };
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Consulta Estoque', 'Dashboard / Gerência / Consulta Estoque')}
+    <div class="stats-row stats-row-4">
+      <div class="stat-card teal"><h4>Itens</h4><div class="stat-value">${r.itens || 0}</div></div>
+      <div class="stat-card green"><h4>Valor (custo)</h4><div class="stat-value">${formatCurrency(r.valor || 0)}</div></div>
+      <div class="stat-card orange"><h4>Estoque baixo</h4><div class="stat-value">${r.baixo || 0}</div></div>
+      <div class="stat-card red"><h4>Sem estoque</h4><div class="stat-value">${r.zerado || 0}</div></div>
+    </div>
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Nome, codigo, marca, local..." value="${escapeHtml(st.search || '')}" id="table-search">
+      </div>
+      <select id="ger-est-categoria" class="toolbar-select">
+        <option value="">Todas as categorias</option>
+        ${categorias.map(c => `<option value="${escapeHtml(c.nome)}" ${st.categoria === c.nome ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
+      </select>
+      <select id="ger-est-situacao" class="toolbar-select">
+        <option value="">Todas as situacoes</option>
+        <option value="ok" ${st.situacao === 'ok' ? 'selected' : ''}>Em estoque</option>
+        <option value="baixo" ${st.situacao === 'baixo' ? 'selected' : ''}>Estoque baixo</option>
+        <option value="zerado" ${st.situacao === 'zerado' ? 'selected' : ''}>Sem estoque</option>
+      </select>
+      <select id="ger-est-tipo" class="toolbar-select">
+        <option value="">Todos os tipos</option>
+        <option value="produto" ${st.tipo === 'produto' ? 'selected' : ''}>Produto</option>
+        <option value="pesavel" ${st.tipo === 'pesavel' ? 'selected' : ''}>Pesavel</option>
+        <option value="kit" ${st.tipo === 'kit' ? 'selected' : ''}>Kit</option>
+        <option value="servico" ${st.tipo === 'servico' ? 'selected' : ''}>Servico</option>
+      </select>
+      <span class="toolbar-info">Total de itens: ${result.total}</span>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table estoque-table">
+        <thead><tr>
+          <th>#</th><th>Item</th><th>Codigo</th><th>Categoria</th><th>Local</th><th>Saldo</th><th>Minimo</th><th>Custo</th><th>Valor</th><th>Situacao</th>
+        </tr></thead>
+        <tbody id="table-body">${renderGerenciaEstoqueRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('gerencia-consulta-estoque', result, loadGerenciaEstoque);
+  document.getElementById('table-new')?.classList.add('hidden');
+  document.getElementById('ger-est-categoria').onchange = () => { st.categoria = document.getElementById('ger-est-categoria').value; st.page = 1; loadGerenciaEstoque(); };
+  document.getElementById('ger-est-situacao').onchange = () => { st.situacao = document.getElementById('ger-est-situacao').value; st.page = 1; loadGerenciaEstoque(); };
+  document.getElementById('ger-est-tipo').onchange = () => { st.tipo = document.getElementById('ger-est-tipo').value; st.page = 1; loadGerenciaEstoque(); };
+}
+
+function renderGerenciaEstoqueRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="10">Nenhum item encontrado</td></tr>';
+  return data.map(p => `<tr>
+    <td>${p.id}</td>
+    <td>${escapeHtml(p.nome)}${typeof produtoTipoTag === 'function' ? produtoTipoTag(p) : ''}</td>
+    <td>${escapeHtml(p.codigo || '-')}</td>
+    <td>${escapeHtml(p.categoria || '-')}</td>
+    <td>${escapeHtml(p.localizacao || '-')}</td>
+    <td>${typeof formatEstoqueLista === 'function' ? formatEstoqueLista(p) : (p.estoque || 0)}</td>
+    <td>${p.estoque_minimo || 0}</td>
+    <td>${formatCurrency(p.preco_custo)}</td>
+    <td>${formatCurrency(p.valor_estoque || 0)}</td>
+    <td>${typeof estoqueSituacaoBadge === 'function' ? estoqueSituacaoBadge(p) : escapeHtml(p.situacao_label || p.situacao || '-')}</td>
+  </tr>`).join('');
+}
+
+async function loadGerenciaEstoque() {
+  const st = pageState['gerencia-consulta-estoque'];
+  const result = await API.gerencia.estoque({
+    search: st.search, page: st.page, limit: st.limit,
+    categoria: st.categoria || '', situacao: st.situacao || '', tipo: st.tipo || ''
+  });
+  document.getElementById('table-body').innerHTML = renderGerenciaEstoqueRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadGerenciaEstoque();
+  });
+  const info = document.querySelector('.toolbar-info');
+  if (info) info.textContent = `Total de itens: ${result.total}`;
 }
 
 async function renderEcommerce() {
@@ -5732,6 +6190,7 @@ async function renderManual() {
         <li><strong>Vendas</strong> — Busque por nome ou código de barras, monte o carrinho e finalize (Dinheiro, cartao, PIX ou Fiado). A margem aparece no painel.</li>
         <li><strong>Clientes / Produtos / Fornecedores</strong> — Cadastre, edite e pesquise registros com paginação.</li>
         <li><strong>Estoque</strong> — Pesquise itens por nome, codigo, marca ou local; filtre por categoria, situacao e tipo; registre entrada, ajuste ou inventario.</li>
+        <li><strong>Gerência</strong> — Aprovacao de orcamentos, compras, conferencia de caixa, inventario e consulta de estoque (Administrador e Gerente).</li>
         <li><strong>Ordens de serviço</strong> — Controle status, datas e valor previsto de cada OS.</li>
         <li><strong>Financeiro</strong> — Vendas a vista entram pagas; Fiado vira contas a receber. Taxas de cartao/PIX e sangria/suprimento lancam sozinhos. A aba DRE mostra o resultado por competencia (Receita, CMV, despesas e Lucro), com export TXT/CSV.</li>
         <li><strong>Histórico</strong> — Consulte vendas, imprima cupom/DANFE, emita NFC-e ou cancele (estoque volta automaticamente).</li>

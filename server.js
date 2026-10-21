@@ -10,6 +10,7 @@ const produtosEstoque = require('./produtos/estoque');
 const comprasMod = require('./compras');
 const rhMod = require('./rh');
 const ecomMod = require('./ecommerce');
+const gerenciaMod = require('./gerencia');
 const backupMod = require('./backup');
 const contador = require('./contador');
 const dre = require('./dre');
@@ -186,6 +187,12 @@ function permissoesDaRota(req) {
   if (p.startsWith('/api/compras')) return ['compras'];
   if (p.startsWith('/api/ecommerce')) return ['ecommerce'];
   if (p.startsWith('/api/rh')) return ['rh-funcionarios', 'rh-pontos', 'rh-grades'];
+  if (p.startsWith('/api/gerencia')) {
+    return [
+      'gerencia-aprovacao-vendas', 'gerencia-compras', 'gerencia-fechamento-caixas',
+      'gerencia-inventario', 'gerencia-consulta-estoque'
+    ];
+  }
   if (p.startsWith('/api/produtos') || p.startsWith('/api/promocoes') || p.startsWith('/api/categorias')) {
     return m === 'GET' ? ['produtos', 'vendas'] : ['produtos'];
   }
@@ -313,6 +320,8 @@ function permissoesDoCargo(cargo) {
       'relatorio', 'contador-nfe', 'contador-compras', 'contador-xml',
       'contador-extrato', 'contador-sped',
       'rh-funcionarios', 'rh-pontos', 'rh-grades',
+      'gerencia-aprovacao-vendas', 'gerencia-compras', 'gerencia-fechamento-caixas',
+      'gerencia-inventario', 'gerencia-consulta-estoque',
       'backup', 'impressoras', 'configuracoes', 'manual'
     ];
   }
@@ -703,7 +712,7 @@ app.post('/api/config/apagar-banco', limitarAcaoCritica, (req, res) => {
       const tabelas = [
         'sessoes', 'venda_itens', 'nfce', 'vendas', 'orcamentos', 'estoque_movimentos',
         'promocoes', 'produto_composicao', 'produto_categorias', 'produtos', 'ordens_servico', 'financeiro', 'caixa',
-        'clientes', 'fornecedores', 'usuarios', 'impressoras'
+        'caixa_fechamentos', 'clientes', 'fornecedores', 'usuarios', 'impressoras'
       ];
       for (const t of tabelas) db.exec(`DELETE FROM ${t}`);
       db.exec("UPDATE caixa_status SET aberto = 0, valor_inicial = 0, aberto_em = NULL, fechado_em = NULL, usuario_id = NULL WHERE id = 1");
@@ -713,7 +722,7 @@ app.post('/api/config/apagar-banco', limitarAcaoCritica, (req, res) => {
         if (!isPreservedConfigKey(row.chave)) delCfg.run(row.chave);
       }
       try {
-        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('sessoes','venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produto_composicao','produto_categorias','produtos','ordens_servico','financeiro','caixa','clientes','fornecedores','usuarios','impressoras')");
+        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('sessoes','venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produto_composicao','produto_categorias','produtos','ordens_servico','financeiro','caixa','caixa_fechamentos','clientes','fornecedores','usuarios','impressoras')");
       } catch {}
       db.prepare(`INSERT INTO usuarios (nome, email, senha, cargo, celular, data_nascimento, cpf, tipo_pessoa, ativo)
         VALUES (?,?,?,?,?,?,?,?,1)`).run(
@@ -1677,6 +1686,265 @@ app.get('/api/rh/folhas', (req, res) => {
   }
 });
 
+function paginarLista(lista, page, limit) {
+  const pg = Math.max(1, parseInt(page, 10) || 1);
+  const lim = Math.max(1, Math.min(100, parseInt(limit, 10) || 15));
+  const total = lista.length;
+  const offset = (pg - 1) * lim;
+  return {
+    data: lista.slice(offset, offset + lim),
+    total,
+    page: pg,
+    limit: lim,
+    totalPages: Math.ceil(total / lim) || 1
+  };
+}
+
+app.get('/api/gerencia/orcamentos', (req, res) => {
+  const { search = '', page = 1, limit = 15, status } = req.query;
+  let query = `SELECT o.*, u.nome as usuario_nome FROM orcamentos o
+    LEFT JOIN usuarios u ON o.usuario_id = u.id WHERE 1=1`;
+  const params = [];
+  if (status) {
+    query += ' AND o.status = ?';
+    params.push(gerenciaMod.normalizarStatusOrc(status));
+  }
+  if (search) {
+    query += ' AND (o.cliente_nome LIKE ? OR CAST(o.id AS TEXT) LIKE ? OR IFNULL(o.observacao,\'\') LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s);
+  }
+  query += ' ORDER BY o.criado_em DESC, o.id DESC';
+  const rows = db.prepare(query).all(...params).map(o => ({
+    ...o,
+    itens: gerenciaMod.parseItensOrc(o.itens),
+    status: gerenciaMod.normalizarStatusOrc(o.status)
+  }));
+  const resumo = gerenciaMod.resumirOrcamentos(
+    db.prepare('SELECT status, total FROM orcamentos').all().map(o => ({
+      status: gerenciaMod.normalizarStatusOrc(o.status),
+      total: o.total
+    }))
+  );
+  const pg = paginarLista(rows, page, limit);
+  res.json({ ...pg, resumo });
+});
+
+app.get('/api/gerencia/orcamentos/:id', (req, res) => {
+  const row = db.prepare(`SELECT o.*, u.nome as usuario_nome FROM orcamentos o
+    LEFT JOIN usuarios u ON o.usuario_id = u.id WHERE o.id = ?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Orcamento nao encontrado' });
+  res.json({
+    ...row,
+    itens: gerenciaMod.parseItensOrc(row.itens),
+    status: gerenciaMod.normalizarStatusOrc(row.status)
+  });
+});
+
+app.post('/api/gerencia/orcamentos/:id/aprovar', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM orcamentos WHERE id = ?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Orcamento nao encontrado' });
+    gerenciaMod.transicaoOrc(atual.status, 'Aprovado');
+    db.prepare(`UPDATE orcamentos SET status='Aprovado', aprovado_em=datetime('now','localtime'), aprovado_por=? WHERE id=?`)
+      .run(req.usuario?.id || null, atual.id);
+    res.json({ message: 'Orcamento aprovado', status: 'Aprovado' });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao aprovar' });
+  }
+});
+
+app.post('/api/gerencia/orcamentos/:id/recusar', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM orcamentos WHERE id = ?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Orcamento nao encontrado' });
+    gerenciaMod.transicaoOrc(atual.status, 'Recusado');
+    db.prepare("UPDATE orcamentos SET status='Recusado' WHERE id=?").run(atual.id);
+    res.json({ message: 'Orcamento recusado', status: 'Recusado' });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao recusar' });
+  }
+});
+
+app.post('/api/gerencia/orcamentos/:id/converter', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM orcamentos WHERE id = ?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Orcamento nao encontrado' });
+    if (atual.venda_id) {
+      const err = new Error('Orcamento ja convertido');
+      err.status = 400;
+      throw err;
+    }
+    gerenciaMod.transicaoOrc(atual.status, 'Convertido');
+    const itens = gerenciaMod.itensParaVenda(atual.itens);
+    const forma = String(req.body?.forma_pagamento || 'PIX').trim() || 'PIX';
+    const venda = criarVendaInterna({
+      cliente_id: atual.cliente_id || null,
+      itens,
+      desconto: Number(atual.desconto) || 0,
+      forma_pagamento: forma,
+      usuario_id: req.usuario?.id,
+      exigirCaixa: false,
+      origem: 'gerencia'
+    });
+    db.prepare("UPDATE orcamentos SET status='Convertido', venda_id=? WHERE id=?").run(venda.id, atual.id);
+    res.json({ message: 'Orcamento convertido em venda', status: 'Convertido', venda_id: venda.id, total: venda.total });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao converter' });
+  }
+});
+
+app.get('/api/gerencia/fechamentos', (req, res) => {
+  const { search = '', page = 1, limit = 15, conferido } = req.query;
+  let query = `SELECT f.*, u.nome as usuario_nome, c.nome as conferido_nome
+    FROM caixa_fechamentos f
+    LEFT JOIN usuarios u ON f.usuario_id = u.id
+    LEFT JOIN usuarios c ON f.conferido_por = c.id WHERE 1=1`;
+  const params = [];
+  if (conferido === '1' || conferido === '0') {
+    query += ' AND f.conferido = ?';
+    params.push(Number(conferido));
+  }
+  if (search) {
+    query += ' AND (IFNULL(f.observacao,\'\') LIKE ? OR IFNULL(u.nome,\'\') LIKE ? OR CAST(f.id AS TEXT) LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s);
+  }
+  query += ' ORDER BY f.fechado_em DESC, f.id DESC';
+  const rows = db.prepare(query).all(...params);
+  const resumo = db.prepare(`
+    SELECT COUNT(*) as total,
+      COALESCE(SUM(CASE WHEN conferido=0 THEN 1 ELSE 0 END),0) as pendentes,
+      COALESCE(SUM(CASE WHEN conferido=1 THEN 1 ELSE 0 END),0) as conferidos,
+      COALESCE(SUM(saldo),0) as saldo
+    FROM caixa_fechamentos
+  `).get();
+  const pg = paginarLista(rows, page, limit);
+  res.json({ ...pg, resumo });
+});
+
+app.post('/api/gerencia/fechamentos/:id/conferir', (req, res) => {
+  const atual = db.prepare('SELECT * FROM caixa_fechamentos WHERE id = ?').get(req.params.id);
+  if (!atual) return res.status(404).json({ error: 'Fechamento nao encontrado' });
+  if (atual.conferido) return res.json({ message: 'Fechamento ja conferido', status: 'conferido' });
+  db.prepare(`UPDATE caixa_fechamentos SET conferido=1, conferido_em=datetime('now','localtime'), conferido_por=?, observacao=? WHERE id=?`)
+    .run(req.usuario?.id || null, String(req.body?.observacao || '').trim() || atual.observacao, atual.id);
+  res.json({ message: 'Fechamento conferido', status: 'conferido' });
+});
+
+app.get('/api/gerencia/inventario', (req, res) => {
+  const { search = '', page = 1, limit = 15, categoria } = req.query;
+  let query = `SELECT p.*, f.nome as fornecedor_nome, o.nome as estoque_origem_nome, o.estoque as estoque_origem_qtd
+    FROM produtos p
+    LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+    LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE p.ativo = 1`;
+  const params = [];
+  if (search) {
+    query += ' AND (p.nome LIKE ? OR p.codigo LIKE ? OR IFNULL(p.categoria,\'\') LIKE ? OR IFNULL(p.localizacao,\'\') LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s, s);
+  }
+  if (categoria) {
+    query += ' AND lower(IFNULL(p.categoria,\'\')) = lower(?)';
+    params.push(String(categoria).trim());
+  }
+  query += ' ORDER BY p.nome ASC';
+  const rows = db.prepare(query).all(...params).map(p => {
+    const row = enriquecerProduto(p);
+    row.situacao = produtosEstoque.situacaoDe(row);
+    row.situacao_label = produtosEstoque.rotuloSituacao(row.situacao);
+    row.valor_estoque = produtosEstoque.valorEstoque(row);
+    return row;
+  }).filter(p => {
+    const tipo = produtosTipos.normalizarTipo(p.tipo);
+    return tipo !== 'servico' && tipo !== 'kit' && produtosTipos.controlaEstoque(p, tipo);
+  });
+  const resumo = produtosEstoque.resumir(rows);
+  const pg = paginarLista(rows, page, limit);
+  res.json({ ...pg, resumo });
+});
+
+app.post('/api/gerencia/inventario', (req, res) => {
+  try {
+    const itens = Array.isArray(req.body?.itens) ? req.body.itens : [];
+    if (!itens.length) {
+      const err = new Error('Informe ao menos um item para contar');
+      err.status = 400;
+      throw err;
+    }
+    const usuario_id = req.usuario?.id;
+    const obs = String(req.body?.observacao || 'Inventario gerencia').trim() || 'Inventario gerencia';
+    const txn = db.transaction(() => {
+      let atualizados = 0;
+      for (const it of itens) {
+        const id = Number(it.produto_id || it.id);
+        if (!id) continue;
+        const produto = db.prepare('SELECT * FROM produtos WHERE id = ? AND ativo = 1').get(id);
+        if (!produto) continue;
+        const tipoProd = produtosTipos.normalizarTipo(produto.tipo);
+        if (tipoProd === 'servico' || tipoProd === 'kit' || !produtosTipos.controlaEstoque(produto, tipoProd)) continue;
+        const alvo = produto.estoque_origem_id
+          ? db.prepare('SELECT * FROM produtos WHERE id = ?').get(produto.estoque_origem_id)
+          : produto;
+        if (!alvo) continue;
+        const contado = gerenciaMod.validarContagem(it.contado != null ? it.contado : it.quantidade);
+        const anterior = alvo.estoque || 0;
+        const novo = Math.max(0, contado);
+        db.prepare('UPDATE produtos SET estoque = ? WHERE id = ?').run(novo, alvo.id);
+        db.prepare('INSERT INTO estoque_movimentos (produto_id, tipo, quantidade, estoque_anterior, estoque_novo, observacao, usuario_id) VALUES (?,?,?,?,?,?,?)')
+          .run(alvo.id, 'inventario', novo, anterior, novo, obs, usuario_id || null);
+        atualizados += 1;
+      }
+      if (!atualizados) {
+        const err = new Error('Nenhum item valido para inventario');
+        err.status = 400;
+        throw err;
+      }
+      return atualizados;
+    });
+    const n = txn();
+    res.json({ message: `${n} item(ns) inventariado(s)`, atualizados: n });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha no inventario' });
+  }
+});
+
+app.get('/api/gerencia/estoque', (req, res) => {
+  const { search = '', page = 1, limit = 15, categoria, situacao, tipo } = req.query;
+  let query = `SELECT p.*, f.nome as fornecedor_nome, o.nome as estoque_origem_nome, o.estoque as estoque_origem_qtd
+    FROM produtos p
+    LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+    LEFT JOIN produtos o ON o.id = p.estoque_origem_id
+    WHERE p.ativo = 1`;
+  const params = [];
+  if (search) {
+    query += ' AND (p.nome LIKE ? OR p.codigo LIKE ? OR IFNULL(p.categoria,\'\') LIKE ? OR IFNULL(p.marca,\'\') LIKE ? OR IFNULL(p.referencia,\'\') LIKE ? OR IFNULL(p.localizacao,\'\') LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s, s, s, s);
+  }
+  if (categoria) {
+    query += ' AND lower(IFNULL(p.categoria,\'\')) = lower(?)';
+    params.push(String(categoria).trim());
+  }
+  if (tipo) {
+    query += ' AND lower(IFNULL(p.tipo,\'produto\')) = lower(?)';
+    params.push(String(tipo).trim());
+  }
+  query += ' ORDER BY p.nome ASC';
+  const rows = db.prepare(query).all(...params).map(p => {
+    const row = enriquecerProduto(p);
+    row.situacao = produtosEstoque.situacaoDe(row);
+    row.situacao_label = produtosEstoque.rotuloSituacao(row.situacao);
+    row.valor_estoque = produtosEstoque.valorEstoque(row);
+    return row;
+  });
+  const filtrados = situacao ? rows.filter(p => p.situacao === String(situacao).trim()) : rows;
+  const resumo = produtosEstoque.resumir(filtrados);
+  const pg = paginarLista(filtrados, page, limit);
+  res.json({ ...pg, resumo });
+});
+
 function garantirCategoria(nome) {
   const n = String(nome || '').trim();
   if (!n) return '';
@@ -2350,6 +2618,11 @@ const PERMISSOES_DISPONIVEIS = [
   { key: 'rh-funcionarios', label: 'R.H. Funcionarios' },
   { key: 'rh-pontos', label: 'R.H. Folhas de ponto' },
   { key: 'rh-grades', label: 'R.H. Grades horarias' },
+  { key: 'gerencia-aprovacao-vendas', label: 'Gerencia: Aprovacao Vendas' },
+  { key: 'gerencia-compras', label: 'Gerencia: Compras' },
+  { key: 'gerencia-fechamento-caixas', label: 'Gerencia: Fechamento Caixas' },
+  { key: 'gerencia-inventario', label: 'Gerencia: Inventario' },
+  { key: 'gerencia-consulta-estoque', label: 'Gerencia: Consulta Estoque' },
   { key: 'usuarios', label: 'Usuarios' },
   { key: 'fornecedores', label: 'Fornecedores' },
   { key: 'historico-vendas', label: 'Historico de vendas' },
@@ -2699,8 +2972,31 @@ app.post('/api/caixa/abrir', (req, res) => {
 });
 
 app.post('/api/caixa/fechar', (req, res) => {
-  db.prepare("UPDATE caixa_status SET aberto=0, fechado_em=datetime('now','localtime') WHERE id=1").run();
-  res.json({ message: 'Caixa fechado' });
+  const usuario_id = req.usuario?.id;
+  const status = db.prepare('SELECT * FROM caixa_status WHERE id = 1').get();
+  const desde = status?.aberto === 1 && status.aberto_em ? status.aberto_em : null;
+  const params = desde ? [desde] : [];
+  const filtro = desde ? 'AND criado_em >= ?' : '';
+  const mov = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN tipo='Abertura' THEN valor ELSE 0 END),0) AS abertura,
+      COALESCE(SUM(CASE WHEN tipo='Entrada' THEN valor ELSE 0 END),0) AS entradas,
+      COALESCE(SUM(CASE WHEN tipo='Saída' THEN valor ELSE 0 END),0) AS saidas,
+      COALESCE(SUM(CASE WHEN tipo='Venda realizada' THEN valor ELSE 0 END),0) AS vendas
+    FROM caixa WHERE 1=1 ${filtro}
+  `).get(...params);
+  const calc = gerenciaMod.calcularFechamento(mov);
+  const txn = db.transaction(() => {
+    db.prepare("UPDATE caixa_status SET aberto=0, fechado_em=datetime('now','localtime') WHERE id=1").run();
+    const info = db.prepare(`INSERT INTO caixa_fechamentos
+      (aberto_em, fechado_em, valor_inicial, total_vendas, entradas, saidas, saldo, conferido, usuario_id)
+      VALUES (?, datetime('now','localtime'), ?, ?, ?, ?, ?, 0, ?)`).run(
+      status?.aberto_em || null, calc.abertura, calc.vendas, calc.entradas, calc.saidas, calc.saldo, usuario_id || null
+    );
+    return info.lastInsertRowid;
+  });
+  const id = txn();
+  res.json({ message: 'Caixa fechado', fechamento_id: id, ...calc });
 });
 
 app.get('/api/caixa/movimentos', (req, res) => {
