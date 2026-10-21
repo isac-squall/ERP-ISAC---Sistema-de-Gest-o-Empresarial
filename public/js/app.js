@@ -37,9 +37,34 @@ const PAGES = {
   manual: { title: 'Manual', breadcrumb: 'Dashboard / Manual' }
 };
 
+function isMobileNav() {
+  return window.matchMedia('(max-width: 768px)').matches;
+}
+
+function setSidebarOpen(open) {
+  const side = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (!side) return;
+  if (isMobileNav()) {
+    side.classList.toggle('collapsed', !open);
+    overlay?.classList.toggle('hidden', !open);
+    document.body.classList.toggle('nav-open', !!open);
+  } else {
+    side.classList.toggle('collapsed', !open);
+    overlay?.classList.add('hidden');
+    document.body.classList.remove('nav-open');
+  }
+}
+
+function syncSidebarForViewport() {
+  setSidebarOpen(!isMobileNav());
+}
+
 function irParaLogin() {
   currentUser = null;
   localStorage.removeItem('erp_user');
+  document.body.classList.remove('nav-open');
+  document.getElementById('sidebar-overlay')?.classList.add('hidden');
   document.getElementById('app')?.classList.add('hidden');
   document.getElementById('login-screen')?.classList.remove('hidden');
   document.getElementById('ai-chat')?.classList.add('hidden');
@@ -93,8 +118,16 @@ function bindGlobalEvents() {
     irParaLogin();
   };
 
-  document.getElementById('sidebar-toggle').onclick = () =>
-    document.getElementById('sidebar').classList.toggle('collapsed');
+  document.getElementById('sidebar-toggle').onclick = () => {
+    const side = document.getElementById('sidebar');
+    setSidebarOpen(side.classList.contains('collapsed'));
+  };
+  document.getElementById('sidebar-overlay')?.addEventListener('click', () => setSidebarOpen(false));
+  window.addEventListener('resize', () => {
+    clearTimeout(window.__erpNavResize);
+    window.__erpNavResize = setTimeout(syncSidebarForViewport, 150);
+  });
+  syncSidebarForViewport();
 
   document.querySelectorAll('.nav-item').forEach(el => {
     el.onclick = (e) => {
@@ -103,7 +136,10 @@ function bindGlobalEvents() {
         el.closest('.nav-group')?.classList.toggle('open');
         return;
       }
-      if (el.dataset.page) navigate(el.dataset.page);
+      if (el.dataset.page) {
+        navigate(el.dataset.page);
+        if (isMobileNav()) setSidebarOpen(false);
+      }
     };
   });
 
@@ -233,6 +269,7 @@ function applyMenuPermissions() {
 async function showApp() {
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
+  if (typeof syncSidebarForViewport === 'function') syncSidebarForViewport();
   document.getElementById('user-name').textContent = currentUser.nome;
   document.getElementById('ai-chat')?.classList.remove('hidden');
   applyMenuPermissions();
