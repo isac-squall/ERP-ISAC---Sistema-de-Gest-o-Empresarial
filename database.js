@@ -434,6 +434,30 @@ db.exec(`
 ensureColumn('vendas', 'origem', "TEXT DEFAULT 'pdv'");
 ensureColumn('vendas', 'ecommerce_pedido_id', 'INTEGER');
 ensureColumn('produtos', 'sku_ecommerce', 'TEXT');
+ensureColumn('orcamentos', 'venda_id', 'INTEGER');
+ensureColumn('orcamentos', 'aprovado_em', 'TEXT');
+ensureColumn('orcamentos', 'aprovado_por', 'INTEGER');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS caixa_fechamentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    aberto_em TEXT,
+    fechado_em TEXT,
+    valor_inicial REAL DEFAULT 0,
+    total_vendas REAL DEFAULT 0,
+    entradas REAL DEFAULT 0,
+    saidas REAL DEFAULT 0,
+    saldo REAL DEFAULT 0,
+    conferido INTEGER DEFAULT 0,
+    conferido_em TEXT,
+    conferido_por INTEGER,
+    usuario_id INTEGER,
+    observacao TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_caixa_fechamentos_dia ON caixa_fechamentos(fechado_em);
+`);
 
 (function seedCategorias() {
   const nomes = db.prepare(`
@@ -488,11 +512,18 @@ const PAGINAS_CONTADOR = [
   'contador-nfe', 'contador-compras', 'contador-xml', 'contador-extrato', 'contador-sped'
 ];
 const PAGINAS_RH = ['rh-funcionarios', 'rh-pontos', 'rh-grades'];
+const PAGINAS_GERENCIA = [
+  'gerencia-aprovacao-vendas',
+  'gerencia-compras',
+  'gerencia-fechamento-caixas',
+  'gerencia-inventario',
+  'gerencia-consulta-estoque'
+];
 const PAGINAS_TODAS = [
   'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
   'compras', 'ecommerce',
   'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
-  'relatorio', ...PAGINAS_CONTADOR, ...PAGINAS_RH, 'backup', 'impressoras', 'configuracoes', 'manual'
+  'relatorio', ...PAGINAS_CONTADOR, ...PAGINAS_RH, ...PAGINAS_GERENCIA, 'backup', 'impressoras', 'configuracoes', 'manual'
 ];
 const PERFIS_PADRAO = [
   {
@@ -507,7 +538,7 @@ const PERFIS_PADRAO = [
       'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
       'compras', 'ecommerce',
       'ordens-servico', 'fornecedores', 'historico-vendas', 'relatorio',
-      ...PAGINAS_CONTADOR, ...PAGINAS_RH, 'impressoras', 'manual'
+      ...PAGINAS_CONTADOR, ...PAGINAS_RH, ...PAGINAS_GERENCIA, 'impressoras', 'manual'
     ]
   },
   {
@@ -576,6 +607,13 @@ if (adminPerfil) {
       else perms.push(k);
     }
   }
+  for (const k of PAGINAS_GERENCIA) {
+    if (!perms.includes(k)) {
+      const i = perms.indexOf('backup');
+      if (i >= 0) perms.splice(i, 0, k);
+      else perms.push(k);
+    }
+  }
   db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), adminPerfil.id);
 }
 const gerentePerfil = db.prepare("SELECT id, permissoes FROM perfis WHERE nome = 'Gerente'").get();
@@ -622,6 +660,14 @@ if (gerentePerfil) {
     dirty = true;
   }
   for (const k of PAGINAS_RH) {
+    if (!perms.includes(k)) {
+      const i = perms.indexOf('impressoras');
+      if (i >= 0) perms.splice(i, 0, k);
+      else perms.push(k);
+      dirty = true;
+    }
+  }
+  for (const k of PAGINAS_GERENCIA) {
     if (!perms.includes(k)) {
       const i = perms.indexOf('impressoras');
       if (i >= 0) perms.splice(i, 0, k);

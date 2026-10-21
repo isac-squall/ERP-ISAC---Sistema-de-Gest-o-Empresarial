@@ -582,11 +582,83 @@ module.exports = [
     pagina: 'usuarios',
     titulo: 'O que cada nivel pode ver',
     keywords: 'permissao menu escondido cargo nivel acesso sem permissao',
-    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo, inclusive Contador, Gerenciar Backup e Impressoras. Gerente nao acessa Usuarios, Backup nem Configuracoes (acessa Contador, Impressoras, Pedidos de compras, R.H. e Loja online). Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio, Contador, Backup, Impressoras, Compras, R.H., Loja online nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Admin, Gerente e Vendedor acessam Categorias e Estoque. Sem permissao a tela avisa Sem permissao para esta pagina.`,
+    conteudo: `O menu mostra so as paginas do cargo. Administrador ve tudo, inclusive Contador, Gerencia, Gerenciar Backup e Impressoras. Gerente nao acessa Usuarios, Backup nem Configuracoes (acessa Contador, Gerencia, Impressoras, Pedidos de compras, R.H. e Loja online). Vendedor nao acessa Caixa, Financeiro, Usuarios, Fornecedores, Relatorio, Contador, Gerencia, Backup, Impressoras, Compras, R.H., Loja online nem Configuracoes. Caixa acessa Dashboard, Vendas, Caixa, Clientes, Historico e Manual. Admin, Gerente e Vendedor acessam Categorias e Estoque. Sem permissao a tela avisa Sem permissao para esta pagina.`,
     passos: [
       'Faca login com o usuario do cargo desejado.',
       'Confira o menu lateral filtrado.',
       'Admin altera as telas em Perfil de acesso.'
+    ]
+  },
+  {
+    id: 'gerencia-aprovacao-vendas',
+    modulo: 'Gerencia',
+    sessao: 'Aprovacao Vendas',
+    pagina: 'gerencia-aprovacao-vendas',
+    titulo: 'Aprovar orcamentos e converter em venda',
+    keywords: 'gerencia aprovacao vendas orcamento aprovar recusar converter pdv gerente',
+    conteudo: `Em Gerencia > Aprovacao Vendas o gerente ve os orcamentos gerados no PDV. Status: Aberto, Aprovado, Recusado e Convertido. Aprovar libera converter em venda (baixa estoque, nao exige caixa aberto). Recusar encerra o orcamento. O mesmo orcamento convertido nao gera venda duplicada. Acesso: Administrador e Gerente.`,
+    passos: [
+      'No PDV, gere um Orcamento.',
+      'Abra Gerencia > Aprovacao Vendas.',
+      'Aprove o orcamento aguardando.',
+      'Converta em venda e informe a forma de pagamento.'
+    ]
+  },
+  {
+    id: 'gerencia-compras',
+    modulo: 'Gerencia',
+    sessao: 'Compras',
+    pagina: 'gerencia-compras',
+    titulo: 'Aprovar e receber pedidos de compra',
+    keywords: 'gerencia compras aprovar recusar receber estoque fornecedor pedido',
+    conteudo: `Gerencia > Compras mostra os pedidos de compra para o gerente aprovar, recusar ou receber. Ao receber, entra estoque e lanca Despesa Estoque no Financeiro. A criacao do pedido continua em Pedidos de compras. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Abra Gerencia > Compras.',
+      'Filtre Aguardando.',
+      'Aprove ou recuse o pedido.',
+      'Com status Aprovado, use Receber para entrar estoque.'
+    ]
+  },
+  {
+    id: 'gerencia-fechamento-caixas',
+    modulo: 'Gerencia',
+    sessao: 'Fechamento Caixas',
+    pagina: 'gerencia-fechamento-caixas',
+    titulo: 'Conferir o fechamento do caixa',
+    keywords: 'gerencia fechamento caixa conferir saldo sangria suprimento operador',
+    conteudo: `Ao fechar o caixa em Gerenciar caixa, o ERP grava um fechamento (abertura, vendas, entradas, saidas e saldo). Em Gerencia > Fechamento Caixas o gerente confere os pendentes. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Feche o caixa em Gerenciar caixa.',
+      'Abra Gerencia > Fechamento Caixas.',
+      'Filtre Pendentes e clique em Conferir.'
+    ]
+  },
+  {
+    id: 'gerencia-inventario',
+    modulo: 'Gerencia',
+    sessao: 'Inventario',
+    pagina: 'gerencia-inventario',
+    titulo: 'Contar estoque e substituir o saldo',
+    keywords: 'gerencia inventario contagem estoque saldo minimo produto',
+    conteudo: `Inventario lista itens que controlam estoque. Informe a quantidade contada e Salvar contagem: o saldo e substituido (movimento tipo inventario). Doses alteram a garrafa. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Abra Gerencia > Inventario.',
+      'Ajuste a coluna Contado.',
+      'Clique em Salvar contagem.'
+    ]
+  },
+  {
+    id: 'gerencia-consulta-estoque',
+    modulo: 'Gerencia',
+    sessao: 'Consulta Estoque',
+    pagina: 'gerencia-consulta-estoque',
+    titulo: 'Consultar saldo, custo e situacao do estoque',
+    keywords: 'gerencia consulta estoque saldo baixo zerado custo local categoria',
+    conteudo: `Consulta Estoque e somente leitura: saldo, minimo, custo, valor e situacao (em estoque, baixo, zerado). Filtros por categoria, situacao e tipo. Para movimentar, use Estoque ou Inventario. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Abra Gerencia > Consulta Estoque.',
+      'Pesquise por nome, codigo, marca ou local.',
+      'Filtre categoria, situacao ou tipo.'
     ]
   }
 ];

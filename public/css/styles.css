@@ -475,6 +475,7 @@ a.btn-icon-square { text-decoration: none; }
 }
 .estoque-table td { white-space: nowrap; }
 .estoque-table td:nth-child(3) { white-space: normal; }
+.ger-inv-contado { width: 110px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
 
 /* Pagination */
 .pagination {
