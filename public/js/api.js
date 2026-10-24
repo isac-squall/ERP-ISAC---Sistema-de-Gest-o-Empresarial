@@ -146,6 +146,69 @@ const API = {
     estoque: (p) => API.request(`/gerencia/estoque?${new URLSearchParams(p || {})}`)
   },
 
+  crm: {
+    list: (p) => API.request(`/crm?${new URLSearchParams(p || {})}`),
+    get: (id) => API.request(`/crm/${id}`),
+    create: (d) => API.request('/crm', { method: 'POST', body: d }),
+    update: (id, d) => API.request(`/crm/${id}`, { method: 'PUT', body: d }),
+    mover: (id, etapa) => API.request(`/crm/${id}/mover`, { method: 'POST', body: { etapa } }),
+    ganhar: (id) => API.request(`/crm/${id}/ganhar`, { method: 'POST', body: {} }),
+    perder: (id) => API.request(`/crm/${id}/perder`, { method: 'POST', body: {} }),
+    delete: (id) => API.request(`/crm/${id}`, { method: 'DELETE' })
+  },
+
+  contratos: {
+    list: (p) => API.request(`/contratos?${new URLSearchParams(p || {})}`),
+    get: (id) => API.request(`/contratos/${id}`),
+    create: (d) => API.request('/contratos', { method: 'POST', body: d }),
+    update: (id, d) => API.request(`/contratos/${id}`, { method: 'PUT', body: d }),
+    faturar: (id) => API.request(`/contratos/${id}/faturar`, { method: 'POST', body: {} }),
+    delete: (id) => API.request(`/contratos/${id}`, { method: 'DELETE' })
+  },
+
+  bancos: {
+    list: () => API.request('/bancos'),
+    create: (d) => API.request('/bancos', { method: 'POST', body: d }),
+    update: (id, d) => API.request(`/bancos/${id}`, { method: 'PUT', body: d }),
+    delete: (id) => API.request(`/bancos/${id}`, { method: 'DELETE' }),
+    extrato: (id, p) => API.request(`/bancos/${id}/extrato?${new URLSearchParams(p || {})}`),
+    importar: (id, d) => API.request(`/bancos/${id}/extrato`, { method: 'POST', body: d }),
+    conciliacao: (p) => API.request(`/conciliacao?${new URLSearchParams(p || {})}`),
+    conciliar: (d) => API.request('/conciliacao', { method: 'POST', body: d }),
+    ignorar: (id) => API.request('/conciliacao/ignorar', { method: 'POST', body: { extrato_id: id } }),
+    fluxo: (p) => API.request(`/fluxo?${new URLSearchParams(p || {})}`)
+  },
+
+  nfe: {
+    list: (p) => API.request(`/nfe?${new URLSearchParams(p || {})}`),
+    get: (id) => API.request(`/nfe/${id}`),
+    create: (d) => API.request('/nfe', { method: 'POST', body: d }),
+    emitir: (id) => API.request(`/nfe/${id}/emitir`, { method: 'POST', body: {} }),
+    cancelar: (id) => API.request(`/nfe/${id}/cancelar`, { method: 'POST', body: {} }),
+    xmlUrl: (id) => `/api/nfe/${id}/xml`,
+    daVenda: (id) => API.request(`/nfe/da-venda/${id}`, { method: 'POST', body: {} })
+  },
+
+  nfse: {
+    list: (p) => API.request(`/nfse?${new URLSearchParams(p || {})}`),
+    get: (id) => API.request(`/nfse/${id}`),
+    create: (d) => API.request('/nfse', { method: 'POST', body: d }),
+    emitir: (id) => API.request(`/nfse/${id}/emitir`, { method: 'POST', body: {} }),
+    cancelar: (id) => API.request(`/nfse/${id}/cancelar`, { method: 'POST', body: {} }),
+    xmlUrl: (id) => `/api/nfse/${id}/xml`,
+    daOs: (id) => API.request(`/nfse/da-os/${id}`, { method: 'POST', body: {} })
+  },
+
+  producao: {
+    list: (p) => API.request(`/producao?${new URLSearchParams(p || {})}`),
+    get: (id) => API.request(`/producao/${id}`),
+    create: (d) => API.request('/producao', { method: 'POST', body: d }),
+    iniciar: (id) => API.request(`/producao/${id}/iniciar`, { method: 'POST', body: {} }),
+    concluir: (id) => API.request(`/producao/${id}/concluir`, { method: 'POST', body: {} }),
+    cancelar: (id) => API.request(`/producao/${id}/cancelar`, { method: 'POST', body: {} }),
+    curvaAbc: (p) => API.request(`/curva-abc?${new URLSearchParams(p || {})}`)
+  },
+
   produtos: {
     list: (p) => API.request(`/produtos?${new URLSearchParams(p)}`),
     all: () => API.request('/produtos/all'),

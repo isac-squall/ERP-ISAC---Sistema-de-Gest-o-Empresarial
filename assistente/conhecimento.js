@@ -660,5 +660,95 @@ module.exports = [
       'Pesquise por nome, codigo, marca ou local.',
       'Filtre categoria, situacao ou tipo.'
     ]
+  },
+  {
+    id: 'crm',
+    modulo: 'CRM',
+    sessao: 'Funil de vendas',
+    pagina: 'crm',
+    titulo: 'Gerenciar oportunidades no kanban',
+    keywords: 'crm funil kanban lead qualificacao proposta negociacao ganho perdido pipeline oportunidade',
+    conteudo: `O CRM e um funil kanban: Lead, Qualificacao, Proposta, Negociacao, Ganho e Perdido. Cada card tem titulo, cliente, valor e probabilidade (10/30/50/70/100%). Pipeline soma as abertas; Ponderado multiplica valor pela probabilidade. Ganho e Perdido nao voltam de etapa. Acesso: Administrador, Gerente e Vendedor.`,
+    passos: [
+      'Abra CRM no menu.',
+      'Clique em Nova oportunidade e informe titulo, cliente e valor.',
+      'Use Avancar, Ganhar ou Perder no card.',
+      'Opcional: WhatsApp do cliente no card.'
+    ]
+  },
+  {
+    id: 'contratos',
+    modulo: 'Contratos',
+    sessao: 'Recorrencia',
+    pagina: 'contratos',
+    titulo: 'Cadastrar e faturar contratos',
+    keywords: 'contrato recorrente mrr faturar mensal trimestral anual receita financeiro',
+    conteudo: `Contratos geram receita recorrente. Periodicidade Mensal, Trimestral, Semestral ou Anual. O card MRR converte o valor para mensal. Faturar lanca Receita categoria Contrato no Financeiro (Pendente) e avanca a proxima data. Contrato Ativo nao exclui: encerre antes. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Abra Contratos.',
+      'Novo contrato: cliente, descricao, valor, periodicidade e dia de vencimento.',
+      'Quando chegar a data, clique em Faturar.',
+      'Confira o lancamento em Contas a receber.'
+    ]
+  },
+  {
+    id: 'financeiro-bancos',
+    modulo: 'Financeiro',
+    sessao: 'Contas bancarias',
+    pagina: 'financeiro',
+    titulo: 'Contas, extrato CSV, conciliacao e fluxo',
+    keywords: 'banco extrato csv conciliacao fluxo caixa saldo conta corrente pix',
+    conteudo: `No Financeiro, a aba Contas bancarias cadastra Corrente, Poupanca, Caixa ou Digital e importa CSV (data, descricao, valor; negativo = debito). Conciliacao sugere pares com o mesmo valor e data proxima; conciliar marca o titulo como Pago e atualiza o saldo. Ignorar descarta a linha. Fluxo de caixa projeta 30 dias com titulos Pendentes sobre o saldo das contas ativas.`,
+    passos: [
+      'Financeiro > Contas bancarias > Nova conta.',
+      'Importe o CSV do banco.',
+      'Na aba Conciliacao, aceite a sugestao ou ignore a linha.',
+      'Veja a projecao em Fluxo de caixa.'
+    ]
+  },
+  {
+    id: 'nfe',
+    modulo: 'NF-e',
+    sessao: 'Emissao simulada',
+    pagina: 'nfe',
+    titulo: 'Emitir NF-e em simulacao',
+    keywords: 'nfe nf-e nota fiscal produto xml chave protocolo sefaz rascunho autorizada',
+    conteudo: `A tela NF-e emite modelo 55 em simulacao local (sem SEFAZ). Crie o rascunho com destinatario, CPF/CNPJ e item; Emitir gera chave, protocolo e XML. Cancelar so vale em Autorizada. Para o varejo com certificado, use a NFC-e no PDV. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Abra NF-e.',
+      'Nova nota: cliente ou destinatario avulso, item e valor.',
+      'Clique em Emitir no rascunho.',
+      'Baixe o XML se precisar.'
+    ]
+  },
+  {
+    id: 'nfse',
+    modulo: 'NFS-e',
+    sessao: 'Emissao simulada',
+    pagina: 'nfse',
+    titulo: 'Emitir NFS-e em simulacao',
+    keywords: 'nfse nfs-e nota fiscal servico os prefeitura xml rascunho',
+    conteudo: `A NFS-e cobre prestacao de servico (incluindo OS) em simulacao local, sem prefeitura. O fluxo e o mesmo da NF-e: rascunho, emitir, XML e cancelar. API: POST /api/nfse/da-os/:id. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Abra NFS-e.',
+      'Nova nota com destinatario e valor do servico.',
+      'Emitir para autorizar em simulacao.',
+      'Baixe o XML.'
+    ]
+  },
+  {
+    id: 'producao',
+    modulo: 'Producao',
+    sessao: 'Ordem de producao',
+    pagina: 'producao',
+    titulo: 'Produzir com BOM e curva ABC',
+    keywords: 'producao op ordem bom kit composicao insumo estoque curva abc',
+    conteudo: `Producao cria OP a partir da composicao (BOM) do produto/kit. Status: Aberta, Em producao, Concluida, Cancelada. Concluir exige estoque dos insumos, baixa o consumo e entra o acabado. A aba Curva ABC classifica o faturamento do mes: A ate 80%, B ate 95%, C o restante. Acesso: Administrador e Gerente.`,
+    passos: [
+      'Cadastre um kit com composicao em Produtos.',
+      'Abra Producao > Nova OP e informe quantidade.',
+      'Inicie e depois Conclua (estoque dos insumos precisa cobrir).',
+      'Veja a Curva ABC na outra aba.'
+    ]
   }
 ];

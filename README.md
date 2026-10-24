@@ -1,13 +1,17 @@
 # ERP ISAC - Sistema de Gestao Empresarial
 
-Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, financeiro, ordens de servico e NFC-e.
+Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, financeiro, CRM, contratos, NF-e/NFS-e, producao, ordens de servico e NFC-e.
 
 ## Modulos
 
 - **Dashboard** — Vendas do dia e do mes, clientes, produtos, estoque baixo, OS abertas/prontas, contas e grafico de receita
 - **Realizar vendas** — PDV com carrinho, abas, lupa (Produto / Categoria / Ordem de servico), F7, NFC-e e cupom
 - **Gerenciar caixa** — Abertura, entrada (suprimento), saida (sangria), fechamento e historico
-- **Financeiro** — Contas a pagar e receber, vencidos, saldo previsto e previsao em 7/15/30 dias
+- **Financeiro** — Contas a pagar e receber, vencidos, saldo previsto, previsao 7/15/30 dias, contas bancarias, extrato CSV, conciliacao e fluxo de caixa 30 dias
+- **CRM** — Funil kanban (Lead, Qualificacao, Proposta, Negociacao, Ganho, Perdido) com pipeline ponderado
+- **Contratos** — Recorrencia (mensal a anual), MRR e faturamento que lanca Receita no Financeiro
+- **NF-e / NFS-e** — Emissao simulada local (sem SEFAZ/prefeitura); XML e cancelamento; NF-e da venda e NFS-e da OS
+- **Producao** — Ordem de producao com BOM (composicao do kit), baixa de insumos, entrada do acabado e curva ABC
 - **Clientes** — Cadastro com busca e paginacao; vinculo no PDV (Visitante); botao WhatsApp no telefone
 - **Loja digital** — Vitrine publica em `/loja` com produtos, categorias, carrinho e pedido pelo WhatsApp da loja
 - **Produtos** — Tipos Produto/Servico/Kit/Pesavel, estoque, precos, codigo de barras, promocao, foto, NCM/CFOP, importacao/exportacao e dose (baixa da garrafa)
@@ -54,6 +58,11 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - R.H.: Funcionarios (cargo, salario, grade, admissao), Folhas de ponto (batidas e saldo previsto/trabalhado/extra/banco) e Grades horarias no estilo SimpleDot (Nome, Status, Tipo Comercial/Flexivel, horas dia/semana/mes, limite, intervalo, banco de horas, exigir localizacao/perto). Grade em uso por funcionario ativo nao exclui. Acesso: Administrador e Gerente. Teste: `npm run test:rh`.
 - Loja online / API: webhooks em `/api/webhooks/{woocommerce|shopify|nuvemshop|vtex|mercadolivre|generico}`. Pedido pago faz upsert do cliente, cria venda (`origem=ecommerce`) e baixa estoque pelo SKU (codigo de barras). Cancelamento devolve estoque. Idempotencia por plataforma + id externo. Tokens Bearer `erp_live_...`. Mercado Livre: cole o Access Token; a notificacao nao traz itens — o ERP busca o pedido em `GET /orders/{id}`. Acesso: Administrador e Gerente. Teste: `npm run test:ecommerce`.
 - Gerencia: submenu Aprovacao Vendas (orcamentos do PDV: aprovar, recusar, converter em venda), Compras (aprovar/receber pedidos), Fechamento Caixas (conferir o caixa fechado), Inventario (contagem substitui saldo) e Consulta Estoque (somente leitura). Acesso: Administrador e Gerente. Teste: `npm run test:gerencia`.
+- CRM: kanban de oportunidades (Lead a Perdido), valor e probabilidade por etapa, WhatsApp do cliente. Acesso: Administrador, Gerente e Vendedor. Teste: `npm run test:crm`.
+- Contratos: cadastro recorrente; Faturar gera Receita Pendente no Financeiro e avanca a proxima data. Contrato Ativo nao exclui (encerra antes). Teste: `npm run test:contratos`.
+- Bancos: contas (Corrente/Poupanca/Caixa/Digital), importacao de extrato CSV, conciliacao por valor+data e fluxo de caixa 30 dias. Abas no Financeiro. Teste: `npm run test:bancos`.
+- NF-e e NFS-e: rascunho, autorizacao simulada (chave/protocolo/XML locais) e cancelamento. Sem transmissao a SEFAZ ou prefeitura nesta entrega. Teste: `npm run test:fiscal`.
+- Producao: OP usa a composicao (BOM) do produto/kit; concluir baixa insumos e entra o acabado. Curva ABC pelo faturamento do mes (A ate 80%, B ate 95%, C o restante). Teste: `npm run test:producao`.
 
 ## Produtos: importar e exportar
 
@@ -100,6 +109,44 @@ No **Financeiro**, a aba **DRE** monta o resultado do periodo no regime de **com
 - Fiado entra na Receita Bruta no dia da venda e aparece como **Fiado a receber (a cobrar)** em negativo, com o cliente, para controle de cobranca (o titulo vence em 30 dias)
 - Horario do sistema: America/Sao_Paulo (o filtro Hoje segue o dia no Brasil)
 - Teste: `npm run test:dre` (roda em transacao com rollback, nao altera o banco)
+- **Contas bancarias**: cadastre banco, agencia e saldo inicial; importe CSV (data, descricao, valor)
+- **Conciliacao**: o ERP sugere pares extrato x lancamento (mesmo valor, data ate 5 dias); conciliar marca o titulo como Pago e atualiza o saldo
+- **Fluxo de caixa**: projecao de 30 dias com titulos Pendentes sobre o saldo das contas ativas
+
+## CRM
+
+Menu **CRM** (Administrador, Gerente e Vendedor).
+
+- Colunas: Lead, Qualificacao, Proposta, Negociacao, Ganho, Perdido
+- Cards mostram cliente, valor e probabilidade; Avancar, Ganhar e Perder
+- Pipeline = soma das abertas; Ponderado = valor x probabilidade
+
+## Contratos
+
+Menu **Contratos**. Periodicidade Mensal, Trimestral, Semestral ou Anual.
+
+- **Faturar** lanca Receita categoria Contrato no Financeiro (status Pendente)
+- A proxima data avanca pela periodicidade; se passar do fim, o contrato encerra
+- Contrato Ativo nao exclui: encerre antes
+
+## NF-e e NFS-e
+
+Menus **NF-e** (modelo 55) e **NFS-e**. Emissao **simulada local** (sem SEFAZ/prefeitura).
+
+1. Crie o rascunho (cliente, destinatario, item e valor)
+2. **Emitir** gera chave, protocolo e XML
+3. Baixe o XML; **Cancelar** so em nota autorizada
+4. APIs: `POST /api/nfe/da-venda/:id` e `POST /api/nfse/da-os/:id`
+
+Para o varejo com SEFAZ, use a NFC-e no PDV (certificado A1).
+
+## Producao
+
+Menu **Producao**. A OP usa a composicao do produto (kit/BOM).
+
+- Status: Aberta, Em producao, Concluida, Cancelada
+- **Concluir** exige estoque dos insumos; baixa o consumo e entra o acabado
+- Aba **Curva ABC**: ranking do mes (A ate 80% do faturamento, B ate 95%, C o restante)
 
 ## NFC-e
 
@@ -198,8 +245,8 @@ O menu lateral mostra so as telas do cargo. Perfil de acesso define as paginas.
 | Cargo | Acesso |
 | --- | --- |
 | Administrador | Tudo |
-| Gerente | Sem Usuarios, Backup e Configuracoes (acessa Contador e Impressoras) |
-| Vendedor | Vendas, clientes, produtos, OS e historico |
+| Gerente | Sem Usuarios, Backup e Configuracoes (acessa Contador, Impressoras, CRM, Contratos, NF-e/NFS-e e Producao) |
+| Vendedor | Vendas, clientes, produtos, OS, historico e CRM |
 | Caixa | PDV, caixa, clientes e historico |
 
 ## Login

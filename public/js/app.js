@@ -8,6 +8,11 @@ const PAGES = {
   caixa: { title: 'Gerenciar caixa', breadcrumb: 'Dashboard / Gerenciar caixa' },
   financeiro: { title: 'Financeiro', breadcrumb: 'Dashboard / Financeiro' },
   clientes: { title: 'Clientes', breadcrumb: 'Dashboard / Clientes' },
+  crm: { title: 'CRM', breadcrumb: 'Dashboard / CRM' },
+  contratos: { title: 'Contratos', breadcrumb: 'Dashboard / Contratos' },
+  nfe: { title: 'NF-e', breadcrumb: 'Dashboard / NF-e' },
+  nfse: { title: 'NFS-e', breadcrumb: 'Dashboard / NFS-e' },
+  producao: { title: 'Produção', breadcrumb: 'Dashboard / Produção' },
   produtos: { title: 'Produtos', breadcrumb: 'Dashboard / Produtos' },
   categorias: { title: 'Categorias de estoque', breadcrumb: 'Dashboard / Categorias' },
   estoque: { title: 'Estoque', breadcrumb: 'Dashboard / Estoque' },
@@ -224,13 +229,14 @@ const GERENCIA_PAGES = [
   'gerencia-inventario',
   'gerencia-consulta-estoque'
 ];
+const OMIE_PAGES = ['crm', 'contratos', 'nfe', 'nfse', 'producao'];
 
 function userPermissoes() {
   const list = currentUser?.permissoes;
   let allowed;
   if (Array.isArray(list) && list.length) allowed = [...list];
   else if (currentUser?.cargo === 'Administrador') {
-    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque', 'compras', 'ecommerce', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, ...RH_PAGES, ...GERENCIA_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
+    allowed = ['dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque', 'compras', 'ecommerce', 'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas', 'relatorio', ...CONTADOR_PAGES, ...RH_PAGES, ...GERENCIA_PAGES, ...OMIE_PAGES, 'backup', 'impressoras', 'configuracoes', 'manual'];
   } else {
     allowed = ['dashboard', 'manual'];
   }
@@ -242,6 +248,9 @@ function userPermissoes() {
       if (!allowed.includes(k)) allowed.push(k);
     }
     for (const k of GERENCIA_PAGES) {
+      if (!allowed.includes(k)) allowed.push(k);
+    }
+    for (const k of OMIE_PAGES) {
       if (!allowed.includes(k)) allowed.push(k);
     }
     if (!allowed.includes('ecommerce')) allowed.push('ecommerce');
@@ -381,6 +390,11 @@ async function renderPage() {
     caixa: renderCaixa,
     financeiro: () => { pageState.financeiro.tab = pageState.financeiro.tab || 'pagar'; return renderFinanceiro(); },
     clientes: renderClientes,
+    crm: renderCrm,
+    contratos: renderContratos,
+    nfe: () => renderNotasFiscais('nfe'),
+    nfse: () => renderNotasFiscais('nfse'),
+    producao: renderProducao,
     produtos: renderProdutos,
     categorias: renderCategorias,
     estoque: renderEstoque,
@@ -709,6 +723,457 @@ async function deleteCliente(id) {
     await API.clientes.delete(id);
     showToast('Cliente excluído', 'success'); renderClientes();
   } catch (err) { showToast(err.message, 'error'); }
+}
+
+const CRM_ETAPAS = ['Lead', 'Qualificacao', 'Proposta', 'Negociacao', 'Ganho', 'Perdido'];
+const CRM_ORIGENS = ['Indicacao', 'WhatsApp', 'Loja', 'Telefone', 'Site', 'Marketplace', 'Visita', 'Outro'];
+
+async function renderCrm() {
+  const st = pageState.crm;
+  st.search = st.search || '';
+  const result = await API.crm.list({ search: st.search });
+  const r = result.resumo || { total: 0, abertas: 0, ganhas: 0, valor_aberto: 0, ponderado: 0 };
+  const kanban = result.kanban || {};
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('CRM', 'Dashboard / CRM')}
+    <div class="stats-row stats-row-5">
+      <div class="stat-card teal"><h4>Oportunidades</h4><div class="stat-value">${r.total || 0}</div></div>
+      <div class="stat-card orange"><h4>Abertas</h4><div class="stat-value">${r.abertas || 0}</div></div>
+      <div class="stat-card green"><h4>Ganhas</h4><div class="stat-value">${r.ganhas || 0}</div></div>
+      <div class="stat-card blue"><h4>Pipeline</h4><div class="stat-value">${formatCurrency(r.valor_aberto || 0)}</div></div>
+      <div class="stat-card"><h4>Ponderado</h4><div class="stat-value">${formatCurrency(r.ponderado || 0)}</div></div>
+    </div>
+    <div class="toolbar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Titulo ou cliente..." value="${escapeHtml(st.search)}" id="crm-search">
+      </div>
+      <span class="toolbar-info">Funil de vendas</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-primary" id="crm-new"><i class="fas fa-plus"></i> Nova oportunidade</button>
+    </div>
+    <div class="kanban">
+      ${CRM_ETAPAS.map(e => {
+        const cards = kanban[e] || [];
+        const soma = cards.reduce((s, o) => s + (Number(o.valor) || 0), 0);
+        return `<div class="kanban-col">
+          <div class="kanban-head">${escapeHtml(e)} <span>${cards.length} · ${formatCurrency(soma)}</span></div>
+          <div class="kanban-list">${cards.map(o => renderCrmCard(o)).join('') || '<div class="kanban-empty">Vazio</div>'}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  document.getElementById('crm-new').onclick = () => showCrmForm();
+  const search = document.getElementById('crm-search');
+  search.oninput = debounce(() => { st.search = search.value; renderCrm(); }, 300);
+}
+
+function renderCrmCard(o) {
+  const tel = o.cliente_telefone ? `<button type="button" class="btn-icon" title="WhatsApp" onclick="abrirWhatsappCliente(${JSON.stringify(String(o.cliente_telefone))})"><i class="fab fa-whatsapp"></i></button>` : '';
+  const next = CRM_ETAPAS[CRM_ETAPAS.indexOf(o.etapa) + 1];
+  const aberta = ['Lead', 'Qualificacao', 'Proposta', 'Negociacao'].includes(o.etapa);
+  return `<div class="kanban-card">
+    <strong>${escapeHtml(o.titulo)}</strong>
+    <span>${escapeHtml(o.cliente_cadastro || o.cliente_nome || 'Sem cliente')}</span>
+    <span class="kanban-valor">${formatCurrency(o.valor)} · ${o.probabilidade || 0}%</span>
+    <div class="kanban-actions">
+      ${tel}
+      <button class="btn-icon edit" title="Editar" onclick="showCrmForm(${o.id})"><i class="fas fa-edit"></i></button>
+      ${aberta && next && next !== 'Ganho' && next !== 'Perdido' ? `<button class="btn-icon" title="Avancar" onclick="crmMover(${o.id}, '${next}')"><i class="fas fa-arrow-right"></i></button>` : ''}
+      ${aberta ? `<button class="btn-icon" title="Ganhar" onclick="crmGanhar(${o.id})"><i class="fas fa-check"></i></button>
+      <button class="btn-icon delete" title="Perder" onclick="crmPerder(${o.id})"><i class="fas fa-times"></i></button>` : ''}
+    </div>
+  </div>`;
+}
+
+async function crmMover(id, etapa) {
+  try { await API.crm.mover(id, etapa); showToast('Etapa atualizada', 'success'); renderCrm(); }
+  catch (err) { showToast(err.message, 'error'); }
+}
+async function crmGanhar(id) {
+  try { await API.crm.ganhar(id); showToast('Oportunidade ganha', 'success'); renderCrm(); }
+  catch (err) { showToast(err.message, 'error'); }
+}
+async function crmPerder(id) {
+  if (!confirm('Marcar como perdida?')) return;
+  try { await API.crm.perder(id); showToast('Oportunidade perdida', 'success'); renderCrm(); }
+  catch (err) { showToast(err.message, 'error'); }
+}
+
+async function showCrmForm(id) {
+  let data = {};
+  const clientes = await API.clientes.all().catch(() => []);
+  if (id) data = await API.crm.get(id);
+  openModal(id ? 'Editar oportunidade' : 'Nova oportunidade', `
+    <form id="entity-form">
+      <div class="form-group"><label>Titulo *</label><input name="titulo" value="${escapeHtml(data.titulo || '')}" required></div>
+      <div class="form-row">
+        <div class="form-group"><label>Cliente</label>
+          <select name="cliente_id">
+            <option value="">—</option>
+            ${clientes.map(c => `<option value="${c.id}" ${Number(data.cliente_id) === c.id ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>Nome (se avulso)</label><input name="cliente_nome" value="${escapeHtml(data.cliente_nome || '')}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Valor</label><input name="valor" type="number" step="0.01" min="0" value="${data.valor || 0}"></div>
+        <div class="form-group"><label>Etapa</label>
+          <select name="etapa">${CRM_ETAPAS.map(e => `<option ${data.etapa === e ? 'selected' : ''}>${e}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Origem</label>
+          <select name="origem">${CRM_ORIGENS.map(e => `<option ${data.origem === e ? 'selected' : ''}>${e}</option>`).join('')}</select>
+        </div>
+        <div class="form-group"><label>Previsao</label><input name="previsao_fechamento" type="date" value="${toInputDate(data.previsao_fechamento)}"></div>
+      </div>
+      <div class="form-group"><label>Observacao</label><textarea name="observacao" rows="2">${escapeHtml(data.observacao || '')}</textarea></div>
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
+  document.getElementById('entity-save').onclick = async () => {
+    const f = document.getElementById('entity-form');
+    const body = Object.fromEntries(new FormData(f).entries());
+    body.valor = Number(body.valor) || 0;
+    body.cliente_id = body.cliente_id ? Number(body.cliente_id) : null;
+    try {
+      if (id) await API.crm.update(id, body);
+      else await API.crm.create(body);
+      closeModal(); showToast('Salvo', 'success'); renderCrm();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+const CTR_STATUS = ['Ativo', 'Pausado', 'Encerrado'];
+const CTR_PERIOD = ['Mensal', 'Trimestral', 'Semestral', 'Anual'];
+
+async function renderContratos() {
+  const st = pageState.contratos;
+  st.status = st.status || '';
+  const result = await API.contratos.list({ search: st.search, page: st.page, limit: st.limit, status: st.status });
+  const r = result.resumo || { total: 0, ativos: 0, mrr: 0, pausados: 0 };
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Contratos', 'Dashboard / Contratos')}
+    <div class="stats-row stats-row-4">
+      <div class="stat-card teal"><h4>Contratos</h4><div class="stat-value">${r.total || 0}</div></div>
+      <div class="stat-card green"><h4>Ativos</h4><div class="stat-value">${r.ativos || 0}</div></div>
+      <div class="stat-card blue"><h4>MRR</h4><div class="stat-value">${formatCurrency(r.mrr || 0)}</div></div>
+      <div class="stat-card orange"><h4>Pausados</h4><div class="stat-value">${r.pausados || 0}</div></div>
+    </div>
+    <div class="fin-tabs">
+      ${[{ key: '', label: 'Todos' }, ...CTR_STATUS.map(s => ({ key: s, label: s }))].map(t =>
+        `<button class="fin-tab ${st.status === t.key ? 'active' : ''}" data-ctr-tab="${t.key}">${escapeHtml(t.label)}</button>`
+      ).join('')}
+    </div>
+    ${renderTableToolbar(st.search, `Total: ${result.total}`, 'Novo contrato')}
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Status</th><th>Cliente</th><th>Descricao</th><th>Valor</th><th>Periodo</th><th>Proximo</th><th>Acoes</th></tr></thead>
+        <tbody id="table-body">${renderContratosRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('contratos', result, loadContratos);
+  document.getElementById('table-new').onclick = () => showContratoForm();
+  document.querySelectorAll('[data-ctr-tab]').forEach(btn => {
+    btn.onclick = () => { st.status = btn.dataset.ctrTab; st.page = 1; renderContratos(); };
+  });
+}
+
+function renderContratosRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="8">Nenhum contrato</td></tr>';
+  return data.map(c => `<tr>
+    <td>${c.id}</td>
+    <td><span class="status-badge ${statusClass(c.status === 'Ativo' ? 'Recebido' : c.status === 'Pausado' ? 'Aguardando' : 'Recusado')}">${escapeHtml(c.status)}</span></td>
+    <td>${escapeHtml(c.cliente_nome || '-')}</td>
+    <td>${escapeHtml(c.descricao)}</td>
+    <td>${formatCurrency(c.valor)}</td>
+    <td>${escapeHtml(c.periodicidade)}</td>
+    <td>${formatDate(c.proximo_faturamento)}</td>
+    <td class="actions-cell">
+      ${c.status === 'Ativo' ? `<button class="btn-icon" title="Faturar" onclick="faturarContrato(${c.id})"><i class="fas fa-file-invoice-dollar"></i></button>` : ''}
+      <button class="btn-icon edit" onclick="showContratoForm(${c.id})"><i class="fas fa-edit"></i></button>
+      ${c.status !== 'Encerrado' ? `<button class="btn-icon" title="Encerrar" onclick="encerrarContrato(${c.id})"><i class="fas fa-stop"></i></button>` : ''}
+    </td></tr>`).join('');
+}
+
+async function loadContratos() {
+  const st = pageState.contratos;
+  const result = await API.contratos.list({ search: st.search, page: st.page, limit: st.limit, status: st.status });
+  document.getElementById('table-body').innerHTML = renderContratosRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadContratos();
+  });
+}
+
+async function faturarContrato(id) {
+  try { await API.contratos.faturar(id); showToast('Fatura gerada no Financeiro', 'success'); renderContratos(); }
+  catch (err) { showToast(err.message, 'error'); }
+}
+async function encerrarContrato(id) {
+  if (!confirm('Encerrar este contrato?')) return;
+  try { await API.contratos.update(id, { status: 'Encerrado' }); showToast('Encerrado', 'success'); renderContratos(); }
+  catch (err) { showToast(err.message, 'error'); }
+}
+
+async function showContratoForm(id) {
+  let data = { periodicidade: 'Mensal', dia_vencimento: 10, status: 'Ativo' };
+  const clientes = await API.clientes.all().catch(() => []);
+  if (id) data = await API.contratos.get(id);
+  openModal(id ? 'Editar contrato' : 'Novo contrato', `
+    <form id="entity-form">
+      <div class="form-group"><label>Cliente *</label>
+        <select name="cliente_id" required>
+          <option value="">Selecione</option>
+          ${clientes.map(c => `<option value="${c.id}" ${Number(data.cliente_id) === c.id ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Descricao *</label><input name="descricao" value="${escapeHtml(data.descricao || '')}" required></div>
+      <div class="form-row">
+        <div class="form-group"><label>Valor</label><input name="valor" type="number" step="0.01" min="0" value="${data.valor || 0}"></div>
+        <div class="form-group"><label>Periodicidade</label>
+          <select name="periodicidade">${CTR_PERIOD.map(p => `<option ${data.periodicidade === p ? 'selected' : ''}>${p}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Inicio</label><input name="inicio" type="date" value="${toInputDate(data.inicio) || hojeLocalIso()}"></div>
+        <div class="form-group"><label>Dia vencimento</label><input name="dia_vencimento" type="number" min="1" max="28" value="${data.dia_vencimento || 10}"></div>
+      </div>
+      <div class="form-group"><label>Observacao</label><textarea name="observacao" rows="2">${escapeHtml(data.observacao || '')}</textarea></div>
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
+  document.getElementById('entity-save').onclick = async () => {
+    const body = Object.fromEntries(new FormData(document.getElementById('entity-form')).entries());
+    body.valor = Number(body.valor) || 0;
+    body.cliente_id = Number(body.cliente_id);
+    body.dia_vencimento = Number(body.dia_vencimento) || 10;
+    try {
+      if (id) await API.contratos.update(id, body);
+      else await API.contratos.create(body);
+      closeModal(); showToast('Salvo', 'success'); renderContratos();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function renderNotasFiscais(tipo) {
+  const key = tipo === 'nfse' ? 'nfse' : 'nfe';
+  const api = API[key];
+  const titulo = key === 'nfse' ? 'NFS-e' : 'NF-e';
+  const st = pageState[key];
+  st.status = st.status || '';
+  const result = await api.list({ search: st.search, page: st.page, limit: st.limit, status: st.status });
+  const r = result.resumo || { total: 0, autorizadas: 0, rascunhos: 0, valor: 0 };
+  document.getElementById('content').innerHTML = `
+    ${pageHeader(titulo, 'Dashboard / ' + titulo)}
+    <div class="stats-row stats-row-4">
+      <div class="stat-card teal"><h4>Notas</h4><div class="stat-value">${r.total || 0}</div></div>
+      <div class="stat-card green"><h4>Autorizadas</h4><div class="stat-value">${r.autorizadas || 0}</div></div>
+      <div class="stat-card orange"><h4>Rascunhos</h4><div class="stat-value">${r.rascunhos || 0}</div></div>
+      <div class="stat-card blue"><h4>Valor</h4><div class="stat-value">${formatCurrency(r.valor || 0)}</div></div>
+    </div>
+    <p class="muted">Emissao em simulacao local (sem SEFAZ/prefeitura). Use para treinar o fluxo; ative certificado na NFC-e para o varejo.</p>
+    ${renderTableToolbar(st.search, `Total: ${result.total}`, 'Nova nota')}
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Numero</th><th>Status</th><th>Destinatario</th><th>Total</th><th>Chave</th><th>Acoes</th></tr></thead>
+        <tbody id="table-body">${renderNotasRows(result.data, key)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents(key, result, () => loadNotas(key));
+  document.getElementById('table-new').onclick = () => showNotaForm(key);
+}
+
+function renderNotasRows(data, key) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="7">Nenhuma nota</td></tr>';
+  return data.map(n => `<tr>
+    <td>${n.id}</td><td>${n.numero || '-'}</td>
+    <td><span class="status-badge ${statusClass(n.status === 'Autorizada' ? 'Recebido' : n.status === 'Cancelada' ? 'Recusado' : 'Aguardando')}">${escapeHtml(n.status)}</span></td>
+    <td>${escapeHtml(n.destinatario_nome || n.cliente_nome || '-')}</td>
+    <td>${formatCurrency(n.total)}</td>
+    <td class="mono">${escapeHtml((n.chave || '').slice(0, 20) || '-')}</td>
+    <td class="actions-cell">
+      ${n.status === 'Rascunho' ? `<button class="btn-icon" title="Emitir" onclick="emitirNota('${key}',${n.id})"><i class="fas fa-paper-plane"></i></button>` : ''}
+      ${n.xml ? `<a class="btn-icon" href="${API[key].xmlUrl(n.id)}" title="XML"><i class="fas fa-file-code"></i></a>` : ''}
+      ${n.status === 'Autorizada' ? `<button class="btn-icon delete" title="Cancelar" onclick="cancelarNota('${key}',${n.id})"><i class="fas fa-ban"></i></button>` : ''}
+    </td></tr>`).join('');
+}
+
+async function loadNotas(key) {
+  const st = pageState[key];
+  const result = await API[key].list({ search: st.search, page: st.page, limit: st.limit, status: st.status });
+  document.getElementById('table-body').innerHTML = renderNotasRows(result.data, key);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadNotas(key);
+  });
+}
+
+async function emitirNota(key, id) {
+  try { await API[key].emitir(id); showToast('Nota autorizada (simulacao)', 'success'); renderNotasFiscais(key); }
+  catch (err) { showToast(err.message, 'error'); }
+}
+async function cancelarNota(key, id) {
+  if (!confirm('Cancelar esta nota?')) return;
+  try { await API[key].cancelar(id); showToast('Cancelada', 'success'); renderNotasFiscais(key); }
+  catch (err) { showToast(err.message, 'error'); }
+}
+
+async function showNotaForm(key) {
+  const clientes = await API.clientes.all().catch(() => []);
+  openModal(key === 'nfse' ? 'Nova NFS-e' : 'Nova NF-e', `
+    <form id="entity-form">
+      <div class="form-group"><label>Cliente</label>
+        <select name="cliente_id" id="nota-cliente">
+          <option value="">Avulso</option>
+          ${clientes.map(c => `<option value="${c.id}" data-doc="${escapeHtml(c.cpf_cnpj || '')}" data-nome="${escapeHtml(c.nome)}" data-uf="${escapeHtml(c.estado || '')}">${escapeHtml(c.nome)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Destinatario *</label><input name="destinatario_nome" id="nota-nome" required></div>
+        <div class="form-group"><label>CPF/CNPJ *</label><input name="destinatario_doc" id="nota-doc" required></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>UF</label><input name="destinatario_uf" id="nota-uf" maxlength="2"></div>
+        <div class="form-group"><label>Natureza</label><input name="natureza" value="${key === 'nfse' ? 'Prestacao de servicos' : 'Venda de mercadoria'}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Descricao do item *</label><input name="item_desc" required></div>
+        <div class="form-group"><label>Valor *</label><input name="item_valor" type="number" step="0.01" min="0" required></div>
+      </div>
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
+  document.getElementById('nota-cliente').onchange = (e) => {
+    const opt = e.target.selectedOptions[0];
+    if (!opt || !opt.value) return;
+    document.getElementById('nota-nome').value = opt.dataset.nome || '';
+    document.getElementById('nota-doc').value = opt.dataset.doc || '';
+    document.getElementById('nota-uf').value = opt.dataset.uf || '';
+  };
+  document.getElementById('entity-save').onclick = async () => {
+    const f = document.getElementById('entity-form');
+    const body = Object.fromEntries(new FormData(f).entries());
+    body.cliente_id = body.cliente_id ? Number(body.cliente_id) : null;
+    body.itens = [{ descricao: body.item_desc, quantidade: 1, preco_unitario: Number(body.item_valor) || 0 }];
+    try {
+      await API[key].create(body);
+      closeModal(); showToast('Rascunho salvo', 'success'); renderNotasFiscais(key);
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function renderProducao() {
+  const st = pageState.producao;
+  st.tab = st.tab || 'ops';
+  if (st.tab === 'abc') return renderCurvaAbc();
+  st.status = st.status || '';
+  const result = await API.producao.list({ search: st.search, page: st.page, limit: st.limit, status: st.status });
+  const r = result.resumo || { total: 0, abertas: 0, producao: 0, concluidas: 0 };
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Producao', 'Dashboard / Producao')}
+    <div class="stats-row stats-row-4">
+      <div class="stat-card teal"><h4>OPs</h4><div class="stat-value">${r.total || 0}</div></div>
+      <div class="stat-card orange"><h4>Abertas</h4><div class="stat-value">${r.abertas || 0}</div></div>
+      <div class="stat-card blue"><h4>Em producao</h4><div class="stat-value">${r.producao || 0}</div></div>
+      <div class="stat-card green"><h4>Concluidas</h4><div class="stat-value">${r.concluidas || 0}</div></div>
+    </div>
+    <div class="fin-tabs">
+      <button class="fin-tab active" id="op-tab-ops">Ordens de producao</button>
+      <button class="fin-tab" id="op-tab-abc">Curva ABC</button>
+    </div>
+    ${renderTableToolbar(st.search, `Total: ${result.total}`, 'Nova OP')}
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Status</th><th>Produto</th><th>Qtd</th><th>Criada</th><th>Acoes</th></tr></thead>
+        <tbody id="table-body">${renderOpRows(result.data)}</tbody>
+      </table>
+      <div id="table-pagination"></div>
+    </div>`;
+  bindTableEvents('producao', result, loadProducao);
+  document.getElementById('table-new').onclick = () => showOpForm();
+  document.getElementById('op-tab-abc').onclick = () => { st.tab = 'abc'; renderProducao(); };
+}
+
+function renderOpRows(data) {
+  if (!data.length) return '<tr class="empty-row"><td colspan="6">Nenhuma OP</td></tr>';
+  return data.map(o => `<tr>
+    <td>${o.id}</td>
+    <td><span class="status-badge ${statusClass(o.status === 'Concluida' ? 'Recebido' : o.status === 'Cancelada' ? 'Recusado' : o.status === 'Em producao' ? 'Aprovado' : 'Aguardando')}">${escapeHtml(o.status)}</span></td>
+    <td>${escapeHtml(o.produto_nome || '-')}</td>
+    <td>${o.quantidade}</td>
+    <td>${formatDateTime(o.criado_em)}</td>
+    <td class="actions-cell">
+      ${o.status === 'Aberta' ? `<button class="btn-icon" title="Iniciar" onclick="opAcao('iniciar',${o.id})"><i class="fas fa-play"></i></button>` : ''}
+      ${o.status === 'Em producao' ? `<button class="btn-icon" title="Concluir" onclick="opAcao('concluir',${o.id})"><i class="fas fa-check"></i></button>` : ''}
+      ${o.status === 'Aberta' || o.status === 'Em producao' ? `<button class="btn-icon delete" title="Cancelar" onclick="opAcao('cancelar',${o.id})"><i class="fas fa-ban"></i></button>` : ''}
+    </td></tr>`).join('');
+}
+
+async function loadProducao() {
+  const st = pageState.producao;
+  const result = await API.producao.list({ search: st.search, page: st.page, limit: st.limit, status: st.status });
+  document.getElementById('table-body').innerHTML = renderOpRows(result.data);
+  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
+    st.page = p; st.limit = l; loadProducao();
+  });
+}
+
+async function opAcao(acao, id) {
+  try {
+    if (acao === 'iniciar') await API.producao.iniciar(id);
+    else if (acao === 'concluir') await API.producao.concluir(id);
+    else {
+      if (!confirm('Cancelar OP?')) return;
+      await API.producao.cancelar(id);
+    }
+    showToast('OK', 'success'); renderProducao();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function showOpForm() {
+  const produtos = await API.produtos.all().catch(() => []);
+  openModal('Nova ordem de producao', `
+    <form id="entity-form">
+      <div class="form-group"><label>Produto acabado *</label>
+        <select name="produto_id" required>
+          <option value="">Selecione (kit ou produto com composicao)</option>
+          ${produtos.map(p => `<option value="${p.id}">${escapeHtml(p.nome)} (${escapeHtml(p.codigo || '')})</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Quantidade *</label><input name="quantidade" type="number" step="0.0001" min="0.0001" value="1" required></div>
+      <div class="form-group"><label>Observacao</label><textarea name="observacao" rows="2"></textarea></div>
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
+  document.getElementById('entity-save').onclick = async () => {
+    const body = Object.fromEntries(new FormData(document.getElementById('entity-form')).entries());
+    body.produto_id = Number(body.produto_id);
+    body.quantidade = Number(body.quantidade);
+    try {
+      await API.producao.create(body);
+      closeModal(); showToast('OP criada', 'success'); renderProducao();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function renderCurvaAbc() {
+  const st = pageState.producao;
+  const abc = await API.producao.curvaAbc({});
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Producao', 'Dashboard / Producao')}
+    <div class="fin-tabs">
+      <button class="fin-tab" id="op-tab-ops">Ordens de producao</button>
+      <button class="fin-tab active" id="op-tab-abc">Curva ABC</button>
+    </div>
+    <p class="muted">Classificacao pelo faturamento do mes: A ate 80%, B ate 95%, C o restante.</p>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Produto</th><th>Qtd</th><th>Valor</th><th>%</th><th>Acum.</th><th>Classe</th></tr></thead>
+        <tbody>${(abc.data || []).map(r => `<tr>
+          <td>${r.posicao}</td><td>${escapeHtml(r.nome)}</td><td>${r.quantidade}</td>
+          <td>${formatCurrency(r.valor)}</td><td>${r.percentual}%</td><td>${r.acumulado}%</td>
+          <td><span class="status-badge ${r.classe === 'A' ? 'compra-recebido' : r.classe === 'B' ? 'compra-aprovado' : 'compra-aguardando'}">${r.classe}</span></td>
+        </tr>`).join('') || '<tr class="empty-row"><td colspan="7">Sem vendas no periodo</td></tr>'}</tbody>
+      </table>
+    </div>`;
+  document.getElementById('op-tab-ops').onclick = () => { st.tab = 'ops'; renderProducao(); };
 }
 
 // ===================== PRODUTOS =====================
@@ -4544,10 +5009,33 @@ function finPrevisaoCard(titulo, dados) {
     </div>`;
 }
 
+function finTabsHtml(active) {
+  const tabs = [
+    ['pagar', 'fa-file-invoice-dollar', 'Contas a pagar'],
+    ['receber', 'fa-hand-holding-usd', 'Contas a receber'],
+    ['bancos', 'fa-university', 'Contas bancarias'],
+    ['conciliacao', 'fa-balance-scale', 'Conciliacao'],
+    ['fluxo', 'fa-water', 'Fluxo de caixa'],
+    ['dre', 'fa-chart-pie', 'DRE']
+  ];
+  return `<div class="fin-tabs">${tabs.map(([k, ico, lab]) =>
+    `<button class="fin-tab ${active === k ? 'active' : ''}" data-fin-tab="${k}"><i class="fas ${ico}"></i> ${lab}</button>`
+  ).join('')}</div>`;
+}
+
+function bindFinTabs(st) {
+  document.querySelectorAll('[data-fin-tab]').forEach(btn => {
+    btn.onclick = () => { st.tab = btn.dataset.finTab; st.page = 1; renderFinanceiro(); };
+  });
+}
+
 async function renderFinanceiro() {
   const st = pageState.financeiro;
   st.tab = st.tab || 'pagar';
   if (st.tab === 'dre') return renderFinanceiroDre();
+  if (st.tab === 'bancos') return renderFinanceiroBancos();
+  if (st.tab === 'conciliacao') return renderFinanceiroConciliacao();
+  if (st.tab === 'fluxo') return renderFinanceiroFluxo();
   const tipo = finTabTipo();
   const [stats, result] = await Promise.all([
     API.financeiro.stats(),
@@ -4584,19 +5072,7 @@ async function renderFinanceiro() {
       ${finPrevisaoCard('Previsao 15 dias', stats.previsao15 || { entradas: 0, saidas: 0, saldo: 0 })}
       ${finPrevisaoCard('Previsao 30 dias', stats.previsao30 || { entradas: 0, saidas: 0, saldo: 0 })}
     </div>
-    <div class="fin-tabs">
-      <button class="fin-tab ${isPagar ? 'active' : ''}" id="fin-tab-pagar">
-        <i class="fas fa-file-invoice-dollar"></i> Contas a pagar
-        <span class="fin-tab-count">${stats.qtd_pagar || 0}</span>
-      </button>
-      <button class="fin-tab ${!isPagar ? 'active' : ''}" id="fin-tab-receber">
-        <i class="fas fa-hand-holding-usd"></i> Contas a receber
-        <span class="fin-tab-count">${stats.qtd_receber || 0}</span>
-      </button>
-      <button class="fin-tab" id="fin-tab-dre">
-        <i class="fas fa-chart-pie"></i> DRE
-      </button>
-    </div>
+    ${finTabsHtml(st.tab)}
     <div class="toolbar">
       <div class="search-box">
         <i class="fas fa-search"></i>
@@ -4621,15 +5097,7 @@ async function renderFinanceiro() {
     </div>`;
   bindTableEvents('financeiro', result, loadFinanceiro);
   document.getElementById('table-new').onclick = () => showFinanceiroForm();
-  document.getElementById('fin-tab-pagar').onclick = () => {
-    st.tab = 'pagar'; st.page = 1; st.search = ''; renderFinanceiro();
-  };
-  document.getElementById('fin-tab-receber').onclick = () => {
-    st.tab = 'receber'; st.page = 1; st.search = ''; renderFinanceiro();
-  };
-  document.getElementById('fin-tab-dre').onclick = () => {
-    st.tab = 'dre'; renderFinanceiro();
-  };
+  bindFinTabs(st);
 }
 
 function drePeriodoParams(st) {
@@ -4677,11 +5145,7 @@ async function renderFinanceiroDre() {
   const presets = [['hoje', 'Hoje'], ['7dias', '7 dias'], ['30dias', '30 dias'], ['mes', 'Mes'], ['ano', 'Ano']];
   document.getElementById('content').innerHTML = `
     ${pageHeader('Financeiro', 'Dashboard / <a href="#" onclick="navigate(\'financeiro\');return false">Financeiro</a> / DRE')}
-    <div class="fin-tabs">
-      <button class="fin-tab" id="fin-tab-pagar"><i class="fas fa-file-invoice-dollar"></i> Contas a pagar</button>
-      <button class="fin-tab" id="fin-tab-receber"><i class="fas fa-hand-holding-usd"></i> Contas a receber</button>
-      <button class="fin-tab active" id="fin-tab-dre"><i class="fas fa-chart-pie"></i> DRE</button>
-    </div>
+    ${finTabsHtml('dre')}
     <div class="contador-filters">
       <div class="rep-presets">
         ${presets.map(([k, lab]) => `<button type="button" class="rep-preset ${st.periodo === k ? 'active' : ''}" data-periodo="${k}">${lab}</button>`).join('')}
@@ -4745,9 +5209,7 @@ async function renderFinanceiroDre() {
         <ul>${(d.ignorados || []).map(x => `<li>${escapeHtml(x.tipo)} · ${escapeHtml(x.descricao)} · ${formatCurrency(x.valor)}</li>`).join('')}</ul>
       </div>` : ''}`;
 
-  document.getElementById('fin-tab-pagar').onclick = () => { st.tab = 'pagar'; st.page = 1; renderFinanceiro(); };
-  document.getElementById('fin-tab-receber').onclick = () => { st.tab = 'receber'; st.page = 1; renderFinanceiro(); };
-  document.getElementById('fin-tab-dre').onclick = () => renderFinanceiro();
+  bindFinTabs(st);
   document.querySelectorAll('.rep-preset').forEach(btn => {
     btn.onclick = () => {
       st.periodo = btn.dataset.periodo;
@@ -4764,6 +5226,221 @@ async function renderFinanceiroDre() {
   };
   document.getElementById('dre-txt').onclick = () => baixarContadorUrl(API.dre.txtUrl(drePeriodoParams(st)));
   document.getElementById('dre-csv').onclick = () => baixarContadorUrl(API.dre.csvUrl(drePeriodoParams(st)));
+}
+
+const BANCO_TIPOS = ['Corrente', 'Poupanca', 'Caixa', 'Digital'];
+
+async function renderFinanceiroBancos() {
+  const st = pageState.financeiro;
+  const result = await API.bancos.list();
+  const contas = result.data || [];
+  const saldo = contas.reduce((s, c) => s + (Number(c.saldo_atual) || 0), 0);
+  st.contaId = st.contaId || (contas[0] && contas[0].id);
+  const conta = contas.find(c => c.id === Number(st.contaId));
+  let extrato = { data: [] };
+  if (conta) {
+    extrato = await API.bancos.extrato(conta.id, {}).catch(() => ({ data: [] }));
+  }
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Financeiro', 'Dashboard / Financeiro / Contas bancarias')}
+    ${finTabsHtml('bancos')}
+    <div class="stats-row stats-row-4">
+      <div class="stat-card teal"><h4>Contas</h4><div class="stat-value">${contas.length}</div></div>
+      <div class="stat-card green"><h4>Saldo atual</h4><div class="stat-value">${formatCurrency(saldo)}</div></div>
+    </div>
+    <div class="toolbar">
+      <span class="toolbar-info">Contas cadastradas</span>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-primary" id="banco-new"><i class="fas fa-plus"></i> Nova conta</button>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Nome</th><th>Banco</th><th>Agencia</th><th>Conta</th><th>Tipo</th><th>Saldo</th><th>Acoes</th></tr></thead>
+        <tbody>${contas.map(c => `<tr>
+          <td>${c.id}</td><td>${escapeHtml(c.nome)}</td><td>${escapeHtml(c.banco || '-')}</td>
+          <td>${escapeHtml(c.agencia || '-')}</td><td>${escapeHtml(c.conta || '-')}</td>
+          <td>${escapeHtml(c.tipo)}</td><td>${formatCurrency(c.saldo_atual)}</td>
+          <td class="actions-cell">
+            <button class="btn-icon" title="Extrato" onclick="abrirExtratoBanco(${c.id})"><i class="fas fa-list"></i></button>
+            <button class="btn-icon edit" onclick="showBancoForm(${c.id})"><i class="fas fa-edit"></i></button>
+          </td></tr>`).join('') || '<tr class="empty-row"><td colspan="8">Nenhuma conta</td></tr>'}</tbody>
+      </table>
+    </div>
+    ${conta ? `
+    <h3 style="margin:16px 0 8px">Extrato · ${escapeHtml(conta.nome)}</h3>
+    <div class="toolbar">
+      <select id="banco-conta-sel">${contas.map(c => `<option value="${c.id}" ${c.id === conta.id ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}</select>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-outline" id="banco-csv"><i class="fas fa-file-csv"></i> Importar CSV</button>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>Data</th><th>Descricao</th><th>Valor</th><th>Tipo</th><th>Status</th></tr></thead>
+        <tbody>${(extrato.data || []).map(e => `<tr>
+          <td>${formatDate(e.data)}</td><td>${escapeHtml(e.descricao)}</td>
+          <td class="${Number(e.valor) < 0 ? 'text-danger' : 'text-success'}">${formatCurrency(e.valor)}</td>
+          <td>${escapeHtml(e.tipo)}</td>
+          <td><span class="status-badge ${statusClass(e.status === 'Conciliado' ? 'Recebido' : e.status === 'Ignorado' ? 'Recusado' : 'Aguardando')}">${escapeHtml(e.status)}</span></td>
+        </tr>`).join('') || '<tr class="empty-row"><td colspan="5">Sem lancamentos. Importe um CSV.</td></tr>'}</tbody>
+      </table>
+    </div>` : ''}`;
+  bindFinTabs(st);
+  document.getElementById('banco-new').onclick = () => showBancoForm();
+  const sel = document.getElementById('banco-conta-sel');
+  if (sel) sel.onchange = () => { st.contaId = Number(sel.value); renderFinanceiroBancos(); };
+  const csvBtn = document.getElementById('banco-csv');
+  if (csvBtn) csvBtn.onclick = () => importarCsvBanco(conta.id);
+}
+
+function abrirExtratoBanco(id) {
+  pageState.financeiro.tab = 'bancos';
+  pageState.financeiro.contaId = id;
+  renderFinanceiroBancos();
+}
+
+async function showBancoForm(id) {
+  let data = { tipo: 'Corrente', saldo_inicial: 0 };
+  const contas = id ? ((await API.bancos.list()).data || []) : [];
+  if (id) data = contas.find(c => c.id === id) || data;
+  openModal(id ? 'Editar conta' : 'Nova conta bancaria', `
+    <form id="entity-form">
+      <div class="form-group"><label>Nome *</label><input name="nome" value="${escapeHtml(data.nome || '')}" required></div>
+      <div class="form-row">
+        <div class="form-group"><label>Banco</label><input name="banco" value="${escapeHtml(data.banco || '')}"></div>
+        <div class="form-group"><label>Tipo</label>
+          <select name="tipo">${BANCO_TIPOS.map(t => `<option ${data.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Agencia</label><input name="agencia" value="${escapeHtml(data.agencia || '')}"></div>
+        <div class="form-group"><label>Conta</label><input name="conta" value="${escapeHtml(data.conta || '')}"></div>
+      </div>
+      ${id ? '' : `<div class="form-group"><label>Saldo inicial</label><input name="saldo_inicial" type="number" step="0.01" value="${data.saldo_inicial || 0}"></div>`}
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
+  document.getElementById('entity-save').onclick = async () => {
+    const body = Object.fromEntries(new FormData(document.getElementById('entity-form')).entries());
+    body.saldo_inicial = Number(body.saldo_inicial) || 0;
+    try {
+      if (id) await API.bancos.update(id, body);
+      else await API.bancos.create(body);
+      closeModal(); showToast('Salvo', 'success'); renderFinanceiroBancos();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+function importarCsvBanco(contaId) {
+  openModal('Importar extrato CSV', `
+    <p class="muted">Colunas: data, descricao, valor (separador virgula ou ponto-e-virgula). Valor negativo = debito.</p>
+    <form id="entity-form">
+      <div class="form-group"><label>CSV</label><textarea name="csv" rows="10" required placeholder="data;descricao;valor"></textarea></div>
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Importar</button>`);
+  document.getElementById('entity-save').onclick = async () => {
+    const csv = document.getElementById('entity-form').csv.value;
+    try {
+      const r = await API.bancos.importar(contaId, { csv });
+      closeModal(); showToast(r.message || 'Importado', 'success'); renderFinanceiroBancos();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+}
+
+async function renderFinanceiroConciliacao() {
+  const st = pageState.financeiro;
+  const contas = ((await API.bancos.list()).data || []).filter(c => c.ativo !== 0);
+  st.contaId = st.contaId || (contas[0] && contas[0].id);
+  if (!st.contaId) {
+    document.getElementById('content').innerHTML = `
+      ${pageHeader('Financeiro', 'Dashboard / Financeiro / Conciliacao')}
+      ${finTabsHtml('conciliacao')}
+      <p class="muted">Cadastre uma conta bancaria na aba Contas bancarias.</p>`;
+    bindFinTabs(st);
+    return;
+  }
+  const data = await API.bancos.conciliacao({ conta_id: st.contaId });
+  const sugestoes = data.sugestoes || [];
+  const mapaFin = new Map((data.lancamentos || []).map(l => [l.id, l]));
+  const mapaExt = new Map((data.extratos || []).map(e => [e.id, e]));
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Financeiro', 'Dashboard / Financeiro / Conciliacao')}
+    ${finTabsHtml('conciliacao')}
+    <div class="toolbar">
+      <div class="form-group" style="margin:0">
+        <label>Conta</label>
+        <select id="conc-conta">${contas.map(c => `<option value="${c.id}" ${Number(st.contaId) === c.id ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}</select>
+      </div>
+      <span class="toolbar-info">${(data.extratos || []).length} em aberto · ${sugestoes.length} sugestao(oes)</span>
+    </div>
+    ${sugestoes.length ? `<div>${sugestoes.map(s => {
+      const e = mapaExt.get(s.extrato_id) || {};
+      const l = mapaFin.get(s.financeiro_id) || {};
+      return `<div class="conciliacao-sugestao">
+        <span>${formatDate(e.data)} ${escapeHtml(e.descricao || '')} ${formatCurrency(e.valor)} · ${escapeHtml(l.descricao || '')} (${s.score}%)</span>
+        <button class="btn btn-primary" onclick="conciliarLinha(${s.extrato_id},${s.financeiro_id})">Conciliar</button>
+      </div>`;
+    }).join('')}</div>` : ''}
+    <div class="conciliacao-grid">
+      <div class="table-wrapper">
+        <h3>Extrato aberto</h3>
+        <table class="data-table">
+          <thead><tr><th>Data</th><th>Descricao</th><th>Valor</th><th></th></tr></thead>
+          <tbody>${(data.extratos || []).map(e => `<tr>
+            <td>${formatDate(e.data)}</td><td>${escapeHtml(e.descricao)}</td>
+            <td>${formatCurrency(e.valor)}</td>
+            <td><button class="btn-icon" title="Ignorar" onclick="ignorarExtrato(${e.id})"><i class="fas fa-eye-slash"></i></button></td>
+          </tr>`).join('') || '<tr class="empty-row"><td colspan="4">Nada em aberto</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="table-wrapper">
+        <h3>Lancamentos sem conciliar</h3>
+        <table class="data-table">
+          <thead><tr><th>#</th><th>Descricao</th><th>Valor</th><th>Venc.</th></tr></thead>
+          <tbody>${(data.lancamentos || []).map(l => `<tr>
+            <td>${l.id}</td><td>${escapeHtml(l.descricao)}</td>
+            <td>${formatCurrency(l.valor)}</td><td>${formatDate(l.data_vencimento)}</td>
+          </tr>`).join('') || '<tr class="empty-row"><td colspan="4">Nenhum</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+  bindFinTabs(st);
+  document.getElementById('conc-conta').onchange = (e) => { st.contaId = Number(e.target.value); renderFinanceiroConciliacao(); };
+}
+
+async function conciliarLinha(extratoId, financeiroId) {
+  try { await API.bancos.conciliar({ extrato_id: extratoId, financeiro_id: financeiroId }); showToast('Conciliado', 'success'); renderFinanceiroConciliacao(); }
+  catch (err) { showToast(err.message, 'error'); }
+}
+async function ignorarExtrato(id) {
+  try { await API.bancos.ignorar(id); showToast('Ignorado', 'success'); renderFinanceiroConciliacao(); }
+  catch (err) { showToast(err.message, 'error'); }
+}
+
+async function renderFinanceiroFluxo() {
+  const st = pageState.financeiro;
+  const fluxo = await API.bancos.fluxo({ dias: 30 });
+  const dias = fluxo.dias || [];
+  const maxAbs = Math.max(1, ...dias.map(d => Math.abs(d.saldo)));
+  document.getElementById('content').innerHTML = `
+    ${pageHeader('Financeiro', 'Dashboard / Financeiro / Fluxo de caixa')}
+    ${finTabsHtml('fluxo')}
+    <div class="stats-row stats-row-4">
+      <div class="stat-card teal"><h4>Saldo inicial</h4><div class="stat-value">${formatCurrency(fluxo.saldo_inicial)}</div></div>
+      <div class="stat-card green"><h4>Saldo em 30 dias</h4><div class="stat-value">${formatCurrency(dias.length ? dias[dias.length - 1].saldo : fluxo.saldo_inicial)}</div></div>
+    </div>
+    <p class="muted">Projecao com titulos pendentes (vencimento) sobre o saldo das contas ativas.</p>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>Data</th><th>Entradas</th><th>Saidas</th><th>Saldo</th><th></th></tr></thead>
+        <tbody>${dias.map(d => `<tr>
+          <td>${formatDate(d.data)}</td>
+          <td class="text-success">${formatCurrency(d.entradas)}</td>
+          <td class="text-danger">${formatCurrency(d.saidas)}</td>
+          <td>${formatCurrency(d.saldo)}</td>
+          <td><div class="fluxo-bar-wrap"><div class="fluxo-bar" style="width:${Math.min(100, Math.abs(d.saldo) / maxAbs * 100)}%;background:${d.saldo < 0 ? 'var(--danger)' : 'var(--success)'}"></div></div></td>
+        </tr>`).join('') || '<tr class="empty-row"><td colspan="5">Sem dados</td></tr>'}</tbody>
+      </table>
+    </div>`;
+  bindFinTabs(st);
 }
 
 function renderDreDetalhes(data) {
@@ -6229,7 +6906,11 @@ async function renderManual() {
         <li><strong>Estoque</strong> — Pesquise itens por nome, codigo, marca ou local; filtre por categoria, situacao e tipo; registre entrada, ajuste ou inventario.</li>
         <li><strong>Gerência</strong> — Aprovacao de orcamentos, compras, conferencia de caixa, inventario e consulta de estoque (Administrador e Gerente).</li>
         <li><strong>Ordens de serviço</strong> — Controle status, datas e valor previsto de cada OS.</li>
-        <li><strong>Financeiro</strong> — Vendas a vista entram pagas; Fiado vira contas a receber. Taxas de cartao/PIX e sangria/suprimento lancam sozinhos. A aba DRE mostra o resultado por competencia (Receita, CMV, despesas e Lucro), com export TXT/CSV.</li>
+        <li><strong>Financeiro</strong> — Vendas a vista entram pagas; Fiado vira contas a receber. Taxas de cartao/PIX e sangria/suprimento lancam sozinhos. Abas: contas bancarias (CSV), conciliacao, fluxo 30 dias e DRE (competencia, TXT/CSV).</li>
+        <li><strong>CRM</strong> — Funil kanban (Lead a Perdido). Avance, ganhe ou perca a oportunidade.</li>
+        <li><strong>Contratos</strong> — Recorrencia e MRR. Faturar lanca Receita no Financeiro. Encerre antes de excluir.</li>
+        <li><strong>NF-e / NFS-e</strong> — Rascunho e autorizacao simulada (sem SEFAZ/prefeitura). Baixe o XML.</li>
+        <li><strong>Producao</strong> — OP com BOM do kit. Concluir baixa insumos e entra o acabado. Curva ABC do mes.</li>
         <li><strong>Histórico</strong> — Consulte vendas, imprima cupom/DANFE, emita NFC-e ou cancele (estoque volta automaticamente).</li>
         <li><strong>Relatório</strong> — Veja faturamento mensal, produtos mais vendidos e top clientes.</li>
         <li><strong>Gerenciar Backup</strong> — Realize, baixe, restaure ou exclua copias do banco. Verifique atualizacao do aplicativo.</li>

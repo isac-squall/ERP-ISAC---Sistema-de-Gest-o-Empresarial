@@ -11,7 +11,12 @@
     "test:compras": "node compras/test.js",
     "test:rh": "node rh/test.js",
     "test:ecommerce": "node ecommerce/test.js",
-    "test:gerencia": "node gerencia/test.js"
+    "test:gerencia": "node gerencia/test.js",
+    "test:crm": "node crm/test.js",
+    "test:contratos": "node contratos/test.js",
+    "test:bancos": "node bancos/test.js",
+    "test:fiscal": "node fiscal/test.js",
+    "test:producao": "node producao/test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
