@@ -11,6 +11,11 @@ const comprasMod = require('./compras');
 const rhMod = require('./rh');
 const ecomMod = require('./ecommerce');
 const gerenciaMod = require('./gerencia');
+const crmMod = require('./crm');
+const contratosMod = require('./contratos');
+const bancosMod = require('./bancos');
+const fiscalMod = require('./fiscal');
+const producaoMod = require('./producao');
 const backupMod = require('./backup');
 const contador = require('./contador');
 const dre = require('./dre');
@@ -178,6 +183,12 @@ function permissoesDaRota(req) {
   if (p.startsWith('/api/vendas') || p.startsWith('/api/orcamentos')) return ['vendas', 'historico-vendas'];
   if (p.startsWith('/api/financeiro/cliente/')) return ['financeiro', 'vendas', 'caixa'];
   if (p.startsWith('/api/financeiro')) return ['financeiro'];
+  if (p.startsWith('/api/crm')) return ['crm', 'clientes', 'vendas'];
+  if (p.startsWith('/api/contratos')) return ['contratos', 'ordens-servico'];
+  if (p.startsWith('/api/bancos') || p.startsWith('/api/fluxo') || p.startsWith('/api/conciliacao')) return ['financeiro'];
+  if (p.startsWith('/api/nfe')) return ['nfe', 'contador-nfe'];
+  if (p.startsWith('/api/nfse')) return ['nfse', 'ordens-servico'];
+  if (p.startsWith('/api/producao') || p.startsWith('/api/curva-abc')) return ['producao', 'estoque'];
   if (p.startsWith('/api/dre')) return ['financeiro'];
   if (p.startsWith('/api/relatorio')) return ['relatorio'];
   if (p.startsWith('/api/produtos/export') || p.startsWith('/api/produtos/modelo') || p.startsWith('/api/produtos/import')) {
@@ -322,6 +333,7 @@ function permissoesDoCargo(cargo) {
       'rh-funcionarios', 'rh-pontos', 'rh-grades',
       'gerencia-aprovacao-vendas', 'gerencia-compras', 'gerencia-fechamento-caixas',
       'gerencia-inventario', 'gerencia-consulta-estoque',
+      'crm', 'contratos', 'nfe', 'nfse', 'producao',
       'backup', 'impressoras', 'configuracoes', 'manual'
     ];
   }
@@ -817,7 +829,7 @@ app.get('/api/clientes', (req, res) => {
 });
 
 app.get('/api/clientes/all', (req, res) => {
-  res.json(db.prepare('SELECT id, nome FROM clientes WHERE ativo = 1 ORDER BY nome').all());
+  res.json(db.prepare('SELECT id, nome, cpf_cnpj, telefone, estado, cidade FROM clientes WHERE ativo = 1 ORDER BY nome').all());
 });
 
 app.get('/api/clientes/:id', (req, res) => {
@@ -1943,6 +1955,640 @@ app.get('/api/gerencia/estoque', (req, res) => {
   const resumo = produtosEstoque.resumir(filtrados);
   const pg = paginarLista(filtrados, page, limit);
   res.json({ ...pg, resumo });
+});
+
+function cfgEmitente() {
+  const cfg = Object.fromEntries(db.prepare('SELECT chave, valor FROM config').all().map(r => [r.chave, r.valor]));
+  return {
+    cnpj: cfg.nfce_cnpj || cfg.empresa_cnpj || '',
+    razao: cfg.nfce_razao_social || cfg.empresa_nome || 'ERP ISAC',
+    ie: cfg.nfce_ie || '',
+    uf: cfg.nfce_uf || cfg.empresa_estado || 'RN',
+    cuf: String(cfg.nfce_codigo_municipio || '2410306').slice(0, 2) || '24',
+    ambiente: cfg.nfce_ambiente || 'homologacao',
+    crt: Number(cfg.nfce_crt || 1)
+  };
+}
+
+function proximoNumeroNota(modelo) {
+  const chave = modelo === 'NFS-e' ? 'nfse_numero_atual' : 'nfe_numero_atual';
+  const row = db.prepare('SELECT valor FROM config WHERE chave=?').get(chave);
+  const n = (Number(row?.valor) || 0) + 1;
+  db.prepare("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor")
+    .run(chave, String(n));
+  return n;
+}
+
+function itensDaNota(notaId) {
+  return db.prepare('SELECT * FROM nota_itens WHERE nota_id=?').all(notaId);
+}
+
+function notaCompleta(id) {
+  const n = db.prepare(`SELECT n.*, c.nome as cliente_nome FROM notas_fiscais n
+    LEFT JOIN clientes c ON n.cliente_id = c.id WHERE n.id=?`).get(id);
+  if (!n) return null;
+  n.itens = itensDaNota(id);
+  return n;
+}
+
+// ============ CRM ============
+app.get('/api/crm', (req, res) => {
+  const { search = '', etapa, vendedor_id } = req.query;
+  let query = `SELECT o.*, c.nome as cliente_cadastro, c.telefone as cliente_telefone, u.nome as vendedor_nome
+    FROM crm_oportunidades o
+    LEFT JOIN clientes c ON o.cliente_id = c.id
+    LEFT JOIN usuarios u ON o.vendedor_id = u.id WHERE 1=1`;
+  const params = [];
+  if (etapa) { query += ' AND o.etapa=?'; params.push(crmMod.normalizarEtapa(etapa)); }
+  if (vendedor_id) { query += ' AND o.vendedor_id=?'; params.push(Number(vendedor_id)); }
+  if (search) {
+    query += ' AND (o.titulo LIKE ? OR IFNULL(o.cliente_nome,\'\') LIKE ? OR IFNULL(c.nome,\'\') LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s);
+  }
+  query += ' ORDER BY o.id DESC';
+  const data = db.prepare(query).all(...params);
+  res.json({ data, kanban: crmMod.agruparKanban(data), resumo: crmMod.resumirFunil(data) });
+});
+
+app.get('/api/crm/:id', (req, res) => {
+  const row = db.prepare(`SELECT o.*, c.nome as cliente_cadastro, u.nome as vendedor_nome
+    FROM crm_oportunidades o LEFT JOIN clientes c ON o.cliente_id=c.id
+    LEFT JOIN usuarios u ON o.vendedor_id=u.id WHERE o.id=?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
+  res.json(row);
+});
+
+app.post('/api/crm', (req, res) => {
+  try {
+    const d = crmMod.payloadOportunidade(req.body || {});
+    if (!d.vendedor_id && req.usuario?.id) d.vendedor_id = req.usuario.id;
+    const r = db.prepare(`INSERT INTO crm_oportunidades
+      (titulo, cliente_id, cliente_nome, valor, etapa, probabilidade, origem, vendedor_id, previsao_fechamento, observacao)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+      d.titulo, d.cliente_id, d.cliente_nome, d.valor, d.etapa, d.probabilidade,
+      d.origem, d.vendedor_id, d.previsao_fechamento, d.observacao
+    );
+    res.json({ id: r.lastInsertRowid });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.put('/api/crm/:id', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM crm_oportunidades WHERE id=?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
+    const d = crmMod.payloadOportunidade({ ...atual, ...(req.body || {}) });
+    if (req.body?.etapa && req.body.etapa !== atual.etapa) {
+      d.etapa = crmMod.transicaoEtapa(atual.etapa, req.body.etapa);
+      if (req.body.probabilidade == null) d.probabilidade = crmMod.probabilidadeDaEtapa(d.etapa);
+    }
+    db.prepare(`UPDATE crm_oportunidades SET titulo=?, cliente_id=?, cliente_nome=?, valor=?, etapa=?,
+      probabilidade=?, origem=?, vendedor_id=?, previsao_fechamento=?, observacao=? WHERE id=?`).run(
+      d.titulo, d.cliente_id, d.cliente_nome, d.valor, d.etapa, d.probabilidade,
+      d.origem, d.vendedor_id, d.previsao_fechamento, d.observacao, req.params.id
+    );
+    res.json({ message: 'Oportunidade atualizada', etapa: d.etapa });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/crm/:id/mover', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM crm_oportunidades WHERE id=?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
+    const etapa = crmMod.transicaoEtapa(atual.etapa, req.body?.etapa);
+    const probabilidade = crmMod.probabilidadeDaEtapa(etapa);
+    db.prepare('UPDATE crm_oportunidades SET etapa=?, probabilidade=? WHERE id=?').run(etapa, probabilidade, req.params.id);
+    res.json({ message: 'Etapa atualizada', etapa, probabilidade });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/crm/:id/ganhar', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM crm_oportunidades WHERE id=?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
+    crmMod.transicaoEtapa(atual.etapa, 'Ganho');
+    db.prepare("UPDATE crm_oportunidades SET etapa='Ganho', probabilidade=100 WHERE id=?").run(req.params.id);
+    res.json({ message: 'Oportunidade ganha', etapa: 'Ganho' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/crm/:id/perder', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM crm_oportunidades WHERE id=?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
+    crmMod.transicaoEtapa(atual.etapa, 'Perdido');
+    db.prepare("UPDATE crm_oportunidades SET etapa='Perdido', probabilidade=0 WHERE id=?").run(req.params.id);
+    res.json({ message: 'Oportunidade perdida', etapa: 'Perdido' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.delete('/api/crm/:id', (req, res) => {
+  db.prepare('DELETE FROM crm_oportunidades WHERE id=?').run(req.params.id);
+  res.json({ message: 'Oportunidade removida' });
+});
+
+// ============ CONTRATOS ============
+app.get('/api/contratos', (req, res) => {
+  const { search = '', page = 1, limit = 15, status } = req.query;
+  let query = `SELECT c.*, cl.nome as cliente_nome FROM contratos c
+    LEFT JOIN clientes cl ON c.cliente_id = cl.id WHERE 1=1`;
+  const params = [];
+  if (status) { query += ' AND c.status=?'; params.push(contratosMod.normalizarStatus(status)); }
+  if (search) {
+    query += ' AND (c.descricao LIKE ? OR cl.nome LIKE ? OR CAST(c.id AS TEXT) LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s);
+  }
+  query += ' ORDER BY c.id DESC';
+  const rows = db.prepare(query).all(...params);
+  const pg = paginarLista(rows, page, limit);
+  res.json({ ...pg, resumo: contratosMod.resumirContratos(rows) });
+});
+
+app.get('/api/contratos/:id', (req, res) => {
+  const row = db.prepare(`SELECT c.*, cl.nome as cliente_nome FROM contratos c
+    LEFT JOIN clientes cl ON c.cliente_id=cl.id WHERE c.id=?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Contrato nao encontrado' });
+  row.itens = db.prepare('SELECT * FROM contrato_itens WHERE contrato_id=?').all(row.id);
+  res.json(row);
+});
+
+app.post('/api/contratos', (req, res) => {
+  try {
+    const d = contratosMod.payloadContrato(req.body || {});
+    const cli = db.prepare('SELECT id FROM clientes WHERE id=?').get(d.cliente_id);
+    if (!cli) return res.status(400).json({ error: 'Cliente nao encontrado' });
+    const r = db.prepare(`INSERT INTO contratos
+      (cliente_id, descricao, valor, periodicidade, dia_vencimento, inicio, fim, status, proximo_faturamento, observacao)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+      d.cliente_id, d.descricao, d.valor, d.periodicidade, d.dia_vencimento,
+      d.inicio, d.fim, d.status, d.proximo_faturamento, d.observacao
+    );
+    if (d.itens) {
+      const ins = db.prepare('INSERT INTO contrato_itens (contrato_id, produto_id, descricao, quantidade, preco_unitario, subtotal) VALUES (?,?,?,?,?,?)');
+      for (const it of d.itens) ins.run(r.lastInsertRowid, it.produto_id, it.descricao, it.quantidade, it.preco_unitario, it.subtotal);
+    }
+    res.json({ id: r.lastInsertRowid });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.put('/api/contratos/:id', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM contratos WHERE id=?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Contrato nao encontrado' });
+    const d = contratosMod.payloadContrato({ ...atual, ...(req.body || {}), itens: req.body?.itens });
+    if (req.body?.status && req.body.status !== atual.status) {
+      d.status = contratosMod.transicaoStatus(atual.status, req.body.status);
+    }
+    db.prepare(`UPDATE contratos SET cliente_id=?, descricao=?, valor=?, periodicidade=?, dia_vencimento=?,
+      inicio=?, fim=?, status=?, proximo_faturamento=?, observacao=? WHERE id=?`).run(
+      d.cliente_id, d.descricao, d.valor, d.periodicidade, d.dia_vencimento,
+      d.inicio, d.fim, d.status, d.proximo_faturamento, d.observacao, req.params.id
+    );
+    if (Array.isArray(req.body?.itens)) {
+      db.prepare('DELETE FROM contrato_itens WHERE contrato_id=?').run(req.params.id);
+      const ins = db.prepare('INSERT INTO contrato_itens (contrato_id, produto_id, descricao, quantidade, preco_unitario, subtotal) VALUES (?,?,?,?,?,?)');
+      for (const it of d.itens || []) ins.run(req.params.id, it.produto_id, it.descricao, it.quantidade, it.preco_unitario, it.subtotal);
+    }
+    res.json({ message: 'Contrato atualizado' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/contratos/:id/faturar', (req, res) => {
+  try {
+    const c = db.prepare('SELECT * FROM contratos WHERE id=?').get(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Contrato nao encontrado' });
+    const hoje = hojeIso();
+    contratosMod.podeFaturar(c, hoje);
+    const apos = contratosMod.aposFaturar(c, hoje);
+    const fin = inserirFinanceiro({
+      tipo: 'Receita',
+      categoria: 'Contrato',
+      descricao: `Contrato #${c.id} ${c.descricao}`,
+      valor: c.valor,
+      data_vencimento: hoje,
+      status: 'Pendente',
+      cliente_id: c.cliente_id,
+      origem: 'contrato'
+    });
+    db.prepare('UPDATE financeiro SET contrato_id=? WHERE id=?').run(c.id, fin.lastInsertRowid);
+    db.prepare('UPDATE contratos SET proximo_faturamento=?, ultimo_faturamento=?, status=? WHERE id=?')
+      .run(apos.proximo_faturamento, apos.ultimo_faturamento, apos.status, c.id);
+    res.json({ message: 'Fatura gerada', financeiro_id: fin.lastInsertRowid, proximo_faturamento: apos.proximo_faturamento, status: apos.status });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.delete('/api/contratos/:id', (req, res) => {
+  const c = db.prepare('SELECT status FROM contratos WHERE id=?').get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Contrato nao encontrado' });
+  if (c.status === 'Ativo') return res.status(400).json({ error: 'Encerre o contrato antes de excluir' });
+  db.prepare('DELETE FROM contratos WHERE id=?').run(req.params.id);
+  res.json({ message: 'Contrato removido' });
+});
+
+// ============ BANCOS / CONCILIACAO / FLUXO ============
+app.get('/api/bancos', (req, res) => {
+  const data = db.prepare('SELECT * FROM contas_bancarias ORDER BY ativo DESC, nome').all();
+  res.json({ data });
+});
+
+app.post('/api/bancos', (req, res) => {
+  try {
+    const d = bancosMod.payloadConta(req.body || {});
+    const r = db.prepare(`INSERT INTO contas_bancarias (nome, banco, agencia, conta, tipo, saldo_inicial, saldo_atual, ativo)
+      VALUES (?,?,?,?,?,?,?,?)`).run(d.nome, d.banco, d.agencia, d.conta, d.tipo, d.saldo_inicial, d.saldo_inicial, d.ativo);
+    res.json({ id: r.lastInsertRowid });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.put('/api/bancos/:id', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM contas_bancarias WHERE id=?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Conta nao encontrada' });
+    const d = bancosMod.payloadConta({ ...atual, ...(req.body || {}) });
+    db.prepare('UPDATE contas_bancarias SET nome=?, banco=?, agencia=?, conta=?, tipo=?, ativo=? WHERE id=?')
+      .run(d.nome, d.banco, d.agencia, d.conta, d.tipo, d.ativo, req.params.id);
+    res.json({ message: 'Conta atualizada' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.delete('/api/bancos/:id', (req, res) => {
+  db.prepare('DELETE FROM extrato_bancario WHERE conta_id=?').run(req.params.id);
+  db.prepare('DELETE FROM contas_bancarias WHERE id=?').run(req.params.id);
+  res.json({ message: 'Conta removida' });
+});
+
+app.get('/api/bancos/:id/extrato', (req, res) => {
+  const conta = db.prepare('SELECT * FROM contas_bancarias WHERE id=?').get(req.params.id);
+  if (!conta) return res.status(404).json({ error: 'Conta nao encontrada' });
+  const { status } = req.query;
+  let q = 'SELECT * FROM extrato_bancario WHERE conta_id=?';
+  const params = [req.params.id];
+  if (status) { q += ' AND status=?'; params.push(bancosMod.normalizarStatusExtrato(status)); }
+  q += ' ORDER BY data DESC, id DESC';
+  const data = db.prepare(q).all(...params);
+  res.json({ conta, data });
+});
+
+app.post('/api/bancos/:id/extrato', (req, res) => {
+  try {
+    const conta = db.prepare('SELECT * FROM contas_bancarias WHERE id=?').get(req.params.id);
+    if (!conta) return res.status(404).json({ error: 'Conta nao encontrada' });
+    let linhas = req.body?.linhas;
+    if (!linhas && req.body?.csv) linhas = bancosMod.parseCsvExtrato(req.body.csv);
+    if (!Array.isArray(linhas) || !linhas.length) {
+      linhas = [bancosMod.linhaExtrato(req.body || {})];
+    }
+    const ins = db.prepare(`INSERT INTO extrato_bancario (conta_id, data, descricao, valor, tipo, documento, status)
+      VALUES (?,?,?,?,?,?, 'Aberto')`);
+    const txn = db.transaction(() => {
+      let n = 0;
+      for (const l of linhas) {
+        const row = l.valor != null ? bancosMod.linhaExtrato(l) : l;
+        ins.run(conta.id, row.data, row.descricao, row.valor, row.tipo, row.documento || '');
+        n += 1;
+      }
+      return n;
+    });
+    res.json({ message: `${txn()} linha(s) importada(s)` });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.get('/api/conciliacao', (req, res) => {
+  const contaId = Number(req.query.conta_id);
+  if (!contaId) return res.status(400).json({ error: 'Informe a conta' });
+  const extratos = db.prepare("SELECT * FROM extrato_bancario WHERE conta_id=? AND status='Aberto'").all(contaId);
+  const lanc = db.prepare("SELECT * FROM financeiro WHERE status IN ('Pago','Pendente') AND id NOT IN (SELECT IFNULL(financeiro_id,0) FROM extrato_bancario WHERE financeiro_id IS NOT NULL)").all();
+  res.json({ extratos, lancamentos: lanc, sugestoes: bancosMod.sugerirMatches(extratos, lanc) });
+});
+
+app.post('/api/conciliacao', (req, res) => {
+  try {
+    const extratoId = Number(req.body?.extrato_id);
+    const financeiroId = Number(req.body?.financeiro_id);
+    const ext = db.prepare('SELECT * FROM extrato_bancario WHERE id=?').get(extratoId);
+    if (!ext) return res.status(404).json({ error: 'Linha de extrato nao encontrada' });
+    if (ext.status === 'Conciliado') return res.status(400).json({ error: 'Ja conciliado' });
+    const fin = db.prepare('SELECT * FROM financeiro WHERE id=?').get(financeiroId);
+    if (!fin) return res.status(404).json({ error: 'Lancamento nao encontrado' });
+    db.prepare("UPDATE extrato_bancario SET status='Conciliado', financeiro_id=? WHERE id=?").run(financeiroId, extratoId);
+    if (fin.status === 'Pendente') {
+      db.prepare("UPDATE financeiro SET status='Pago', data_pagamento=? WHERE id=?").run(ext.data, financeiroId);
+    }
+    const conta = db.prepare('SELECT * FROM contas_bancarias WHERE id=?').get(ext.conta_id);
+    const novo = bancosMod.aplicarMovimentoSaldo(conta.saldo_atual, ext.valor);
+    db.prepare('UPDATE contas_bancarias SET saldo_atual=? WHERE id=?').run(novo, conta.id);
+    res.json({ message: 'Conciliado', saldo_atual: novo });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/conciliacao/ignorar', (req, res) => {
+  const ext = db.prepare('SELECT * FROM extrato_bancario WHERE id=?').get(req.body?.extrato_id);
+  if (!ext) return res.status(404).json({ error: 'Linha nao encontrada' });
+  db.prepare("UPDATE extrato_bancario SET status='Ignorado' WHERE id=?").run(ext.id);
+  res.json({ message: 'Ignorado' });
+});
+
+app.get('/api/fluxo', (req, res) => {
+  try {
+    const dias = Number(req.query.dias) || 30;
+    const de = req.query.de || hojeIso();
+    const contas = db.prepare('SELECT COALESCE(SUM(saldo_atual),0) as s FROM contas_bancarias WHERE ativo=1').get();
+    const lanc = db.prepare(`SELECT tipo, valor, data_vencimento FROM financeiro
+      WHERE status='Pendente' AND data_vencimento IS NOT NULL`).all();
+    const fluxo = bancosMod.montarFluxo({
+      saldoInicial: contas.s,
+      de,
+      dias,
+      lancamentos: lanc
+    });
+    res.json(fluxo);
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+// ============ NF-e / NFS-e ============
+function listarNotas(req, modelo) {
+  const { search = '', page = 1, limit = 15, status } = req.query;
+  let query = `SELECT n.*, c.nome as cliente_nome FROM notas_fiscais n
+    LEFT JOIN clientes c ON n.cliente_id = c.id WHERE n.modelo=?`;
+  const params = [modelo];
+  if (status) { query += ' AND n.status=?'; params.push(fiscalMod.normalizarStatus(status)); }
+  if (search) {
+    query += ' AND (IFNULL(n.destinatario_nome,\'\') LIKE ? OR IFNULL(n.chave,\'\') LIKE ? OR CAST(n.numero AS TEXT) LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s);
+  }
+  query += ' ORDER BY n.id DESC';
+  const rows = db.prepare(query).all(...params);
+  const pg = paginarLista(rows, page, limit);
+  return { ...pg, resumo: fiscalMod.resumirNotas(rows) };
+}
+
+function gravarNota(body, modeloFixo) {
+  const emit = cfgEmitente();
+  const d = fiscalMod.payloadNota({ ...body, modelo: modeloFixo || body.modelo, crt: emit.crt, uf_emit: emit.uf });
+  const numero = body.numero ? Number(body.numero) : proximoNumeroNota(d.modelo);
+  const r = db.prepare(`INSERT INTO notas_fiscais
+    (modelo, numero, serie, natureza, venda_id, os_id, contrato_id, cliente_id,
+     destinatario_nome, destinatario_doc, destinatario_ie, destinatario_endereco,
+     destinatario_cidade, destinatario_uf, destinatario_cep, total, status, ambiente)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    d.modelo, numero, d.serie, d.natureza, d.venda_id, d.os_id, d.contrato_id, d.cliente_id,
+    d.destinatario_nome, d.destinatario_doc, d.destinatario_ie, d.destinatario_endereco,
+    d.destinatario_cidade, d.destinatario_uf, d.destinatario_cep, d.total, 'Rascunho', emit.ambiente
+  );
+  const ins = db.prepare('INSERT INTO nota_itens (nota_id, produto_id, descricao, quantidade, preco_unitario, subtotal, ncm, cfop) VALUES (?,?,?,?,?,?,?,?)');
+  for (const it of d.calc.itens) {
+    ins.run(r.lastInsertRowid, null, it.descricao, it.quantidade, it.preco_unitario, it.subtotal, it.ncm, it.cfop);
+  }
+  return r.lastInsertRowid;
+}
+
+function emitirNotaLocal(id) {
+  const nota = notaCompleta(id);
+  if (!nota) { const e = new Error('Nota nao encontrada'); e.status = 404; throw e; }
+  fiscalMod.transicaoStatus(nota.status, 'Autorizada');
+  const emit = cfgEmitente();
+  const calc = fiscalMod.calcularImpostos({
+    itens: nota.itens, crt: emit.crt, ufEmit: emit.uf, ufDest: nota.destinatario_uf, modelo: nota.modelo
+  });
+  const auth = fiscalMod.simularAutorizacao({ ...nota, calc }, emit);
+  db.prepare('UPDATE notas_fiscais SET status=?, chave=?, protocolo=?, xml=? WHERE id=?')
+    .run(auth.status, auth.chave, auth.protocolo, auth.xml, id);
+  return { ...auth, id };
+}
+
+app.get('/api/nfe', (req, res) => res.json(listarNotas(req, '55')));
+app.get('/api/nfse', (req, res) => res.json(listarNotas(req, 'NFS-e')));
+
+app.get('/api/nfe/:id', (req, res) => {
+  const n = notaCompleta(req.params.id);
+  if (!n || n.modelo !== '55') return res.status(404).json({ error: 'NF-e nao encontrada' });
+  res.json(n);
+});
+app.get('/api/nfse/:id', (req, res) => {
+  const n = notaCompleta(req.params.id);
+  if (!n || n.modelo !== 'NFS-e') return res.status(404).json({ error: 'NFS-e nao encontrada' });
+  res.json(n);
+});
+
+app.post('/api/nfe', (req, res) => {
+  try { res.json({ id: gravarNota(req.body || {}, '55') }); }
+  catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+app.post('/api/nfse', (req, res) => {
+  try { res.json({ id: gravarNota(req.body || {}, 'NFS-e') }); }
+  catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/nfe/:id/emitir', (req, res) => {
+  try { res.json(emitirNotaLocal(req.params.id)); }
+  catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+app.post('/api/nfse/:id/emitir', (req, res) => {
+  try { res.json(emitirNotaLocal(req.params.id)); }
+  catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/nfe/:id/cancelar', (req, res) => {
+  try {
+    const n = db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(req.params.id);
+    if (!n) return res.status(404).json({ error: 'Nota nao encontrada' });
+    fiscalMod.transicaoStatus(n.status, 'Cancelada');
+    db.prepare("UPDATE notas_fiscais SET status='Cancelada' WHERE id=?").run(n.id);
+    res.json({ message: 'Nota cancelada' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+app.post('/api/nfse/:id/cancelar', (req, res) => {
+  try {
+    const n = db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(req.params.id);
+    if (!n) return res.status(404).json({ error: 'Nota nao encontrada' });
+    fiscalMod.transicaoStatus(n.status, 'Cancelada');
+    db.prepare("UPDATE notas_fiscais SET status='Cancelada' WHERE id=?").run(n.id);
+    res.json({ message: 'NFS-e cancelada' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.get('/api/nfe/:id/xml', (req, res) => {
+  const n = db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(req.params.id);
+  if (!n?.xml) return res.status(404).json({ error: 'XML nao encontrado' });
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="NFe-${n.chave || n.id}.xml"`);
+  res.send(n.xml);
+});
+app.get('/api/nfse/:id/xml', (req, res) => {
+  const n = db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(req.params.id);
+  if (!n?.xml) return res.status(404).json({ error: 'XML nao encontrado' });
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="NFSe-${n.numero || n.id}.xml"`);
+  res.send(n.xml);
+});
+
+app.post('/api/nfe/da-venda/:id', (req, res) => {
+  try {
+    const venda = db.prepare(`SELECT v.*, c.nome as cliente_nome, c.cpf_cnpj, c.endereco, c.cidade, c.estado
+      FROM vendas v LEFT JOIN clientes c ON v.cliente_id=c.id WHERE v.id=?`).get(req.params.id);
+    if (!venda) return res.status(404).json({ error: 'Venda nao encontrada' });
+    const itens = db.prepare(`SELECT vi.*, COALESCE(p.nome, vi.descricao) as nome, p.ncm, p.cfop
+      FROM venda_itens vi LEFT JOIN produtos p ON vi.produto_id=p.id WHERE vi.venda_id=?`).all(venda.id);
+    const id = gravarNota({
+      modelo: '55',
+      venda_id: venda.id,
+      cliente_id: venda.cliente_id,
+      destinatario_nome: venda.cliente_nome || 'Destinatario',
+      destinatario_doc: venda.cpf_cnpj,
+      destinatario_endereco: venda.endereco,
+      destinatario_cidade: venda.cidade,
+      destinatario_uf: venda.estado,
+      itens: itens.map(i => ({ descricao: i.nome, quantidade: i.quantidade, preco_unitario: i.preco_unitario, ncm: i.ncm, cfop: i.cfop }))
+    }, '55');
+    const auth = emitirNotaLocal(id);
+    res.json({ id, ...auth });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/nfse/da-os/:id', (req, res) => {
+  try {
+    const os = db.prepare(`SELECT o.*, c.nome as cliente_nome, c.cpf_cnpj, c.endereco, c.cidade, c.estado
+      FROM ordens_servico o LEFT JOIN clientes c ON o.cliente_id=c.id WHERE o.id=?`).get(req.params.id);
+    if (!os) return res.status(404).json({ error: 'OS nao encontrada' });
+    const id = gravarNota({
+      modelo: 'NFS-e',
+      os_id: os.id,
+      cliente_id: os.cliente_id,
+      destinatario_nome: os.cliente_nome || 'Tomador',
+      destinatario_doc: os.cpf_cnpj || '00000000000',
+      destinatario_endereco: os.endereco,
+      destinatario_cidade: os.cidade,
+      destinatario_uf: os.estado,
+      natureza: os.solicitacao || 'Prestacao de servicos',
+      itens: [{ descricao: os.solicitacao || os.equipamento || 'Servico', quantidade: 1, preco_unitario: os.valor_previsto || 0 }]
+    }, 'NFS-e');
+    const auth = emitirNotaLocal(id);
+    res.json({ id, ...auth });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+// ============ PRODUCAO ============
+app.get('/api/producao', (req, res) => {
+  const { search = '', page = 1, limit = 15, status } = req.query;
+  let query = `SELECT o.*, p.nome as produto_nome, p.codigo as produto_codigo, u.nome as usuario_nome
+    FROM ordens_producao o
+    LEFT JOIN produtos p ON o.produto_id = p.id
+    LEFT JOIN usuarios u ON o.usuario_id = u.id WHERE 1=1`;
+  const params = [];
+  if (status) { query += ' AND o.status=?'; params.push(producaoMod.normalizarStatus(status)); }
+  if (search) {
+    query += ' AND (p.nome LIKE ? OR p.codigo LIKE ? OR CAST(o.id AS TEXT) LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s);
+  }
+  query += ' ORDER BY o.id DESC';
+  const rows = db.prepare(query).all(...params);
+  const pg = paginarLista(rows, page, limit);
+  res.json({ ...pg, resumo: producaoMod.resumirOps(rows) });
+});
+
+app.get('/api/producao/:id', (req, res) => {
+  const row = db.prepare(`SELECT o.*, p.nome as produto_nome FROM ordens_producao o
+    LEFT JOIN produtos p ON o.produto_id=p.id WHERE o.id=?`).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'OP nao encontrada' });
+  row.itens = db.prepare(`SELECT i.*, p.nome as item_nome, p.estoque FROM ordem_producao_itens i
+    LEFT JOIN produtos p ON i.item_id=p.id WHERE i.op_id=?`).all(row.id);
+  res.json(row);
+});
+
+app.post('/api/producao', (req, res) => {
+  try {
+    const d = producaoMod.payloadOp(req.body || {});
+    const prod = db.prepare('SELECT * FROM produtos WHERE id=?').get(d.produto_id);
+    if (!prod) return res.status(400).json({ error: 'Produto nao encontrado' });
+    let bom = (req.body?.itens || []).map(it => ({ item_id: it.item_id || it.produto_id, quantidade: it.quantidade, descricao: it.descricao }));
+    if (!bom.length) {
+      bom = db.prepare(`SELECT item_id, quantidade, p.nome as descricao FROM produto_composicao c
+        LEFT JOIN produtos p ON p.id=c.item_id WHERE c.produto_id=?`).all(d.produto_id);
+    }
+    const precisa = producaoMod.explodirBom(bom, d.quantidade);
+    const r = db.prepare('INSERT INTO ordens_producao (produto_id, quantidade, status, observacao, usuario_id) VALUES (?,?,?,?,?)')
+      .run(d.produto_id, d.quantidade, 'Aberta', d.observacao, req.usuario?.id || null);
+    const ins = db.prepare('INSERT INTO ordem_producao_itens (op_id, item_id, quantidade) VALUES (?,?,?)');
+    for (const it of precisa) ins.run(r.lastInsertRowid, it.item_id, it.quantidade);
+    res.json({ id: r.lastInsertRowid, itens: precisa.length });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/producao/:id/iniciar', (req, res) => {
+  try {
+    const op = db.prepare('SELECT * FROM ordens_producao WHERE id=?').get(req.params.id);
+    if (!op) return res.status(404).json({ error: 'OP nao encontrada' });
+    producaoMod.transicaoStatus(op.status, 'Em producao');
+    db.prepare("UPDATE ordens_producao SET status='Em producao' WHERE id=?").run(op.id);
+    res.json({ message: 'Producao iniciada', status: 'Em producao' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/producao/:id/concluir', (req, res) => {
+  try {
+    const op = db.prepare('SELECT * FROM ordens_producao WHERE id=?').get(req.params.id);
+    if (!op) return res.status(404).json({ error: 'OP nao encontrada' });
+    producaoMod.transicaoStatus(op.status, 'Concluida');
+    const itens = db.prepare('SELECT * FROM ordem_producao_itens WHERE op_id=?').all(op.id);
+    const saldos = itens.map(it => db.prepare('SELECT id, estoque FROM produtos WHERE id=?').get(it.item_id)).filter(Boolean);
+    const faltas = producaoMod.checarEstoque(itens, saldos);
+    if (faltas.length) {
+      const e = new Error('Estoque insuficiente: ' + faltas.map(f => `${f.descricao || f.item_id} falta ${f.falta}`).join('; '));
+      e.status = 400;
+      throw e;
+    }
+    const txn = db.transaction(() => {
+      for (const it of itens) {
+        const p = db.prepare('SELECT estoque FROM produtos WHERE id=?').get(it.item_id);
+        const anterior = Number(p?.estoque) || 0;
+        const novo = producaoMod.arredQtd(anterior - it.quantidade);
+        db.prepare('UPDATE produtos SET estoque=? WHERE id=?').run(novo, it.item_id);
+        registrarMovimentoEstoque({
+          produtoId: it.item_id, tipo: 'Saída', quantidade: it.quantidade,
+          anterior, novo, observacao: `OP #${op.id} consumo`, usuarioId: req.usuario?.id
+        });
+      }
+      const acab = db.prepare('SELECT estoque FROM produtos WHERE id=?').get(op.produto_id);
+      const antA = Number(acab?.estoque) || 0;
+      const novoA = producaoMod.arredQtd(antA + op.quantidade);
+      db.prepare('UPDATE produtos SET estoque=? WHERE id=?').run(novoA, op.produto_id);
+      registrarMovimentoEstoque({
+        produtoId: op.produto_id, tipo: 'Entrada', quantidade: op.quantidade,
+        anterior: antA, novo: novoA, observacao: `OP #${op.id} acabado`, usuarioId: req.usuario?.id
+      });
+      db.prepare("UPDATE ordens_producao SET status='Concluida', concluida_em=datetime('now','localtime') WHERE id=?").run(op.id);
+    });
+    txn();
+    res.json({ message: 'OP concluida', status: 'Concluida' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/producao/:id/cancelar', (req, res) => {
+  try {
+    const op = db.prepare('SELECT * FROM ordens_producao WHERE id=?').get(req.params.id);
+    if (!op) return res.status(404).json({ error: 'OP nao encontrada' });
+    producaoMod.transicaoStatus(op.status, 'Cancelada');
+    db.prepare("UPDATE ordens_producao SET status='Cancelada' WHERE id=?").run(op.id);
+    res.json({ message: 'OP cancelada' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.get('/api/curva-abc', (req, res) => {
+  const de = req.query.de || db.prepare("SELECT date('now','localtime','start of month') as d").get().d;
+  const ate = req.query.ate || hojeIso();
+  const linhas = db.prepare(`
+    SELECT vi.produto_id, COALESCE(p.nome, vi.descricao) as nome,
+      SUM(vi.quantidade) as quantidade, SUM(vi.subtotal) as valor
+    FROM venda_itens vi
+    JOIN vendas v ON v.id = vi.venda_id
+    LEFT JOIN produtos p ON p.id = vi.produto_id
+    WHERE v.status != 'Cancelada' AND date(v.criado_em) BETWEEN date(?) AND date(?)
+    GROUP BY vi.produto_id, COALESCE(p.nome, vi.descricao)
+  `).all(de, ate);
+  res.json({ de, ate, data: producaoMod.curvaAbc(linhas) });
 });
 
 function garantirCategoria(nome) {

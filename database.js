@@ -459,6 +459,172 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_caixa_fechamentos_dia ON caixa_fechamentos(fechado_em);
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS crm_oportunidades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    titulo TEXT NOT NULL,
+    cliente_id INTEGER,
+    cliente_nome TEXT,
+    valor REAL DEFAULT 0,
+    etapa TEXT DEFAULT 'Lead',
+    probabilidade INTEGER DEFAULT 10,
+    origem TEXT DEFAULT 'Outro',
+    vendedor_id INTEGER,
+    previsao_fechamento TEXT,
+    venda_id INTEGER,
+    observacao TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+    FOREIGN KEY (vendedor_id) REFERENCES usuarios(id),
+    FOREIGN KEY (venda_id) REFERENCES vendas(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_crm_etapa ON crm_oportunidades(etapa);
+  CREATE INDEX IF NOT EXISTS idx_crm_cliente ON crm_oportunidades(cliente_id);
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS contratos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_id INTEGER NOT NULL,
+    descricao TEXT NOT NULL,
+    valor REAL DEFAULT 0,
+    periodicidade TEXT DEFAULT 'Mensal',
+    dia_vencimento INTEGER DEFAULT 10,
+    inicio TEXT,
+    fim TEXT,
+    status TEXT DEFAULT 'Ativo',
+    proximo_faturamento TEXT,
+    ultimo_faturamento TEXT,
+    observacao TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+  );
+  CREATE TABLE IF NOT EXISTS contrato_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contrato_id INTEGER NOT NULL,
+    produto_id INTEGER,
+    descricao TEXT,
+    quantidade REAL DEFAULT 1,
+    preco_unitario REAL DEFAULT 0,
+    subtotal REAL DEFAULT 0,
+    FOREIGN KEY (contrato_id) REFERENCES contratos(id) ON DELETE CASCADE,
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_contratos_status ON contratos(status);
+  CREATE INDEX IF NOT EXISTS idx_contratos_cliente ON contratos(cliente_id);
+  CREATE INDEX IF NOT EXISTS idx_contratos_prox ON contratos(proximo_faturamento);
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS contas_bancarias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    banco TEXT,
+    agencia TEXT,
+    conta TEXT,
+    tipo TEXT DEFAULT 'Corrente',
+    saldo_inicial REAL DEFAULT 0,
+    saldo_atual REAL DEFAULT 0,
+    ativo INTEGER DEFAULT 1,
+    criado_em TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS extrato_bancario (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conta_id INTEGER NOT NULL,
+    data TEXT NOT NULL,
+    descricao TEXT,
+    valor REAL NOT NULL,
+    tipo TEXT DEFAULT 'Credito',
+    documento TEXT,
+    status TEXT DEFAULT 'Aberto',
+    financeiro_id INTEGER,
+    observacao TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (conta_id) REFERENCES contas_bancarias(id),
+    FOREIGN KEY (financeiro_id) REFERENCES financeiro(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_extrato_conta ON extrato_bancario(conta_id, status);
+  CREATE INDEX IF NOT EXISTS idx_extrato_data ON extrato_bancario(data);
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notas_fiscais (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    modelo TEXT NOT NULL DEFAULT '55',
+    numero INTEGER,
+    serie INTEGER DEFAULT 1,
+    natureza TEXT,
+    venda_id INTEGER,
+    os_id INTEGER,
+    contrato_id INTEGER,
+    cliente_id INTEGER,
+    destinatario_nome TEXT,
+    destinatario_doc TEXT,
+    destinatario_ie TEXT,
+    destinatario_endereco TEXT,
+    destinatario_cidade TEXT,
+    destinatario_uf TEXT,
+    destinatario_cep TEXT,
+    chave TEXT,
+    protocolo TEXT,
+    xml TEXT,
+    total REAL DEFAULT 0,
+    status TEXT DEFAULT 'Rascunho',
+    ambiente TEXT DEFAULT 'homologacao',
+    observacao TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (venda_id) REFERENCES vendas(id),
+    FOREIGN KEY (os_id) REFERENCES ordens_servico(id),
+    FOREIGN KEY (contrato_id) REFERENCES contratos(id),
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+  );
+  CREATE TABLE IF NOT EXISTS nota_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nota_id INTEGER NOT NULL,
+    produto_id INTEGER,
+    descricao TEXT,
+    quantidade REAL DEFAULT 1,
+    preco_unitario REAL DEFAULT 0,
+    subtotal REAL DEFAULT 0,
+    ncm TEXT,
+    cfop TEXT,
+    FOREIGN KEY (nota_id) REFERENCES notas_fiscais(id) ON DELETE CASCADE,
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_notas_modelo ON notas_fiscais(modelo, status);
+  CREATE INDEX IF NOT EXISTS idx_notas_chave ON notas_fiscais(chave);
+  CREATE INDEX IF NOT EXISTS idx_nota_itens_nota ON nota_itens(nota_id);
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ordens_producao (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    produto_id INTEGER NOT NULL,
+    quantidade REAL NOT NULL,
+    status TEXT DEFAULT 'Aberta',
+    observacao TEXT,
+    usuario_id INTEGER,
+    concluida_em TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (produto_id) REFERENCES produtos(id),
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  );
+  CREATE TABLE IF NOT EXISTS ordem_producao_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    op_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    quantidade REAL NOT NULL,
+    FOREIGN KEY (op_id) REFERENCES ordens_producao(id) ON DELETE CASCADE,
+    FOREIGN KEY (item_id) REFERENCES produtos(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_op_status ON ordens_producao(status);
+  CREATE INDEX IF NOT EXISTS idx_op_itens_op ON ordem_producao_itens(op_id);
+`);
+
+ensureColumn('financeiro', 'conta_id', 'INTEGER');
+ensureColumn('financeiro', 'contrato_id', 'INTEGER');
+ensureColumn('financeiro', 'nota_id', 'INTEGER');
+
 (function seedCategorias() {
   const nomes = db.prepare(`
     SELECT DISTINCT TRIM(categoria) as nome FROM produtos
@@ -519,11 +685,13 @@ const PAGINAS_GERENCIA = [
   'gerencia-inventario',
   'gerencia-consulta-estoque'
 ];
+const PAGINAS_OMIE = ['crm', 'contratos', 'nfe', 'nfse', 'producao'];
 const PAGINAS_TODAS = [
   'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
   'compras', 'ecommerce',
   'ordens-servico', 'usuarios', 'fornecedores', 'historico-vendas',
-  'relatorio', ...PAGINAS_CONTADOR, ...PAGINAS_RH, ...PAGINAS_GERENCIA, 'backup', 'impressoras', 'configuracoes', 'manual'
+  'relatorio', ...PAGINAS_CONTADOR, ...PAGINAS_RH, ...PAGINAS_GERENCIA, ...PAGINAS_OMIE,
+  'backup', 'impressoras', 'configuracoes', 'manual'
 ];
 const PERFIS_PADRAO = [
   {
@@ -538,7 +706,7 @@ const PERFIS_PADRAO = [
       'dashboard', 'vendas', 'caixa', 'financeiro', 'clientes', 'produtos', 'categorias', 'estoque',
       'compras', 'ecommerce',
       'ordens-servico', 'fornecedores', 'historico-vendas', 'relatorio',
-      ...PAGINAS_CONTADOR, ...PAGINAS_RH, ...PAGINAS_GERENCIA, 'impressoras', 'manual'
+      ...PAGINAS_CONTADOR, ...PAGINAS_RH, ...PAGINAS_GERENCIA, ...PAGINAS_OMIE, 'impressoras', 'manual'
     ]
   },
   {
@@ -546,7 +714,7 @@ const PERFIS_PADRAO = [
     descricao: 'Vendas, clientes, produtos e ordens de servico',
     permissoes: [
       'dashboard', 'vendas', 'clientes', 'produtos', 'categorias', 'estoque', 'ordens-servico',
-      'historico-vendas', 'manual'
+      'historico-vendas', 'crm', 'manual'
     ]
   },
   {
@@ -614,6 +782,13 @@ if (adminPerfil) {
       else perms.push(k);
     }
   }
+  for (const k of PAGINAS_OMIE) {
+    if (!perms.includes(k)) {
+      const i = perms.indexOf('backup');
+      if (i >= 0) perms.splice(i, 0, k);
+      else perms.push(k);
+    }
+  }
   db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), adminPerfil.id);
 }
 const gerentePerfil = db.prepare("SELECT id, permissoes FROM perfis WHERE nome = 'Gerente'").get();
@@ -675,6 +850,14 @@ if (gerentePerfil) {
       dirty = true;
     }
   }
+  for (const k of PAGINAS_OMIE) {
+    if (!perms.includes(k)) {
+      const i = perms.indexOf('impressoras');
+      if (i >= 0) perms.splice(i, 0, k);
+      else perms.push(k);
+      dirty = true;
+    }
+  }
   if (dirty) db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), gerentePerfil.id);
 }
 const vendedorPerfil = db.prepare("SELECT id, permissoes FROM perfis WHERE nome = 'Vendedor'").get();
@@ -690,6 +873,12 @@ if (vendedorPerfil) {
   if (!perms.includes('estoque') && (perms.includes('produtos') || perms.includes('categorias'))) {
     const i = perms.includes('categorias') ? perms.indexOf('categorias') : perms.indexOf('produtos');
     perms.splice(i + 1, 0, 'estoque');
+    vendedorDirty = true;
+  }
+  if (!perms.includes('crm')) {
+    const i = perms.indexOf('clientes');
+    if (i >= 0) perms.splice(i + 1, 0, 'crm');
+    else perms.push('crm');
     vendedorDirty = true;
   }
   if (vendedorDirty) db.prepare('UPDATE perfis SET permissoes = ? WHERE id = ?').run(JSON.stringify(perms), vendedorPerfil.id);
