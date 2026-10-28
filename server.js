@@ -8,6 +8,7 @@ const produtosIo = require('./produtos/io');
 const produtosTipos = require('./produtos/tipos');
 const produtosEstoque = require('./produtos/estoque');
 const comprasMod = require('./compras');
+const comprasXml = require('./compras/xml');
 const rhMod = require('./rh');
 const ecomMod = require('./ecommerce');
 const gerenciaMod = require('./gerencia');
@@ -1046,7 +1047,7 @@ app.get('/api/compras', (req, res) => {
   });
 });
 
-app.get('/api/compras/:id', (req, res) => {
+app.get('/api/compras/:id(\\d+)', (req, res) => {
   const row = compraComItens(req.params.id);
   if (!row) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
   res.json(row);
@@ -1071,7 +1072,7 @@ app.post('/api/compras', (req, res) => {
   }
 });
 
-app.put('/api/compras/:id', (req, res) => {
+app.put('/api/compras/:id(\\d+)', (req, res) => {
   try {
     const atual = db.prepare('SELECT * FROM compras WHERE id = ?').get(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
@@ -1091,7 +1092,7 @@ app.put('/api/compras/:id', (req, res) => {
   }
 });
 
-app.delete('/api/compras/:id', (req, res) => {
+app.delete('/api/compras/:id(\\d+)', (req, res) => {
   const atual = db.prepare('SELECT * FROM compras WHERE id = ?').get(req.params.id);
   if (!atual) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
   if (!comprasMod.podeExcluir(atual.status)) {
@@ -1102,7 +1103,7 @@ app.delete('/api/compras/:id', (req, res) => {
   res.json({ message: 'Pedido excluido' });
 });
 
-app.post('/api/compras/:id/aprovar', (req, res) => {
+app.post('/api/compras/:id(\\d+)/aprovar', (req, res) => {
   try {
     const atual = db.prepare('SELECT * FROM compras WHERE id = ?').get(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
@@ -1114,7 +1115,7 @@ app.post('/api/compras/:id/aprovar', (req, res) => {
   }
 });
 
-app.post('/api/compras/:id/recusar', (req, res) => {
+app.post('/api/compras/:id(\\d+)/recusar', (req, res) => {
   try {
     const atual = db.prepare('SELECT * FROM compras WHERE id = ?').get(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
@@ -1126,7 +1127,7 @@ app.post('/api/compras/:id/recusar', (req, res) => {
   }
 });
 
-app.post('/api/compras/:id/receber', (req, res) => {
+app.post('/api/compras/:id(\\d+)/receber', (req, res) => {
   try {
     const atual = db.prepare('SELECT * FROM compras WHERE id = ?').get(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Pedido de compra nao encontrado' });
@@ -1136,6 +1137,316 @@ app.post('/api/compras/:id/receber', (req, res) => {
     res.json({ message: 'Pedido recebido', status: 'Recebido', financeiro_id: financeiroId });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message || 'Falha ao receber' });
+  }
+});
+
+function upsertFornecedorPorCnpj(nota) {
+  const cnpj = comprasXml.onlyDigits(nota.emit_cnpj);
+  let row = null;
+  if (cnpj) {
+    row = db.prepare("SELECT * FROM fornecedores WHERE replace(replace(replace(replace(IFNULL(cnpj,''),'.',''),'/',''),'-',''),' ','') = ? ORDER BY ativo DESC, id LIMIT 1").get(cnpj);
+  }
+  if (!row && nota.emit_nome) {
+    row = db.prepare('SELECT * FROM fornecedores WHERE lower(nome) = lower(?) ORDER BY ativo DESC, id LIMIT 1').get(nota.emit_nome);
+  }
+  if (row) {
+    if (!row.ativo) db.prepare('UPDATE fornecedores SET ativo = 1 WHERE id = ?').run(row.id);
+    if (cnpj && !row.cnpj) db.prepare('UPDATE fornecedores SET cnpj=? WHERE id=?').run(cnpj, row.id);
+    return row.id;
+  }
+  const r = db.prepare('INSERT INTO fornecedores (nome, cnpj, endereco, ativo) VALUES (?,?,?,1)')
+    .run(nota.emit_nome || 'Fornecedor NF-e', cnpj || null, nota.emit_endereco || null);
+  return r.lastInsertRowid;
+}
+
+function mapasDePara(fornecedorId) {
+  const depara = {};
+  if (fornecedorId) {
+    const rows = db.prepare('SELECT codigo_fornecedor, produto_id, fator FROM produto_fornecedor_depara WHERE fornecedor_id = ?').all(fornecedorId);
+    for (const r of rows) depara[String(r.codigo_fornecedor)] = r;
+  }
+  const produtos = db.prepare("SELECT id, nome, codigo, ncm FROM produtos WHERE ativo = 1 AND IFNULL(tipo,'produto') NOT IN ('servico','kit')").all();
+  const porEan = {};
+  const porCodigo = {};
+  const porNome = {};
+  for (const p of produtos) {
+    const ean = comprasXml.eanValido(p.codigo);
+    if (ean && !porEan[ean]) porEan[ean] = p;
+    if (p.codigo && !porCodigo[p.codigo]) porCodigo[p.codigo] = p;
+    const nome = String(p.nome || '').trim().toLowerCase();
+    if (nome && !porNome[nome]) porNome[nome] = p;
+  }
+  return { depara, porEan, porCodigo, porNome };
+}
+
+function persistirEntradaXml(nota, { origem, usuarioId }) {
+  const existente = db.prepare('SELECT id, status FROM nfe_entrada WHERE chave = ?').get(nota.chave);
+  if (existente) {
+    const err = new Error(`NF-e ja importada (entrada #${existente.id}, ${existente.status})`);
+    err.status = 409;
+    err.entrada_id = existente.id;
+    throw err;
+  }
+  const fornecedorId = upsertFornecedorPorCnpj(nota);
+  const preview = comprasXml.montarItensPreview(nota, mapasDePara(fornecedorId));
+  const ins = db.prepare(`INSERT INTO nfe_entrada
+    (chave, numero, serie, modelo, natureza, data_emissao, emit_cnpj, emit_nome, emit_ie, emit_uf, dest_cnpj, valor, xml, status, origem, fornecedor_id, usuario_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const result = ins.run(
+    nota.chave, nota.numero, nota.serie, nota.modelo, nota.natureza, nota.data_emissao,
+    nota.emit_cnpj, nota.emit_nome, nota.emit_ie, nota.emit_uf, nota.dest_cnpj, nota.valor,
+    nota.xml, 'Pendente', origem || 'arquivo', fornecedorId, usuarioId || null
+  );
+  const entradaId = result.lastInsertRowid;
+  const insItem = db.prepare(`INSERT INTO nfe_entrada_itens
+    (entrada_id, n_item, codigo_fornecedor, ean, descricao, ncm, cfop, cfop_entrada, unidade, quantidade, preco_unitario, subtotal, icms, ipi, pis, cofins,
+     produto_id, fator, quantidade_estoque, preco_custo, margem, preco_venda, criar_produto, origem_match)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  for (const it of preview) {
+    insItem.run(
+      entradaId, it.n_item, it.codigo_fornecedor, it.ean, it.descricao, it.ncm, it.cfop, it.cfop_entrada, it.unidade,
+      it.quantidade, it.preco_unitario, it.subtotal, it.icms, it.ipi, it.pis, it.cofins,
+      it.produto_id, it.fator, it.quantidade_estoque, it.preco_custo, it.margem, it.preco_venda, it.criar_produto, it.origem_match
+    );
+  }
+  return entradaId;
+}
+
+function entradaComItens(id) {
+  const row = db.prepare(`
+    SELECT e.*, f.nome as fornecedor_nome
+    FROM nfe_entrada e
+    LEFT JOIN fornecedores f ON f.id = e.fornecedor_id
+    WHERE e.id = ?
+  `).get(id);
+  if (!row) return null;
+  row.itens = db.prepare(`
+    SELECT i.*, p.nome as produto_nome, p.codigo as produto_codigo, p.unidade as produto_unidade, p.preco as produto_preco
+    FROM nfe_entrada_itens i
+    LEFT JOIN produtos p ON p.id = i.produto_id
+    WHERE i.entrada_id = ?
+    ORDER BY i.n_item, i.id
+  `).all(id);
+  return row;
+}
+
+function aplicarItensEntrada(entradaId, itensBody) {
+  if (!Array.isArray(itensBody)) return;
+  const upd = db.prepare(`UPDATE nfe_entrada_itens
+    SET produto_id=?, fator=?, quantidade_estoque=?, preco_custo=?, margem=?, preco_venda=?, criar_produto=?
+    WHERE id=? AND entrada_id=?`);
+  for (const it of itensBody) {
+    const id = Number(it.id);
+    if (!id) continue;
+    const atual = db.prepare('SELECT * FROM nfe_entrada_itens WHERE id=? AND entrada_id=?').get(id, entradaId);
+    if (!atual) continue;
+    const fator = Number(it.fator);
+    const conv = comprasXml.aplicarFator(atual, Number.isFinite(fator) && fator > 0 ? fator : atual.fator);
+    const margem = Number(it.margem);
+    const m = Number.isFinite(margem) ? margem : (Number(atual.margem) || 0);
+    let produtoId = inteiroOuNulo(it.produto_id);
+    let criar = it.criar_produto == null ? atual.criar_produto : (it.criar_produto ? 1 : 0);
+    if (produtoId) criar = 0;
+    const vendaInformada = it.preco_venda != null && it.preco_venda !== '';
+    const precoVenda = vendaInformada
+      ? comprasXml.arredMoney(it.preco_venda)
+      : comprasXml.precoComMargem(conv.preco_custo, m);
+    upd.run(produtoId, conv.fator, conv.quantidade_estoque, conv.preco_custo, m, precoVenda, criar ? 1 : 0, id, entradaId);
+  }
+}
+
+function criarProdutoDaEntrada(it, fornecedorId) {
+  const codigo = comprasXml.eanValido(it.ean) || String(it.codigo_fornecedor || '').slice(0, 40) || null;
+  const ncm = String(it.ncm || '00000000').replace(/\D/g, '').padStart(8, '0').slice(0, 8);
+  const unidade = String(it.unidade || 'UN').slice(0, 6);
+  const categoriaNome = garantirCategoria('NF-e');
+  const r = db.prepare(`INSERT INTO produtos
+    (nome, codigo, descricao, preco, preco_custo, estoque, estoque_minimo, categoria, fornecedor_id, ncm, cfop, unidade, origem, tipo, controla_estoque, fracionado, ativo)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`).run(
+    it.descricao || 'Produto NF-e', codigo, it.descricao || '',
+    Number(it.preco_venda) || Number(it.preco_custo) || 0,
+    Number(it.preco_custo) || 0,
+    0, 0, categoriaNome, fornecedorId || null, ncm, it.cfop_entrada || '1102', unidade, '0',
+    'produto', 1, 0
+  );
+  return r.lastInsertRowid;
+}
+
+function salvarDePara(fornecedorId, it, produtoId) {
+  if (!fornecedorId || !produtoId || !it.codigo_fornecedor) return;
+  const existente = db.prepare('SELECT id FROM produto_fornecedor_depara WHERE fornecedor_id=? AND codigo_fornecedor=?')
+    .get(fornecedorId, it.codigo_fornecedor);
+  if (existente) {
+    db.prepare(`UPDATE produto_fornecedor_depara SET produto_id=?, fator=?, ean=?, unidade_fornecedor=?, atualizado_em=datetime('now','localtime') WHERE id=?`)
+      .run(produtoId, it.fator || 1, it.ean || null, it.unidade || null, existente.id);
+    return;
+  }
+  db.prepare(`INSERT INTO produto_fornecedor_depara (fornecedor_id, codigo_fornecedor, ean, produto_id, fator, unidade_fornecedor)
+    VALUES (?,?,?,?,?,?)`).run(fornecedorId, it.codigo_fornecedor, it.ean || null, produtoId, it.fator || 1, it.unidade || null);
+}
+
+function confirmarEntradaXml(entrada, usuarioId) {
+  const itens = db.prepare('SELECT * FROM nfe_entrada_itens WHERE entrada_id=? ORDER BY n_item, id').all(entrada.id);
+  if (!itens.length) {
+    const err = new Error('Entrada sem itens');
+    err.status = 400;
+    throw err;
+  }
+  for (const it of itens) {
+    if (!it.produto_id && !it.criar_produto) {
+      const err = new Error(`Associe o produto: ${it.descricao}`);
+      err.status = 400;
+      throw err;
+    }
+  }
+  const compraItens = [];
+  for (const it of itens) {
+    let produtoId = it.produto_id;
+    if (!produtoId && it.criar_produto) {
+      produtoId = criarProdutoDaEntrada(it, entrada.fornecedor_id);
+      db.prepare('UPDATE nfe_entrada_itens SET produto_id=?, criar_produto=0 WHERE id=?').run(produtoId, it.id);
+    }
+    salvarDePara(entrada.fornecedor_id, it, produtoId);
+    if (Number(it.preco_venda) > 0) {
+      db.prepare('UPDATE produtos SET preco=? WHERE id=?').run(comprasXml.arredMoney(it.preco_venda), produtoId);
+    }
+    const qtd = Number(it.quantidade_estoque) || Number(it.quantidade) || 0;
+    const custo = Number(it.preco_custo) || Number(it.preco_unitario) || 0;
+    compraItens.push({
+      produto_id: produtoId,
+      descricao: it.descricao,
+      quantidade: qtd,
+      preco_unitario: custo,
+      subtotal: comprasXml.arredMoney(qtd * custo),
+      fator: Number(it.fator) || 1,
+      ncm: it.ncm,
+      cfop: it.cfop_entrada || it.cfop,
+      unidade_xml: it.unidade
+    });
+  }
+  const valor = comprasMod.totalizar(compraItens);
+  const dataPedido = dataValida(entrada.data_emissao) || hojeIso();
+  const compra = db.prepare(`INSERT INTO compras
+    (fornecedor_id, status, data_pedido, valor, forma_pagamento, observacao, usuario_id, nfe_entrada_id, chave_nfe)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(
+    entrada.fornecedor_id, 'Aprovado', dataPedido, valor, 'Boleto',
+    `NF-e ${entrada.numero || ''} chave ${entrada.chave}`, usuarioId || null, entrada.id, entrada.chave
+  );
+  const compraId = compra.lastInsertRowid;
+  const insItem = db.prepare(`INSERT INTO compra_itens
+    (compra_id, produto_id, descricao, quantidade, preco_unitario, subtotal, fator, ncm, cfop, unidade_xml)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`);
+  for (const it of compraItens) {
+    insItem.run(compraId, it.produto_id, it.descricao, it.quantidade, it.preco_unitario, it.subtotal, it.fator, it.ncm, it.cfop, it.unidade_xml);
+  }
+  const compraRow = db.prepare('SELECT * FROM compras WHERE id=?').get(compraId);
+  const financeiroId = receberCompra(compraRow, usuarioId);
+  db.prepare(`UPDATE nfe_entrada SET status='Entrada', compra_id=? WHERE id=?`).run(compraId, entrada.id);
+  return { compra_id: compraId, financeiro_id: financeiroId };
+}
+
+app.get('/api/compras/xml', (req, res) => {
+  const { search = '', page = 1, limit = 15, status = '' } = req.query;
+  let where = 'WHERE 1=1';
+  const params = [];
+  if (status) {
+    where += ' AND e.status = ?';
+    params.push(comprasXml.normalizarStatus(status));
+  }
+  if (search) {
+    const s = `%${search}%`;
+    where += ` AND (e.chave LIKE ? OR IFNULL(e.emit_nome,'') LIKE ? OR CAST(e.numero AS TEXT) LIKE ?)`;
+    params.push(s, s, s);
+  }
+  const from = `FROM nfe_entrada e LEFT JOIN fornecedores f ON f.id = e.fornecedor_id ${where}`;
+  const total = db.prepare(`SELECT COUNT(*) as total ${from}`).get(...params)?.total || 0;
+  const limite = Math.min(Math.max(Number(limit) || 15, 1), 200);
+  const pagina = Math.max(Number(page) || 1, 1);
+  const offset = (pagina - 1) * limite;
+  const data = db.prepare(`
+    SELECT e.id, e.chave, e.numero, e.serie, e.data_emissao, e.emit_nome, e.emit_cnpj, e.valor, e.status, e.origem, e.compra_id, f.nome as fornecedor_nome
+    ${from}
+    ORDER BY e.id DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limite, offset);
+  res.json({ data, total, page: pagina, limit: limite, totalPages: Math.ceil(total / limite) || 1 });
+});
+
+app.get('/api/compras/xml/:id', (req, res) => {
+  const row = entradaComItens(req.params.id);
+  if (!row) return res.status(404).json({ error: 'XML de entrada nao encontrado' });
+  res.json(row);
+});
+
+app.post('/api/compras/xml/import', (req, res) => {
+  try {
+    const { xml, conteudo, encoding } = req.body || {};
+    let raw = xml || conteudo || '';
+    if (encoding === 'base64' && raw) {
+      raw = Buffer.from(String(raw), 'base64').toString('utf8');
+    }
+    const nota = comprasXml.parseXml(raw);
+    const txn = db.transaction(() => persistirEntradaXml(nota, { origem: 'arquivo', usuarioId: req.usuario?.id }));
+    const id = txn();
+    res.json(entradaComItens(id));
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao importar XML', entrada_id: err.entrada_id });
+  }
+});
+
+app.post('/api/compras/xml/sefaz', (req, res) => {
+  try {
+    const cfg = Object.fromEntries(db.prepare('SELECT chave, valor FROM config').all().map(r => [r.chave, r.valor]));
+    const cnpj = comprasXml.onlyDigits(cfg.empresa_cnpj || cfg.nfce_cnpj || '');
+    if (cnpj.length !== 14) {
+      return res.status(400).json({ error: 'Informe o CNPJ da empresa em Configuracoes para buscar notas na SEFAZ (simulacao local)' });
+    }
+    const seq = (db.prepare('SELECT COUNT(*) as c FROM nfe_entrada').get()?.c || 0) + 1;
+    const chave = comprasXml.chaveDemo(seq);
+    const xml = comprasXml.xmlDemoSefaz({
+      cnpjDest: cnpj,
+      razaoDest: cfg.empresa_nome || 'ERP ISAC',
+      chaveBase: chave
+    });
+    const nota = comprasXml.parseXml(xml);
+    const txn = db.transaction(() => persistirEntradaXml(nota, { origem: 'sefaz', usuarioId: req.usuario?.id }));
+    const id = txn();
+    res.json({ ...entradaComItens(id), sefaz: 'simulada', aviso: 'Consulta SEFAZ simulada localmente. Sem transmissao a SEFAZ nesta entrega.' });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha na consulta SEFAZ', entrada_id: err.entrada_id });
+  }
+});
+
+app.put('/api/compras/xml/:id', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM nfe_entrada WHERE id=?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'XML de entrada nao encontrado' });
+    if (atual.status === 'Entrada' || atual.status === 'Cancelada') {
+      return res.status(400).json({ error: 'Entrada ja finalizada' });
+    }
+    const txn = db.transaction(() => {
+      aplicarItensEntrada(atual.id, req.body?.itens || []);
+      db.prepare(`UPDATE nfe_entrada SET status='Conferida' WHERE id=?`).run(atual.id);
+    });
+    txn();
+    res.json(entradaComItens(atual.id));
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao associar itens' });
+  }
+});
+
+app.post('/api/compras/xml/:id/confirmar', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT * FROM nfe_entrada WHERE id=?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'XML de entrada nao encontrado' });
+    if (atual.status === 'Entrada') return res.status(400).json({ error: 'Esta NF-e ja deu entrada' });
+    if (atual.status === 'Cancelada') return res.status(400).json({ error: 'Entrada cancelada' });
+    if (Array.isArray(req.body?.itens)) aplicarItensEntrada(atual.id, req.body.itens);
+    const txn = db.transaction(() => confirmarEntradaXml(atual, req.usuario?.id));
+    const r = txn();
+    res.json({ message: 'Entrada confirmada. Estoque e custo atualizados.', ...r, status: 'Entrada' });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao confirmar entrada' });
   }
 });
 

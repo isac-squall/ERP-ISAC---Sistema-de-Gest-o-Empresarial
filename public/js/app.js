@@ -2281,6 +2281,9 @@ async function renderCompras() {
       <span class="toolbar-info">Total de pedidos: ${result.total}</span>
       <div class="toolbar-spacer"></div>
       <button class="btn btn-outline" id="compras-fornecedores"><i class="fas fa-truck"></i> Fornecedores</button>
+      <button class="btn btn-outline" id="compras-xml-lista"><i class="fas fa-file-code"></i> Entradas XML</button>
+      <button class="btn btn-outline" id="compras-xml-sefaz"><i class="fas fa-cloud-download-alt"></i> Buscar SEFAZ</button>
+      <button class="btn btn-outline" id="compras-xml-import"><i class="fas fa-file-import"></i> Importar XML</button>
       <button class="btn btn-primary" id="table-new"><i class="fas fa-plus"></i> Novo Pedido de Compra</button>
     </div>
     <div class="table-wrapper">
@@ -2294,8 +2297,16 @@ async function renderCompras() {
     </div>`;
   bindTableEvents(viaGerencia ? 'gerencia-compras' : 'compras', result, viaGerencia ? loadGerenciaComprasLista : loadCompras);
   document.getElementById('table-new').onclick = () => showCompraForm();
-  if (viaGerencia) document.getElementById('table-new')?.classList.add('hidden');
+  if (viaGerencia) {
+    document.getElementById('table-new')?.classList.add('hidden');
+    document.getElementById('compras-xml-import')?.classList.add('hidden');
+    document.getElementById('compras-xml-sefaz')?.classList.add('hidden');
+    document.getElementById('compras-xml-lista')?.classList.add('hidden');
+  }
   document.getElementById('compras-fornecedores').onclick = () => navigate('fornecedores');
+  document.getElementById('compras-xml-import').onclick = () => showImportarXmlCompra();
+  document.getElementById('compras-xml-sefaz').onclick = () => buscarXmlSefaz();
+  document.getElementById('compras-xml-lista').onclick = () => showXmlEntradasLista();
   document.querySelectorAll('[data-compra-tab]').forEach(btn => {
     btn.onclick = () => {
       st.status = btn.dataset.compraTab;
@@ -2553,6 +2564,169 @@ async function deleteCompra(id) {
     showToast('Pedido excluido', 'success');
     recarregarCompras();
   } catch (err) { showToast(err.message, 'error'); }
+}
+
+function showImportarXmlCompra() {
+  openModal('Importar XML da NF-e', `
+    <p class="muted" style="margin-bottom:14px">Envie o XML da nota do fornecedor (NF-e modelo 55). Na etapa seguinte voce associa os produtos (de/para), define o fator de conversao e confirma a entrada no estoque.</p>
+    <div class="form-group"><label>Arquivo XML</label>
+      <input type="file" id="compra-xml-file" accept=".xml,text/xml,application/xml">
+    </div>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button>
+     <button class="btn btn-primary" id="compra-xml-ok">Ler XML</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('compra-xml-ok').onclick = async () => {
+    const input = document.getElementById('compra-xml-file');
+    const file = input.files && input.files[0];
+    if (!file) { showToast('Selecione o arquivo XML', 'error'); return; }
+    if (file.size > 8 * 1024 * 1024) { showToast('XML deve ter no maximo 8MB', 'error'); return; }
+    const btn = document.getElementById('compra-xml-ok');
+    btn.disabled = true;
+    try {
+      const conteudo = await arquivoParaBase64(file);
+      const data = await API.compras.xmlImport({ conteudo, encoding: 'base64', nome: file.name });
+      showToast('XML lido. Associe os produtos.', 'success');
+      await showXmlEntradaForm(data);
+    } catch (err) {
+      showToast(err.message, 'error');
+      if (err.message && /ja importada/i.test(err.message)) showXmlEntradasLista();
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
+
+async function buscarXmlSefaz() {
+  if (!confirm('Buscar notas emitidas contra o CNPJ da empresa? A consulta e simulada localmente (sem SEFAZ real).')) return;
+  try {
+    const data = await API.compras.xmlSefaz();
+    if (data.aviso) showToast(data.aviso, 'success');
+    else showToast('Nota encontrada na SEFAZ (simulacao)', 'success');
+    await showXmlEntradaForm(data);
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function showXmlEntradasLista() {
+  const result = await API.compras.xmlList({ limit: 50 });
+  const rows = (result.data || []).map(e => `<tr>
+    <td>${e.numero || '-'}/${e.serie || 1}</td>
+    <td><span class="status-badge ${e.status === 'Entrada' ? 'compra-recebido' : e.status === 'Cancelada' ? 'compra-recusado' : 'compra-aguardando'}">${escapeHtml(e.status || '-')}</span></td>
+    <td>${escapeHtml(e.emit_nome || e.fornecedor_nome || '-')}</td>
+    <td>${formatDate(e.data_emissao)}</td>
+    <td>${formatCurrency(e.valor)}</td>
+    <td class="muted" style="font-size:11px">${escapeHtml((e.chave || '').slice(-12))}</td>
+    <td>${e.status === 'Entrada'
+      ? (e.compra_id ? `Pedido #${e.compra_id}` : '-')
+      : `<button type="button" class="btn btn-outline" onclick="showXmlEntradaForm(${e.id})">Abrir</button>`}</td>
+  </tr>`).join('') || '<tr class="empty-row"><td colspan="7">Nenhum XML importado</td></tr>';
+  document.querySelector('.modal-box')?.classList.add('wide');
+  openModal('Entradas por XML', `
+    <p class="muted" style="margin-bottom:12px">Notas importadas do arquivo ou da busca SEFAZ (simulada). Abra as pendentes para associar produtos e confirmar a entrada.</p>
+    <table class="data-table">
+      <thead><tr><th>NF</th><th>Status</th><th>Emitente</th><th>Emissao</th><th>Valor</th><th>Chave</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`,
+    `<button class="btn btn-outline modal-close-btn">Fechar</button>
+     <button class="btn btn-outline" id="xml-lista-import">Importar XML</button>`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('xml-lista-import').onclick = () => showImportarXmlCompra();
+}
+
+function xmlItemLinha(it, produtos) {
+  const opts = produtos.map(p => `<option value="${p.id}" ${Number(it.produto_id) === Number(p.id) ? 'selected' : ''}>${escapeHtml(p.nome)}${p.codigo ? ' · ' + escapeHtml(p.codigo) : ''}</option>`).join('');
+  const novo = !it.produto_id;
+  return `<tr data-xml-item="${it.id}">
+    <td>
+      <strong>${escapeHtml(it.descricao || '-')}</strong>
+      <div class="muted" style="font-size:11px">${escapeHtml(it.codigo_fornecedor || '')} ${it.ean ? 'EAN ' + escapeHtml(it.ean) : ''} · NCM ${escapeHtml(it.ncm || '-')} · CFOP ${escapeHtml(it.cfop_entrada || it.cfop || '-')}</div>
+    </td>
+    <td data-qtd-xml="${it.quantidade}">${it.quantidade} ${escapeHtml(it.unidade || '')}</td>
+    <td><input type="number" min="0.0001" step="0.0001" class="xml-fator" value="${it.fator || 1}"></td>
+    <td class="xml-qtd-est">${it.quantidade_estoque || it.quantidade}</td>
+    <td class="xml-custo">${formatCurrency(it.preco_custo || it.preco_unitario)}</td>
+    <td><input type="number" min="0" step="0.01" class="xml-margem" value="${it.margem || 0}"></td>
+    <td><input type="number" min="0" step="0.01" class="xml-preco" value="${it.preco_venda || it.preco_custo || 0}"></td>
+    <td>
+      <select class="xml-produto">
+        <option value="">Cadastrar novo</option>
+        ${opts}
+      </select>
+      <div class="muted" style="font-size:11px;margin-top:4px">${novo ? 'Primeira compra: cria cadastro com nome, NCM e EAN da nota.' : 'Vinculo memorizado para as proximas notas deste fornecedor.'}</div>
+    </td>
+  </tr>`;
+}
+
+async function showXmlEntradaForm(idOrData) {
+  const data = typeof idOrData === 'object' ? idOrData : await API.compras.xmlGet(idOrData);
+  const produtos = (await API.produtos.all()).filter(p => {
+    const t = String(p.tipo || 'produto').toLowerCase();
+    return t !== 'servico' && t !== 'kit' && !p.estoque_origem_id;
+  });
+  window._xmlProdutos = produtos;
+  const itens = (data.itens || []).map(it => xmlItemLinha(it, produtos)).join('')
+    || '<tr class="empty-row"><td colspan="8">Sem itens</td></tr>';
+  document.querySelector('.modal-box')?.classList.add('wide', 'xl');
+  openModal(`NF-e ${data.numero || ''} — associacao de/para`, `
+    <p><strong>${escapeHtml(data.emit_nome || '-')}</strong> · CNPJ ${escapeHtml(data.emit_cnpj || '-')} · ${formatCurrency(data.valor)}
+      <span class="status-badge ${data.status === 'Entrada' ? 'compra-recebido' : 'compra-aguardando'}">${escapeHtml(data.status || 'Pendente')}</span></p>
+    <p class="muted" style="font-size:12px;margin:6px 0 12px">Chave ${escapeHtml(data.chave || '-')} · ${data.origem === 'sefaz' ? 'Origem SEFAZ (simulada)' : 'Arquivo XML'}</p>
+    <p class="muted">Fator: se o fornecedor vende caixa e voce vende unidade, use 12 para entrar 12 UN no estoque. Impostos (CFOP de entrada, ICMS/IPI/PIS/COFINS) vieram do XML.</p>
+    <div class="table-wrapper" style="max-height:420px;overflow:auto">
+      <table class="data-table compra-itens-table xml-entrada-table">
+        <thead><tr><th>Item da nota</th><th>Qtd XML</th><th>Fator</th><th>Qtd estoque</th><th>Custo UN</th><th>Margem %</th><th>Preco venda</th><th>Produto (de/para)</th></tr></thead>
+        <tbody id="xml-itens-body">${itens}</tbody>
+      </table>
+    </div>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button>
+     ${data.status === 'Entrada' ? '' : `<button class="btn btn-primary" id="xml-confirmar">Confirmar entrada</button>`}`);
+  document.querySelector('.modal-close-btn').onclick = closeModal;
+  const body = document.getElementById('xml-itens-body');
+  body?.addEventListener('input', (ev) => {
+    const tr = ev.target.closest('tr[data-xml-item]');
+    if (!tr) return;
+    const qtdXml = Number(tr.querySelector('[data-qtd-xml]')?.dataset.qtdXml) || 0;
+    const fator = Number(tr.querySelector('.xml-fator')?.value) || 1;
+    const qtdEst = Math.round(qtdXml * fator * 10000) / 10000;
+    const subTxt = tr.querySelector('.xml-custo');
+    const item = (data.itens || []).find(x => String(x.id) === tr.dataset.xmlItem);
+    const sub = Number(item?.subtotal) || 0;
+    const custo = qtdEst > 0 ? sub / qtdEst : 0;
+    tr.querySelector('.xml-qtd-est').textContent = qtdEst;
+    if (subTxt) subTxt.textContent = formatCurrency(custo);
+    const margem = Number(tr.querySelector('.xml-margem')?.value) || 0;
+    const preco = tr.querySelector('.xml-preco');
+    if (preco && document.activeElement !== preco) preco.value = (custo * (1 + margem / 100)).toFixed(2);
+  });
+  const btn = document.getElementById('xml-confirmar');
+  if (btn) btn.onclick = async () => {
+    const payload = coletarItensXml();
+    if (!payload.length) { showToast('Nenhum item', 'error'); return; }
+    if (!confirm('Confirmar entrada? O estoque sera atualizado, o custo/preco gravados e uma conta a pagar lancada.')) return;
+    btn.disabled = true;
+    try {
+      await API.compras.xmlConfirmar(data.id, { itens: payload });
+      closeModal();
+      showToast('Entrada confirmada. Estoque atualizado.', 'success');
+      recarregarCompras();
+    } catch (err) {
+      showToast(err.message, 'error');
+      btn.disabled = false;
+    }
+  };
+}
+
+function coletarItensXml() {
+  return [...document.querySelectorAll('#xml-itens-body tr[data-xml-item]')].map(tr => {
+    const produtoId = tr.querySelector('.xml-produto')?.value || '';
+    return {
+      id: Number(tr.dataset.xmlItem),
+      produto_id: produtoId || null,
+      criar_produto: produtoId ? 0 : 1,
+      fator: Number(tr.querySelector('.xml-fator')?.value) || 1,
+      margem: Number(tr.querySelector('.xml-margem')?.value) || 0,
+      preco_venda: Number(tr.querySelector('.xml-preco')?.value) || 0
+    };
+  });
 }
 
 // ===================== R.H. =====================

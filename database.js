@@ -344,6 +344,80 @@ db.exec(`
 `);
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS nfe_entrada (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chave TEXT UNIQUE NOT NULL,
+    numero INTEGER,
+    serie INTEGER DEFAULT 1,
+    modelo TEXT DEFAULT '55',
+    natureza TEXT,
+    data_emissao TEXT,
+    emit_cnpj TEXT,
+    emit_nome TEXT,
+    emit_ie TEXT,
+    emit_uf TEXT,
+    dest_cnpj TEXT,
+    valor REAL DEFAULT 0,
+    xml TEXT,
+    status TEXT DEFAULT 'Pendente',
+    origem TEXT DEFAULT 'arquivo',
+    fornecedor_id INTEGER,
+    compra_id INTEGER,
+    usuario_id INTEGER,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (fornecedor_id) REFERENCES fornecedores(id),
+    FOREIGN KEY (compra_id) REFERENCES compras(id),
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  );
+  CREATE TABLE IF NOT EXISTS nfe_entrada_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entrada_id INTEGER NOT NULL,
+    n_item INTEGER DEFAULT 1,
+    codigo_fornecedor TEXT,
+    ean TEXT,
+    descricao TEXT,
+    ncm TEXT,
+    cfop TEXT,
+    cfop_entrada TEXT,
+    unidade TEXT DEFAULT 'UN',
+    quantidade REAL DEFAULT 1,
+    preco_unitario REAL DEFAULT 0,
+    subtotal REAL DEFAULT 0,
+    icms REAL DEFAULT 0,
+    ipi REAL DEFAULT 0,
+    pis REAL DEFAULT 0,
+    cofins REAL DEFAULT 0,
+    produto_id INTEGER,
+    fator REAL DEFAULT 1,
+    quantidade_estoque REAL DEFAULT 0,
+    preco_custo REAL DEFAULT 0,
+    margem REAL DEFAULT 0,
+    preco_venda REAL DEFAULT 0,
+    criar_produto INTEGER DEFAULT 0,
+    origem_match TEXT,
+    FOREIGN KEY (entrada_id) REFERENCES nfe_entrada(id) ON DELETE CASCADE,
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
+  CREATE TABLE IF NOT EXISTS produto_fornecedor_depara (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fornecedor_id INTEGER NOT NULL,
+    codigo_fornecedor TEXT NOT NULL,
+    ean TEXT,
+    produto_id INTEGER NOT NULL,
+    fator REAL DEFAULT 1,
+    unidade_fornecedor TEXT,
+    atualizado_em TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE (fornecedor_id, codigo_fornecedor),
+    FOREIGN KEY (fornecedor_id) REFERENCES fornecedores(id),
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_nfe_entrada_status ON nfe_entrada(status);
+  CREATE INDEX IF NOT EXISTS idx_nfe_entrada_chave ON nfe_entrada(chave);
+  CREATE INDEX IF NOT EXISTS idx_nfe_entrada_itens ON nfe_entrada_itens(entrada_id);
+  CREATE INDEX IF NOT EXISTS idx_depara_forn ON produto_fornecedor_depara(fornecedor_id, codigo_fornecedor);
+`);
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS rh_grades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nome TEXT NOT NULL,
@@ -624,6 +698,12 @@ db.exec(`
 ensureColumn('financeiro', 'conta_id', 'INTEGER');
 ensureColumn('financeiro', 'contrato_id', 'INTEGER');
 ensureColumn('financeiro', 'nota_id', 'INTEGER');
+ensureColumn('compras', 'nfe_entrada_id', 'INTEGER');
+ensureColumn('compras', 'chave_nfe', 'TEXT');
+ensureColumn('compra_itens', 'fator', 'REAL DEFAULT 1');
+ensureColumn('compra_itens', 'ncm', 'TEXT');
+ensureColumn('compra_itens', 'cfop', 'TEXT');
+ensureColumn('compra_itens', 'unidade_xml', 'TEXT');
 
 (function seedCategorias() {
   const nomes = db.prepare(`
@@ -986,14 +1066,18 @@ if (!produtoExemplo) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run('COCA-COLA', '7894900011517', 'Refrigerante 2L', 8, 5, 98, 5, 'Bebidas');
 }
 
-const insertOSDemo = db.prepare(`INSERT INTO ordens_servico (status, cliente_id, equipamento, solicitacao, valor_previsto)
-  VALUES (?,?,?,?,?)`);
-if (!db.prepare("SELECT id FROM ordens_servico WHERE equipamento LIKE '%notebook%' COLLATE NOCASE").get()) {
-  insertOSDemo.run('Pronta para entrega', 1, 'Notebook Dell Inspiron', 'Troca de tela e formatacao', 350);
-}
-if (!db.prepare("SELECT id FROM ordens_servico WHERE equipamento LIKE '%celular%' COLLATE NOCASE").get()) {
-  insertOSDemo.run('Pronta para entrega', 2, 'Celular Samsung Galaxy', 'Troca de bateria', 180);
-}
+try {
+  const insertOSDemo = db.prepare(`INSERT INTO ordens_servico (status, cliente_id, equipamento, solicitacao, valor_previsto)
+    VALUES (?,?,?,?,?)`);
+  const cli1 = db.prepare('SELECT id FROM clientes WHERE id=1').get();
+  const cli2 = db.prepare('SELECT id FROM clientes WHERE id=2').get();
+  if (cli1 && !db.prepare("SELECT id FROM ordens_servico WHERE equipamento LIKE '%notebook%' COLLATE NOCASE").get()) {
+    insertOSDemo.run('Pronta para entrega', 1, 'Notebook Dell Inspiron', 'Troca de tela e formatacao', 350);
+  }
+  if (cli2 && !db.prepare("SELECT id FROM ordens_servico WHERE equipamento LIKE '%celular%' COLLATE NOCASE").get()) {
+    insertOSDemo.run('Pronta para entrega', 2, 'Celular Samsung Galaxy', 'Troca de bateria', 180);
+  }
+} catch (_) {}
 
 module.exports = db;
 module.exports.CONFIG_DEFAULTS = defaults;
