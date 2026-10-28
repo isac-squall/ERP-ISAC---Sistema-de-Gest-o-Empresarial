@@ -1,4 +1,5 @@
 const produtosTipos = require('../produtos/tipos');
+const xmlNfe = require('./xml');
 
 const STATUS = ['Aguardando', 'Aprovado', 'Recusado', 'Recebido'];
 const FORMAS = ['Boleto', 'Dinheiro', 'PIX', 'Cartao Debito', 'Cartao Credito', 'Prazo', 'Transferencia'];
@@ -129,5 +130,6 @@ module.exports = {
   podeEditar,
   podeExcluir,
   transicao,
-  resumir
+  resumir,
+  xml: xmlNfe
 };

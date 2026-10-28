@@ -234,14 +234,14 @@ module.exports = [
     sessao: 'Compras e recebimento',
     pagina: 'compras',
     titulo: 'Pedir, aprovar e receber mercadoria',
-    keywords: 'compra compras pedido fornecedor aprovar recusar receber estoque conta pagar boleto',
-    conteudo: `Pedidos de compras controla a compra de mercadoria. Abas: Todos, Aguardando, Aprovados, Recusados e Recebidos. Colunas: numero, status, fornecedor, data, valor, pagamento e acoes. Crie o pedido com fornecedor, data, forma de pagamento e itens (quantidade e custo). Fluxo: Aguardando -> Aprovar ou Recusar; Aprovado -> Receber (entra no estoque, atualiza o custo e lanca conta a pagar no Financeiro, categoria Estoque). Pedido recebido nao edita nem exclui. Servico, kit e dose nao entram como item de estoque. Acesso: Administrador e Gerente.`,
+    keywords: 'compra compras pedido fornecedor aprovar recusar receber estoque conta pagar boleto xml nfe sefaz depara fator conversao',
+    conteudo: `Pedidos de compras controla a compra de mercadoria. Abas: Todos, Aguardando, Aprovados, Recusados e Recebidos. Crie o pedido com fornecedor e itens, aprove e Receber (entra estoque, atualiza custo e lanca conta a pagar). Tambem da para Importar XML da NF-e do fornecedor: o sistema le emitente, chave, NCM, CFOP, EAN e impostos; associa de/para (produto novo ou vinculo ao cadastro); fator de conversao (ex.: CX 12 = 12 UN); margem/preco de venda; Confirmar entrada atualiza estoque na hora. Buscar SEFAZ e simulacao local (sem consulta real a SEFAZ). A chave da nota nao importa duas vezes. Acesso: Administrador e Gerente.`,
     passos: [
       'Abra Pedidos de compras no menu.',
-      'Clique em Novo Pedido de Compra, escolha o fornecedor e inclua os itens.',
-      'Salve. O pedido fica Aguardando.',
-      'Aprove ou recuse no menu de acoes.',
-      'No pedido Aprovado, clique em Receber para entrar o estoque e gerar a conta a pagar.'
+      'Clique em Importar XML e selecione o arquivo .xml da NF-e, ou Buscar SEFAZ (simulacao).',
+      'Na associacao de/para, vincule cada item ao produto ou deixe Cadastrar novo.',
+      'Ajuste o fator (caixa para unidade) e a margem/preco de venda.',
+      'Clique em Confirmar entrada: estoque, custo e conta a pagar sao atualizados.'
     ]
   },
   {

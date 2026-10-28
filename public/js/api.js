@@ -94,7 +94,13 @@ const API = {
     delete: (id) => API.request(`/compras/${id}`, { method: 'DELETE' }),
     aprovar: (id) => API.request(`/compras/${id}/aprovar`, { method: 'POST', body: {} }),
     recusar: (id) => API.request(`/compras/${id}/recusar`, { method: 'POST', body: {} }),
-    receber: (id) => API.request(`/compras/${id}/receber`, { method: 'POST', body: {} })
+    receber: (id) => API.request(`/compras/${id}/receber`, { method: 'POST', body: {} }),
+    xmlList: (p) => API.request(`/compras/xml?${new URLSearchParams(p || {})}`),
+    xmlGet: (id) => API.request(`/compras/xml/${id}`),
+    xmlImport: (d) => API.request('/compras/xml/import', { method: 'POST', body: d }),
+    xmlSefaz: () => API.request('/compras/xml/sefaz', { method: 'POST', body: {} }),
+    xmlSalvar: (id, d) => API.request(`/compras/xml/${id}`, { method: 'PUT', body: d }),
+    xmlConfirmar: (id, d) => API.request(`/compras/xml/${id}/confirmar`, { method: 'POST', body: d || {} })
   },
 
   ecommerce: {
@@ -408,7 +414,7 @@ function openModal(title, body, footer) {
 
 function closeModal() {
   document.getElementById('modal').classList.add('hidden');
-  document.querySelector('.modal-box')?.classList.remove('wide');
+  document.querySelector('.modal-box')?.classList.remove('wide', 'xl');
 }
 
 function renderPagination(container, page, totalPages, total, limit, onChange) {
