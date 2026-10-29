@@ -1276,6 +1276,22 @@ a.btn-icon-square { text-decoration: none; }
 .nfce-qr-wrap { width: 120px; height: 120px; margin: 8px 0; }
 .nfce-qr { width: 120px; height: 120px; background: #fff; }
 .nfce-qr rect { fill: #000; }
+.pix-box {
+  margin-top: 14px; padding: 14px; border: 1px dashed var(--border);
+  border-radius: 8px; background: var(--bg);
+  display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;
+}
+.pix-qr-wrap { width: 168px; height: 168px; background: #fff; padding: 4px; border-radius: 6px; }
+.pix-qr { width: 100%; height: 100%; background: #fff; }
+.pix-qr rect { fill: #111; }
+.pix-qr-info { flex: 1; min-width: 180px; }
+.pix-qr-info p { margin: 0 0 6px; font-size: 13px; }
+.pix-payload {
+  width: 100%; min-height: 64px; font-family: ui-monospace, monospace;
+  font-size: 11px; word-break: break-all; margin: 8px 0;
+}
+.pix-print { text-align: center; margin: 8px 0; }
+.pix-print .pix-qr-wrap { margin: 8px auto; }
 
 .licenca-lock {
   position: fixed; inset: 0; z-index: 1400;
@@ -1423,6 +1439,7 @@ a.btn-icon-square { text-decoration: none; }
   .cupom table { width: 100%; }
   .cupom td { padding: 2px 0; }
   .nfce-qr-wrap, .nfce-qr { width: 140px; height: 140px; }
+  .pix-print .pix-qr-wrap { width: 140px; height: 140px; padding: 0; }
   .danfe-nfce hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
   .etiqueta-preco, .etiqueta-barcode { display: block !important; }
 }

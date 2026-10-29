@@ -21,6 +21,7 @@ const backupMod = require('./backup');
 const contador = require('./contador');
 const dre = require('./dre');
 const licenca = require('./licenca');
+const pixMod = require('./pix');
 const { hashSenha, verificarSenha, precisaAtualizar } = require('./senha');
 
 const app = express();
@@ -176,6 +177,7 @@ function permissoesDaRota(req) {
   const p = req.path;
   const m = req.method;
   if (p === '/api/config') return m === 'GET' ? null : ['configuracoes'];
+  if (p.startsWith('/api/pix')) return ['vendas', 'caixa', 'configuracoes'];
   if (p === '/api/empresa') return ['configuracoes'];
   if (p.startsWith('/api/config/apagar-banco')) return ['configuracoes'];
   if (p.startsWith('/api/usuarios') || p.startsWith('/api/perfis')) return ['usuarios'];
@@ -520,13 +522,29 @@ app.put('/api/config', (req, res) => {
   res.json({ message: 'Configuração salva', ...nfce.sanitizar(nfce.loadConfig()) });
 });
 
+app.get('/api/pix/qr', (req, res) => {
+  try {
+    const cfg = nfce.loadConfig();
+    const valorRaw = req.query.valor;
+    const valor = valorRaw != null && String(valorRaw).trim() !== '' ? Number(valorRaw) : undefined;
+    const cob = pixMod.gerar(cfg, {
+      valor,
+      txid: String(req.query.txid || '***').slice(0, 25),
+      descricao: req.query.descricao
+    });
+    res.json(cob);
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Nao foi possivel gerar o QR PIX' });
+  }
+});
+
 function isLicencaKey(chave) {
   return /licen|serial/i.test(String(chave || ''));
 }
 
 function isPreservedConfigKey(chave) {
   const k = String(chave || '');
-  return isLicencaKey(chave) || k.startsWith('empresa_') || k.startsWith('ecommerce_');
+  return isLicencaKey(chave) || k.startsWith('empresa_') || k.startsWith('ecommerce_') || k.startsWith('pix_');
 }
 
 function onlyDigits(v) {
@@ -683,6 +701,9 @@ app.post('/api/config/apagar-banco', limitarAcaoCritica, (req, res) => {
     taxa_credito: '0',
     taxa_debito: '0',
     taxa_pix: '0',
+    pix_chave: '',
+    pix_nome: '',
+    pix_cidade: '',
     nfce_habilitada: '0',
     nfce_ambiente: 'homologacao',
     nfce_uf: 'RN',
@@ -4244,9 +4265,16 @@ app.get('/api/vendas/:id', (req, res) => {
     FROM venda_itens vi
     LEFT JOIN produtos p ON vi.produto_id = p.id WHERE vi.venda_id = ?
   `).all(req.params.id);
-  const cfg = nfce.sanitizar(nfce.loadConfig());
+  const cfgRaw = nfce.loadConfig();
+  const cfg = nfce.sanitizar(cfgRaw);
   const nota = nfce.nfceDaVenda(Number(req.params.id));
-  res.json({ ...venda, itens, cupom: cfg, nfce: nfce.resumoPublico(nota) });
+  let pix = null;
+  if (String(venda.forma_pagamento || '').toUpperCase() === 'PIX') {
+    try {
+      pix = pixMod.gerar(cfgRaw, { valor: venda.total, txid: 'V' + venda.id });
+    } catch {}
+  }
+  res.json({ ...venda, itens, cupom: cfg, nfce: nfce.resumoPublico(nota), pix });
 });
 
 app.post('/api/vendas/:id/cancelar', async (req, res) => {

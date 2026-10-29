@@ -17,12 +17,14 @@
     "test:contratos": "node contratos/test.js",
     "test:bancos": "node bancos/test.js",
     "test:fiscal": "node fiscal/test.js",
-    "test:producao": "node producao/test.js"
+    "test:producao": "node producao/test.js",
+    "test:pix": "node pix/test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",
-    "node-forge": "^1.4.0"
+    "node-forge": "^1.4.0",
+    "qrcode": "^1.5.4"
   }
 }
