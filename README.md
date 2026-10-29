@@ -29,7 +29,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Contador** — Submenu: Listar NFe emitidas, Relatorio de Compras, Download XML NFes, Download extrato e SPED Fiscal
 - **Gerenciar Backup** — Criar, listar, baixar, restaurar e excluir copias do banco; verificar atualizacao
 - **Impressoras** — Cadastro com conexao (Wi-Fi, Bluetooth, USB), modo (termica/jato de tinta) e largura (58mm, 80mm, A4)
-- **Configuracoes** — Cadastro da empresa (logo, nome, contatos, CNPJ), cupom, taxas, NFC-e e Zona critica
+- **Configuracoes** — Cadastro da empresa (logo, nome, contatos, CNPJ), cupom, taxas, chave PIX, NFC-e e Zona critica
 - **Licenca** — Teste de 30 dias, IDs da maquina (BIOS / UUID / disco) e chave de mensalidade
 - **Manual** — Ajuda por modulo e assistente de duvidas no canto da tela
 
@@ -48,7 +48,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Impressoras: conexao Wi-Fi/Bluetooth/USB, modo termica ou jato de tinta, papel 58mm/80mm/A4, escala do cupom e NFC-e
 - Contador: listar NFC-e, relatorio de compras, ZIP de XMLs, extrato TXT/CSV e SPED Fiscal (EFD ICMS/IPI simplificado)
 - Licenca/mensalidade: icone de computador no cabecalho; periodo de teste de 30 dias; se vencer, o sistema bloqueia ate ativar a chave da maquina
-- PDV + Financeiro: baixa automatica da venda, taxas liquidas de cartao/PIX, Fiado com alerta de inadimplencia, sangria/suprimento no Financeiro e margem no PDV
+- PDV + Financeiro: baixa automatica da venda, taxas liquidas de cartao/PIX, QR Code PIX (chave em Configuracoes), Fiado com alerta de inadimplencia, sangria/suprimento no Financeiro e margem no PDV
 - DRE no Financeiro: resultado do exercicio por competencia (Receita Bruta, CMV, despesas, LAJIR e Lucro Liquido) com export TXT/CSV; fiado a receber no dia da venda (valor a cobrar)
 - Bebidas por dose: cadastre a dose vinculada a garrafa e o consumo (ex.: 0,05 = 20 doses). A venda baixa o estoque da garrafa; o cancelamento devolve
 - Cadastro de itens: tipo Produto, Servico (sem estoque), Kit (baixa a composicao) e Pesavel (quantidade decimal, unidade KG)
@@ -84,7 +84,7 @@ O caixa precisa estar aberto. A venda comeca vazia (Caixa livre).
 - Lupa **BUSCAR EM**: Produto (nome, codigo, SKU, ID), Categoria ou Ordem de servico
 - OS Entregue ou Cancelada nao entra no carrinho; a mesma OS nao pode ser adicionada duas vezes
 - Ao finalizar (F7), a OS vai para **Entregue**; se a venda for cancelada, volta para **Pronta para entrega**
-- Pagamentos: Dinheiro, Cartao Debito, Cartao Credito, PIX e Fiado
+- Pagamentos: Dinheiro, Cartao Debito, Cartao Credito, PIX e Fiado. No PIX, o PDV gera o QR Code (EMV/BR Code) da chave cadastrada em Configuracoes, com o valor da venda e copia-e-cola
 - Venda a vista (Dinheiro/PIX/cartao) lanca Receita Pago no Financeiro; Fiado gera Contas a receber (parcela a cada 30 dias)
 - Taxas de credito, debito e PIX descontam o liquido no Financeiro (despesa Taxa operadora)
 - Cliente com titulos vencidos recebe alerta no PDV; Fiado exige confirmacao

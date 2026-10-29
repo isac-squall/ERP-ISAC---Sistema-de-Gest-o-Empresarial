@@ -4645,6 +4645,7 @@ function posFinalizarVenda() {
         <div><span>Troco</span><strong id="pos-form-troco">${formatCurrency(0)}</strong></div>
         <div><span>Margem</span><strong id="pos-form-margem">${formatCurrency(lucro)}</strong></div>
       </div>
+      <div id="pos-pix-box" class="pix-box hidden"></div>
       ${erpConfig.nfce_habilitada === '1' ? `
       <div class="form-group" style="margin-top:12px">
         <label class="check-label"><input type="checkbox" id="pos-emitir-nfce" ${erpConfig.nfce_emitir_automatico === '1' ? 'checked' : ''}> Emitir NFC-e</label>
@@ -4664,6 +4665,47 @@ function posFinalizarVenda() {
     }).catch(() => {});
   }
 
+  let pixTimer = null;
+  const mostrarPix = (total) => {
+    const box = document.getElementById('pos-pix-box');
+    const forma = document.getElementById('pos-form-pagamento').value;
+    if (!box) return;
+    if (String(forma || '').toUpperCase() !== 'PIX') {
+      box.classList.add('hidden');
+      box.innerHTML = '';
+      return;
+    }
+    box.classList.remove('hidden');
+    box.innerHTML = '<p class="muted">Gerando QR PIX...</p>';
+    clearTimeout(pixTimer);
+    pixTimer = setTimeout(async () => {
+      try {
+        const cob = await API.pix.qr({ valor: total.toFixed(2), txid: 'PDV' });
+        if (document.getElementById('pos-form-pagamento')?.value !== 'PIX') return;
+        box.innerHTML = `
+          <div class="pix-qr-wrap">${cob.svg}</div>
+          <div class="pix-qr-info">
+            <p><strong>PIX ${formatCurrency(cob.valor)}</strong></p>
+            <p class="muted">${escapeHtml(cob.tipo || 'Chave')} · ${escapeHtml(cob.chave_mascarada || '')}</p>
+            <p class="muted">${escapeHtml(cob.nome || '')} · ${escapeHtml(cob.cidade || '')}</p>
+            <textarea id="pos-pix-payload" class="pix-payload" readonly>${escapeHtml(cob.payload)}</textarea>
+            <button type="button" class="btn btn-outline btn-sm" id="pos-pix-copiar"><i class="fas fa-copy"></i> Copiar codigo</button>
+          </div>`;
+        document.getElementById('pos-pix-copiar').onclick = async () => {
+          const t = document.getElementById('pos-pix-payload')?.value || cob.payload;
+          try {
+            await navigator.clipboard.writeText(t);
+            showToast('Codigo PIX copiado', 'success');
+          } catch {
+            document.getElementById('pos-pix-payload')?.select();
+            showToast('Selecione e copie o codigo PIX', 'error');
+          }
+        };
+      } catch (err) {
+        box.innerHTML = `<p class="muted">${escapeHtml(err.message || 'Nao foi possivel gerar o QR PIX')}</p>`;
+      }
+    }, 180);
+  };
   const recalcular = () => {
     const desc = parseFloat(document.getElementById('pos-form-desconto').value) || 0;
     const forma = document.getElementById('pos-form-pagamento').value;
@@ -4677,6 +4719,7 @@ function posFinalizarVenda() {
     document.getElementById('pos-form-troco').textContent = formatCurrency(posIsFiado(forma) ? 0 : Math.max(0, recebido - calc.total));
     document.getElementById('pos-form-recebido').disabled = posIsFiado(forma);
     if (posIsFiado(forma)) document.getElementById('pos-form-recebido').value = '0';
+    mostrarPix(calc.total);
   };
   document.getElementById('pos-form-desconto').oninput = recalcular;
   document.getElementById('pos-form-pagamento').onchange = recalcular;
@@ -4865,6 +4908,7 @@ async function printCupom(id) {
         </table>
         <p><strong>Total: ${formatCurrency(v.total)}</strong></p>
         <p>Pagamento: ${escapeHtml(v.forma_pagamento || '-')}${v.troco ? ` · Troco ${formatCurrency(v.troco)}` : ''}</p>
+        ${v.pix?.svg ? `<div class="pix-print"><p><strong>PIX ${formatCurrency(v.pix.valor)}</strong></p><div class="pix-qr-wrap">${v.pix.svg}</div><p class="muted">${escapeHtml(v.pix.chave_mascarada || '')}</p></div>` : ''}
         <hr>
         <p class="nfce-chave">${chaveFormatada(n.chave)}</p>
         <div class="nfce-qr-wrap">${qrSvg(n.qrcode || n.chave)}</div>
@@ -4884,6 +4928,7 @@ async function printCupom(id) {
         <p><strong>Total: ${formatCurrency(v.total)}</strong></p>
         <p>Pagamento: ${escapeHtml(v.forma_pagamento || '-')}</p>
         ${v.troco ? `<p>Troco: ${formatCurrency(v.troco)}</p>` : ''}
+        ${v.pix?.svg ? `<div class="pix-print"><p><strong>PIX ${formatCurrency(v.pix.valor)}</strong></p><div class="pix-qr-wrap">${v.pix.svg}</div><p class="muted">${escapeHtml(v.pix.chave_mascarada || '')}</p></div>` : ''}
         <pre>${escapeHtml(c.cupom_rodape || '')}</pre>
       </div>`;
   }
@@ -6079,6 +6124,14 @@ async function renderConfiguracoes() {
           <div class="form-group"><label>Taxa PIX (%)</label><input name="taxa_pix" type="number" step="0.01" value="${escapeHtml(cfg.taxa_pix || '0')}"></div>
         </div>
         <p class="muted">As taxas da operadora sao descontadas do valor liquido no Financeiro. O cliente paga o total da venda, sem acrescimo.</p>
+        <h4 style="margin:16px 0 8px">Chave PIX</h4>
+        <p class="muted">Ao finalizar a venda com PIX, o PDV gera o QR Code (copia e cola) com o valor da venda.</p>
+        <div class="form-group"><label>Chave PIX</label>
+          <input name="pix_chave" value="${escapeHtml(cfg.pix_chave || '')}" placeholder="CPF, CNPJ, e-mail, celular ou chave aleatoria"></div>
+        <div class="form-row">
+          <div class="form-group"><label>Nome no PIX</label><input name="pix_nome" value="${escapeHtml(cfg.pix_nome || '')}" placeholder="${escapeHtml(cfg.empresa_nome || 'Nome da loja')}"></div>
+          <div class="form-group"><label>Cidade no PIX</label><input name="pix_cidade" value="${escapeHtml(cfg.pix_cidade || '')}" placeholder="${escapeHtml(cfg.empresa_cidade || cfg.nfce_municipio || 'Cidade')}"></div>
+        </div>
       </div>
       <div class="card">
         <h3>NFC-e</h3>
@@ -7075,7 +7128,7 @@ async function renderManual() {
         <li><strong>Login</strong> — Acesse com email e senha. Padrão: admin@erpisac.com / admin123.</li>
         <li><strong>Dashboard</strong> — Acompanhe vendas, estoque, OS e contas. Troque o período do gráfico.</li>
         <li><strong>Caixa</strong> — Abra o caixa com um valor inicial antes de vender. Sangria e suprimento lancam no Financeiro. Feche ao final do dia.</li>
-        <li><strong>Vendas</strong> — Busque por nome ou código de barras, monte o carrinho e finalize (Dinheiro, cartao, PIX ou Fiado). A margem aparece no painel.</li>
+        <li><strong>Vendas</strong> — Busque por nome ou código de barras, monte o carrinho e finalize (Dinheiro, cartao, PIX ou Fiado). No PIX, o QR Code da chave cadastrada aparece no F7. A margem aparece no painel.</li>
         <li><strong>Clientes / Produtos / Fornecedores</strong> — Cadastre, edite e pesquise registros com paginação.</li>
         <li><strong>Estoque</strong> — Pesquise itens por nome, codigo, marca ou local; filtre por categoria, situacao e tipo; registre entrada, ajuste ou inventario.</li>
         <li><strong>Gerência</strong> — Aprovacao de orcamentos, compras, conferencia de caixa, inventario e consulta de estoque (Administrador e Gerente).</li>
@@ -7090,7 +7143,7 @@ async function renderManual() {
         <li><strong>Gerenciar Backup</strong> — Realize, baixe, restaure ou exclua copias do banco. Verifique atualizacao do aplicativo.</li>
         <li><strong>Impressoras</strong> — Cadastre conexao (Wi-Fi, Bluetooth, USB), modo (termica ou jato de tinta) e largura (58mm, 80mm ou A4) para cupom e NFC-e.</li>
         <li><strong>Licenca</strong> — Icone de computador no cabecalho: status da mensalidade, BIOS/UUID/disco e ativacao da chave. Teste de 30 dias; depois o sistema bloqueia.</li>
-        <li><strong>Configurações</strong> — Personalize cupom, taxas de cartão, NFC-e e use a Zona critica para apagar o banco (a licenca e preservada).</li>
+        <li><strong>Configurações</strong> — Personalize cupom, taxas, chave PIX, NFC-e e use a Zona critica para apagar o banco (a licenca e preservada).</li>
         <li><strong>Assistente IA</strong> — O botao azul no canto inferior direito responde duvidas identificando o modulo e a sessao.</li>
       </ol>
     </div>

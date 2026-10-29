@@ -35,15 +35,15 @@ module.exports = [
     sessao: 'PDV e carrinho',
     pagina: 'vendas',
     titulo: 'Como vender no caixa',
-    keywords: 'venda pdv caixa livre carrinho item produto finalizar f7 f8 f3 aba cliente visitante nfce nota fiscal fiado crediario margem taxa',
-    conteudo: `A tela Realizar vendas e o PDV. O caixa precisa estar aberto; se estiver fechado, o sistema pede para ir em Gerenciar caixa. A venda comeca vazia (Caixa livre). Busque o item, monte o carrinho, escolha o cliente (padrao Visitante) e finalize com F7. Formas de pagamento: Dinheiro, Cartao Debito, Cartao Credito, PIX e Fiado. Venda a vista lanca Receita Pago no Financeiro; Fiado exige cliente cadastrado e gera Contas a receber. Taxas de cartao/PIX descontam o liquido. Cliente inadimplente recebe alerta. O painel mostra margem estimada (preco menos custo). Se a NFC-e estiver habilitada, o F7 pode emitir a nota automaticamente.`,
+    keywords: 'venda pdv caixa livre carrinho item produto finalizar f7 f8 f3 aba cliente visitante nfce nota fiscal fiado crediario margem taxa pix qrcode chave',
+    conteudo: `A tela Realizar vendas e o PDV. O caixa precisa estar aberto; se estiver fechado, o sistema pede para ir em Gerenciar caixa. A venda comeca vazia (Caixa livre). Busque o item, monte o carrinho, escolha o cliente (padrao Visitante) e finalize com F7. Formas de pagamento: Dinheiro, Cartao Debito, Cartao Credito, PIX e Fiado. Ao escolher PIX, o PDV gera o QR Code da chave cadastrada em Configuracoes (copia e cola com o valor). Venda a vista lanca Receita Pago no Financeiro; Fiado exige cliente cadastrado e gera Contas a receber. Taxas de cartao/PIX descontam o liquido. Cliente inadimplente recebe alerta. O painel mostra margem estimada (preco menos custo). Se a NFC-e estiver habilitada, o F7 pode emitir a nota automaticamente.`,
     passos: [
       'Abra o caixa em Gerenciar caixa.',
       'Entre em Realizar vendas.',
       'Se quiser, clique no botao Visitante para selecionar o cliente.',
       'Busque o produto, categoria ou ordem de servico na lupa.',
       'Ajuste quantidades no carrinho.',
-      'Pressione F7, escolha o pagamento e confirme.',
+      'Pressione F7, escolha o pagamento e confirme. No PIX, mostre o QR Code ao cliente.',
       'Imprima o cupom se desejar.'
     ]
   },
@@ -500,13 +500,13 @@ module.exports = [
     sessao: 'Cupom e PDV',
     pagina: 'configuracoes',
     titulo: 'Personalizar cupom e taxas',
-    keywords: 'configuracao cupom taxa cartao credito debito quantidade pdv nfce certificado csc sefaz zona critica apagar banco dados licenca empresa loja logo cnpj whatsapp vitrine site catalogo',
-    conteudo: `Configuracoes comeca com Editar empresa: nome da loja, logo (PNG/JPG ate 2MB), telefone, WhatsApp da loja, e-mail, Instagram, cidade, estado, endereco e CNPJ. Esses dados aparecem no login, na sidebar, no cupom e na vitrine publica /loja. O WhatsApp da loja recebe os pedidos do catalogo digital. Abaixo vem cupom, taxas do PDV e NFC-e. A Zona critica no rodape apaga vendas, clientes, produtos, usuarios e configuracoes; a licenca e os dados da empresa sao preservados. So o administrador, digitando APAGAR e a senha, consegue executar.`,
+    keywords: 'configuracao cupom taxa cartao credito debito quantidade pdv nfce certificado csc sefaz zona critica apagar banco dados licenca empresa loja logo cnpj whatsapp vitrine site catalogo pix chave qrcode',
+    conteudo: `Configuracoes comeca com Editar empresa: nome da loja, logo (PNG/JPG ate 2MB), telefone, WhatsApp da loja, e-mail, Instagram, cidade, estado, endereco e CNPJ. Esses dados aparecem no login, na sidebar, no cupom e na vitrine publica /loja. O WhatsApp da loja recebe os pedidos do catalogo digital. Abaixo vem cupom, taxas do PDV, chave PIX (CPF, CNPJ, e-mail, celular ou aleatoria) e NFC-e. Com a chave PIX preenchida, o PDV gera o QR Code ao finalizar em PIX. A Zona critica no rodape apaga vendas, clientes, produtos, usuarios e configuracoes; a licenca e os dados da empresa sao preservados. So o administrador, digitando APAGAR e a senha, consegue executar.`,
     passos: [
       'Clique na engrenagem ou em Configuracoes.',
       'Em Editar empresa, preencha nome, logo, telefone, WhatsApp da loja, e-mail, Instagram, endereco e CNPJ e clique em Salvar empresa.',
       'Abra o Site da loja (/loja) para ver o catalogo publico.',
-      'Ajuste o texto do cupom e as taxas.',
+      'Ajuste o texto do cupom, as taxas e a chave PIX (para o QR no PDV).',
       'Preencha os dados fiscais da NFC-e.',
       'Envie o certificado A1 e o CSC.',
       'Zona critica: Apagar banco de dados so com confirmacao APAGAR e senha do admin.'

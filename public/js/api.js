@@ -47,6 +47,9 @@ const API = {
     get: () => API.request('/empresa'),
     save: (d) => API.request('/empresa', { method: 'PUT', body: d })
   },
+  pix: {
+    qr: (p) => API.request(`/pix/qr?${new URLSearchParams(p || {})}`)
+  },
   nfce: {
     status: () => API.request('/nfce/status'),
     emitir: (id, d) => API.request(`/vendas/${id}/nfce`, { method: 'POST', body: d || {} }),
