@@ -434,5 +434,5 @@ ensureDir();
 ensureTable();
 
 module.exports = {
-  criar, restaurar, restaurarPorId, excluir, listar, obter, status, verificarAtualizacao, zipStore, APP_VERSION, BACKUP_DIR
+  criar, restaurar, restaurarPorId, excluir, listar, obter, status, verificarAtualizacao, zipStore, unzipBuffers, APP_VERSION, BACKUP_DIR
 };

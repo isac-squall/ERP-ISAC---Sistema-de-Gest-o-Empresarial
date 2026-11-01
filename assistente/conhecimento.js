@@ -387,13 +387,13 @@ module.exports = [
   {
     id: 'contador-nfe',
     modulo: 'Contador',
-    sessao: 'Listar NFe emitidas',
+    sessao: 'Listar NFC-e emitidas',
     pagina: 'contador-nfe',
     titulo: 'Listar NFC-e emitidas no periodo',
     keywords: 'contador nfe nfce nota fiscal listar emitidas chave protocolo xml danfe',
-    conteudo: `O menu Contador (submenu recolhivel) reune as funcoes fiscais. Listar NFe emitidas mostra numero, serie, cliente, chave, status, valor e data. Filtros: Hoje, 7 dias, 30 dias, Mes, Ano ou de/ate, alem de status e busca. Acoes: ver a venda, imprimir DANFE e baixar o XML. Tambem gera ZIP com todos os XMLs do periodo. Acesso: Administrador e Gerente.`,
+    conteudo: `O menu Contador (submenu recolhivel) reune as funcoes fiscais. Listar NFC-e emitidas mostra numero, serie, cliente, chave, status, valor e data das NFC-e do PDV. Filtros: Hoje, 7 dias, 30 dias, Mes, Ano ou de/ate, alem de status e busca. Acoes: ver a venda, imprimir DANFE e baixar o XML. Tambem gera ZIP so com NFC-e do periodo. Acesso: Administrador e Gerente.`,
     passos: [
-      'Abra Contador no menu e clique em Listar NFe emitidas.',
+      'Abra Contador no menu e clique em Listar NFC-e emitidas.',
       'Escolha o periodo ou as datas.',
       'Filtre por status se quiser so autorizadas.',
       'Use o olho, a impressora ou o XML na linha.',
@@ -418,16 +418,17 @@ module.exports = [
   {
     id: 'contador-xml',
     modulo: 'Contador',
-    sessao: 'Download XML NFes',
+    sessao: 'Pacote XML fiscal',
     pagina: 'contador-xml',
-    titulo: 'Baixar XML das NFC-e em ZIP',
-    keywords: 'contador xml nfe zip download arquivo sefaz',
-    conteudo: `Download XML NFes gera um ZIP com os arquivos XML das NFC-e do periodo (nome NFCe-chave.xml). So entram notas que ja possuem XML gravado. O download individual continua no historico de vendas.`,
+    titulo: 'Baixar pacote XML fiscal em ZIP',
+    keywords: 'contador xml nfe nfce nfse zip download arquivo sefaz entrada compras pacote fiscal',
+    conteudo: `Pacote XML fiscal gera um ZIP unico com pastas NFCe/, NFe/, NFSe/ e Entradas/, mais MANIFESTO.txt. Inclui NFC-e do PDV, NF-e modelo 55, NFS-e e XML de entrada (compras) que ja possuem XML gravado no periodo. NF-e e NFS-e desta entrega sao simuladas (sem SEFAZ/prefeitura). O ZIP so de NFC-e continua em Listar NFC-e emitidas.`,
     passos: [
-      'Abra Contador > Download XML NFes.',
+      'Abra Contador > Pacote XML fiscal.',
       'Escolha o periodo.',
-      'Clique em Baixar ZIP.',
-      'Envie o arquivo ao contador.'
+      'Confira os totais de NFC-e, NF-e, NFS-e e entradas.',
+      'Clique em Baixar pacote fiscal.',
+      'Envie o ZIP ao escritorio.'
     ]
   },
   {

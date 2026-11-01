@@ -111,17 +111,120 @@ function zipXmlNfe(query) {
     ORDER BY n.numero, n.id
   `).all(...params);
   if (!rows.length) {
-    const err = new Error('Nenhum XML encontrado no periodo');
+    const err = new Error('Nenhum XML de NFC-e encontrado no periodo');
     err.status = 404;
     throw err;
   }
   const files = rows.map((r) => ({
-    name: `NFCe-${r.chave || `${r.serie || 1}-${r.numero || r.id}`}.xml`,
+    name: `NFCe/${nomeXml('NFCe', r)}`,
     data: Buffer.from(r.xml, 'utf8')
   }));
   const buf = backupMod.zipStore(files);
   const nome = `NFCe-XMLs-${String(from).replace(/-/g, '')}-${String(to).replace(/-/g, '')}.zip`;
   return { buf, nome, qtd: rows.length };
+}
+
+function nomeXml(prefixo, r) {
+  const chave = String(r.chave || '').replace(/\D/g, '');
+  const base = chave || `${r.serie || 1}-${r.numero || r.id}`;
+  return `${prefixo}-${base}.xml`.replace(/[\\/:*?"<>|]/g, '-');
+}
+
+function coletarXmlsFiscais(query) {
+  const { from, to, periodo } = parsePeriodo(query);
+  const nfce = db.prepare(`
+    SELECT n.id, n.chave, n.numero, n.serie, n.xml, n.status,
+      COALESCE(n.dh_emi, n.criado_em) as data_ref
+    FROM nfce n
+    WHERE n.xml IS NOT NULL AND trim(n.xml) != ''
+      AND date(COALESCE(n.dh_emi, n.criado_em)) >= date(?)
+      AND date(COALESCE(n.dh_emi, n.criado_em)) <= date(?)
+    ORDER BY n.id
+  `).all(from, to);
+  const nfe = db.prepare(`
+    SELECT id, chave, numero, serie, xml, status, criado_em as data_ref, destinatario_nome
+    FROM notas_fiscais
+    WHERE modelo = '55' AND xml IS NOT NULL AND trim(xml) != ''
+      AND date(criado_em) >= date(?) AND date(criado_em) <= date(?)
+    ORDER BY id
+  `).all(from, to);
+  const nfse = db.prepare(`
+    SELECT id, chave, numero, serie, xml, status, criado_em as data_ref, destinatario_nome
+    FROM notas_fiscais
+    WHERE modelo = 'NFS-e' AND xml IS NOT NULL AND trim(xml) != ''
+      AND date(criado_em) >= date(?) AND date(criado_em) <= date(?)
+    ORDER BY id
+  `).all(from, to);
+  const entradas = db.prepare(`
+    SELECT id, chave, numero, serie, xml, status, emit_nome,
+      COALESCE(data_emissao, criado_em) as data_ref
+    FROM nfe_entrada
+    WHERE xml IS NOT NULL AND trim(xml) != ''
+      AND date(COALESCE(data_emissao, criado_em)) >= date(?)
+      AND date(COALESCE(data_emissao, criado_em)) <= date(?)
+    ORDER BY id
+  `).all(from, to);
+  return { from, to, periodo, nfce, nfe, nfse, entradas };
+}
+
+function resumoXmlFiscal(query) {
+  const c = coletarXmlsFiscais(query);
+  return {
+    de: c.from,
+    ate: c.to,
+    periodo: c.periodo,
+    resumo: {
+      nfce: c.nfce.length,
+      nfe: c.nfe.length,
+      nfse: c.nfse.length,
+      entradas: c.entradas.length,
+      total: c.nfce.length + c.nfe.length + c.nfse.length + c.entradas.length
+    },
+    nfce: c.nfce.map(r => ({ id: r.id, chave: r.chave, numero: r.numero, serie: r.serie, status: r.status, data: r.data_ref })),
+    nfe: c.nfe.map(r => ({ id: r.id, chave: r.chave, numero: r.numero, serie: r.serie, status: r.status, data: r.data_ref, destinatario: r.destinatario_nome })),
+    nfse: c.nfse.map(r => ({ id: r.id, chave: r.chave, numero: r.numero, serie: r.serie, status: r.status, data: r.data_ref, destinatario: r.destinatario_nome })),
+    entradas: c.entradas.map(r => ({ id: r.id, chave: r.chave, numero: r.numero, serie: r.serie, status: r.status, data: r.data_ref, emitente: r.emit_nome }))
+  };
+}
+
+function zipXmlFiscal(query) {
+  const c = coletarXmlsFiscais(query);
+  const files = [];
+  for (const r of c.nfce) files.push({ name: `NFCe/${nomeXml('NFCe', r)}`, data: Buffer.from(r.xml, 'utf8') });
+  for (const r of c.nfe) files.push({ name: `NFe/${nomeXml('NFe', r)}`, data: Buffer.from(r.xml, 'utf8') });
+  for (const r of c.nfse) files.push({ name: `NFSe/${nomeXml('NFSe', r)}`, data: Buffer.from(r.xml, 'utf8') });
+  for (const r of c.entradas) files.push({ name: `Entradas/${nomeXml('NFe-entrada', r)}`, data: Buffer.from(r.xml, 'utf8') });
+  if (!files.length) {
+    const err = new Error('Nenhum XML fiscal encontrado no periodo');
+    err.status = 404;
+    throw err;
+  }
+  const manifesto = [
+    'Pacote XML fiscal ERP ISAC',
+    `Periodo: ${c.from} a ${c.to}`,
+    `NFC-e (PDV): ${c.nfce.length}`,
+    `NF-e modelo 55: ${c.nfe.length}`,
+    `NFS-e: ${c.nfse.length}`,
+    `NF-e de entrada (compras): ${c.entradas.length}`,
+    `Total: ${files.length}`,
+    '',
+    'Pastas: NFCe/  NFe/  NFSe/  Entradas/',
+    'NF-e e NFS-e desta entrega sao simuladas (sem SEFAZ/prefeitura).'
+  ].join('\r\n');
+  files.unshift({ name: 'MANIFESTO.txt', data: Buffer.from(manifesto, 'utf8') });
+  const buf = backupMod.zipStore(files);
+  const nome = `XML-fiscal-${String(c.from).replace(/-/g, '')}-${String(c.to).replace(/-/g, '')}.zip`;
+  return {
+    buf,
+    nome,
+    qtd: files.length - 1,
+    resumo: {
+      nfce: c.nfce.length,
+      nfe: c.nfe.length,
+      nfse: c.nfse.length,
+      entradas: c.entradas.length
+    }
+  };
 }
 
 function listarCompras(query) {
@@ -478,6 +581,9 @@ module.exports = {
   parsePeriodo,
   listarNfe,
   zipXmlNfe,
+  resumoXmlFiscal,
+  zipXmlFiscal,
+  coletarXmlsFiscais,
   listarCompras,
   comprasCsv,
   montarExtrato,

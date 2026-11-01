@@ -215,6 +215,7 @@ function permissoesDaRota(req) {
   if (p.startsWith('/api/ordens-servico')) return ['ordens-servico'];
   if (p.startsWith('/api/impressoras')) return m === 'GET' ? null : ['impressoras'];
   if (p.startsWith('/api/backups')) return ['backup'];
+  if (p.startsWith('/api/contador/xml-fiscal.zip') || p.startsWith('/api/contador/xml-fiscal')) return ['contador-xml', 'contador-nfe'];
   if (p.startsWith('/api/contador/nfe/xml.zip')) return ['contador-xml', 'contador-nfe'];
   if (p.startsWith('/api/contador/nfe')) return ['contador-nfe'];
   if (p.startsWith('/api/contador/compras')) return ['contador-compras'];
@@ -3605,9 +3606,9 @@ const PERMISSOES_DISPONIVEIS = [
   { key: 'fornecedores', label: 'Fornecedores' },
   { key: 'historico-vendas', label: 'Historico de vendas' },
   { key: 'relatorio', label: 'Relatorio geral' },
-  { key: 'contador-nfe', label: 'Listar NFe emitidas' },
+  { key: 'contador-nfe', label: 'Listar NFC-e emitidas' },
   { key: 'contador-compras', label: 'Relatorio de Compras' },
-  { key: 'contador-xml', label: 'Download XML NFes' },
+  { key: 'contador-xml', label: 'Pacote XML fiscal' },
   { key: 'contador-extrato', label: 'Download extrato' },
   { key: 'contador-sped', label: 'SPED Fiscal' },
   { key: 'backup', label: 'Gerenciar Backup' },
@@ -4922,7 +4923,7 @@ app.get('/api/dre.csv', (req, res) => {
 
 app.get('/api/contador/nfe', (req, res) => {
   try { res.json(contador.listarNfe(req.query)); }
-  catch (err) { res.status(400).json({ error: err.message || 'Falha ao listar NFe' }); }
+  catch (err) { res.status(400).json({ error: err.message || 'Falha ao listar NFC-e' }); }
 });
 
 app.get('/api/contador/nfe/xml.zip', (req, res) => {
@@ -4931,6 +4932,20 @@ app.get('/api/contador/nfe/xml.zip', (req, res) => {
     sendAnexo(res, z.nome, z.buf, 'application/zip');
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message || 'Falha ao gerar ZIP de XMLs' });
+  }
+});
+
+app.get('/api/contador/xml-fiscal', (req, res) => {
+  try { res.json(contador.resumoXmlFiscal(req.query)); }
+  catch (err) { res.status(400).json({ error: err.message || 'Falha ao listar XML fiscal' }); }
+});
+
+app.get('/api/contador/xml-fiscal.zip', (req, res) => {
+  try {
+    const z = contador.zipXmlFiscal(req.query);
+    sendAnexo(res, z.nome, z.buf, 'application/zip');
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Falha ao gerar pacote XML fiscal' });
   }
 });
 

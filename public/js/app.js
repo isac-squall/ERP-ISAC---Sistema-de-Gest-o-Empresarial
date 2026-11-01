@@ -31,9 +31,9 @@ const PAGES = {
   fornecedores: { title: 'Fornecedores', breadcrumb: 'Dashboard / Fornecedores' },
   'historico-vendas': { title: 'Histórico de vendas', breadcrumb: 'Dashboard / Histórico de vendas' },
   relatorio: { title: 'Relatório geral', breadcrumb: 'Dashboard / Relatório geral' },
-  'contador-nfe': { title: 'Listar NFe emitidas', breadcrumb: 'Dashboard / Contador / Listar NFe emitidas' },
+  'contador-nfe': { title: 'Listar NFC-e emitidas', breadcrumb: 'Dashboard / Contador / Listar NFC-e emitidas' },
   'contador-compras': { title: 'Relatório de Compras', breadcrumb: 'Dashboard / Contador / Relatório de Compras' },
-  'contador-xml': { title: 'Download XML NFes', breadcrumb: 'Dashboard / Contador / Download XML NFes' },
+  'contador-xml': { title: 'Pacote XML fiscal', breadcrumb: 'Dashboard / Contador / Pacote XML fiscal' },
   'contador-extrato': { title: 'Download extrato', breadcrumb: 'Dashboard / Contador / Download extrato' },
   'contador-sped': { title: 'SPED Fiscal', breadcrumb: 'Dashboard / Contador / SPED Fiscal' },
   backup: { title: 'Gerenciar Backup', breadcrumb: 'Dashboard / Gerenciar Backup' },
@@ -6381,7 +6381,7 @@ async function renderContadorNfe() {
   }
   const r = result.resumo || {};
   document.getElementById('content').innerHTML = `
-    ${pageHeader('Listar NFe emitidas', 'Dashboard / Contador / Listar NFe emitidas')}
+    ${pageHeader('Listar NFC-e emitidas', 'Dashboard / Contador / Listar NFC-e emitidas')}
     ${contadorFiltrosHtml(st, `
       <div class="form-group"><label>Status</label>
         <select id="cnt-status">
@@ -6400,7 +6400,7 @@ async function renderContadorNfe() {
     <div class="toolbar">
       <span class="toolbar-info">${result.total} NFC-e no periodo ${result.de} a ${result.ate}</span>
       <div class="toolbar-spacer"></div>
-      <button class="btn btn-teal" id="cnt-zip"><i class="fas fa-file-archive"></i> Baixar XMLs (ZIP)</button>
+      <button class="btn btn-teal" id="cnt-zip"><i class="fas fa-file-archive"></i> Baixar XML NFC-e (ZIP)</button>
     </div>
     <div class="table-wrapper">
       <table class="data-table">
@@ -6487,57 +6487,64 @@ async function renderContadorCompras() {
   });
 }
 
+function renderContadorXmlGrupo(titulo, rows, colunas) {
+  if (!rows.length) return `<div class="card"><h4>${titulo}</h4><p class="muted">Nenhum XML no periodo</p></div>`;
+  return `<div class="card">
+    <h4>${titulo} (${rows.length})</h4>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead><tr>${colunas.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+        <tbody>${rows.slice(0, 20).map(n => `<tr>
+          <td>${n.numero || '-'}/${n.serie || '-'}</td>
+          <td class="nfce-chave">${chaveFormatada(n.chave)}</td>
+          <td>${escapeHtml(n.status || '-')}</td>
+          <td>${formatDateTime(n.data)}</td>
+          <td>${escapeHtml(n.destinatario || n.emitente || '-')}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+    ${rows.length > 20 ? `<p class="muted">Mostrando 20 de ${rows.length}. O ZIP inclui todos.</p>` : ''}
+  </div>`;
+}
+
 async function renderContadorXml() {
   const st = pageState['contador-xml'];
-  st.limit = st.limit || 15;
-  st.page = st.page || 1;
   let result;
-  try { result = await API.contador.nfe(contadorPeriodoParams(st)); }
+  try { result = await API.contador.xmlFiscal(contadorPeriodoParams(st)); }
   catch (err) {
     document.getElementById('content').innerHTML = `<div class="card"><p style="color:red">Erro: ${escapeHtml(err.message)}</p></div>`;
     return;
   }
   const r = result.resumo || {};
   document.getElementById('content').innerHTML = `
-    ${pageHeader('Download XML NFes', 'Dashboard / Contador / Download XML NFes')}
+    ${pageHeader('Pacote XML fiscal', 'Dashboard / Contador / Pacote XML fiscal')}
     ${contadorFiltrosHtml(st)}
     ${contadorKpis([
-      { label: 'Notas', value: String(r.qtd || 0) },
-      { label: 'Com XML', value: String(r.com_xml || 0) },
-      { label: 'Autorizadas', value: String(r.autorizadas || 0) },
-      { label: 'Periodo', value: `${result.de} a ${result.ate}` }
+      { label: 'NFC-e', value: String(r.nfce || 0) },
+      { label: 'NF-e 55', value: String(r.nfe || 0) },
+      { label: 'NFS-e', value: String(r.nfse || 0) },
+      { label: 'Entradas', value: String(r.entradas || 0) },
+      { label: 'Total', value: String(r.total || 0) }
     ])}
     <div class="contador-panel">
-      <h3>Pacote de XMLs</h3>
-      <p>Gera um ZIP com os arquivos XML das NFC-e do periodo (nome NFCe-chave.xml).</p>
+      <h3>ZIP unico para o escritorio</h3>
+      <p>Gera um ZIP com pastas <strong>NFCe/</strong>, <strong>NFe/</strong>, <strong>NFSe/</strong> e <strong>Entradas/</strong>, mais MANIFESTO.txt.</p>
       <ul>
-        <li>Inclui somente notas que ja possuem XML gravado</li>
-        <li>Use o mesmo filtro de datas da listagem</li>
-        <li>O download individual continua disponivel no historico de vendas</li>
+        <li>NFC-e do PDV, NF-e modelo 55, NFS-e e XML de entrada (compras)</li>
+        <li>So entram notas que ja possuem XML gravado no periodo</li>
+        <li>NF-e e NFS-e desta entrega sao simuladas (sem SEFAZ/prefeitura)</li>
+        <li>O ZIP so de NFC-e continua em Listar NFC-e emitidas</li>
       </ul>
       <div class="contador-actions">
-        <button class="btn btn-primary" id="cnt-zip"><i class="fas fa-file-archive"></i> Baixar ZIP (${r.com_xml || 0} XML)</button>
+        <button class="btn btn-primary" id="cnt-zip"><i class="fas fa-file-archive"></i> Baixar pacote fiscal (${r.total || 0} XML)</button>
       </div>
     </div>
-    <div class="table-wrapper">
-      <table class="data-table">
-        <thead><tr><th>Numero</th><th>Chave</th><th>Status</th><th>XML</th><th>Emissao</th><th>Acoes</th></tr></thead>
-        <tbody>${(result.data || []).length ? result.data.map(n => `<tr>
-          <td>${n.numero || '-'}/${n.serie || '-'}</td>
-          <td class="nfce-chave">${chaveFormatada(n.chave)}</td>
-          <td>${nfceStatusBadge(n.status)}</td>
-          <td>${n.tem_xml ? 'Sim' : 'Nao'}</td>
-          <td>${formatDateTime(n.dh_emi || n.criado_em)}</td>
-          <td class="actions-cell">${n.tem_xml && n.venda_id ? `<a class="btn-icon view" href="/api/vendas/${n.venda_id}/nfce.xml" download title="Baixar XML"><i class="fas fa-download"></i></a>` : '-'}</td>
-        </tr>`).join('') : '<tr class="empty-row"><td colspan="6">Nenhuma NFC-e no periodo</td></tr>'}</tbody>
-      </table>
-      <div id="table-pagination"></div>
-    </div>`;
+    ${renderContadorXmlGrupo('NFC-e (PDV)', result.nfce || [], ['Numero', 'Chave', 'Status', 'Emissao', 'Cliente'])}
+    ${renderContadorXmlGrupo('NF-e modelo 55', result.nfe || [], ['Numero', 'Chave', 'Status', 'Emissao', 'Destinatario'])}
+    ${renderContadorXmlGrupo('NFS-e', result.nfse || [], ['Numero', 'Chave', 'Status', 'Emissao', 'Destinatario'])}
+    ${renderContadorXmlGrupo('NF-e de entrada', result.entradas || [], ['Numero', 'Chave', 'Status', 'Emissao', 'Emitente'])}`;
   bindContadorFiltros('contador-xml');
-  document.getElementById('cnt-zip').onclick = () => baixarContadorUrl(API.contador.xmlZipUrl(contadorPeriodoParams(st)));
-  renderPagination(document.getElementById('table-pagination'), result.page, result.totalPages, result.total, result.limit, (p, l) => {
-    st.page = p; st.limit = l; renderContadorXml();
-  });
+  document.getElementById('cnt-zip').onclick = () => baixarContadorUrl(API.contador.xmlFiscalZipUrl(contadorPeriodoParams(st)));
 }
 
 async function renderContadorExtrato() {
@@ -7140,6 +7147,7 @@ async function renderManual() {
         <li><strong>Producao</strong> — OP com BOM do kit. Concluir baixa insumos e entra o acabado. Curva ABC do mes.</li>
         <li><strong>Histórico</strong> — Consulte vendas, imprima cupom/DANFE, emita NFC-e ou cancele (estoque volta automaticamente).</li>
         <li><strong>Relatório</strong> — Veja faturamento mensal, produtos mais vendidos e top clientes.</li>
+        <li><strong>Contador</strong> — NFC-e do PDV, pacote XML fiscal (NFC-e, NF-e 55, NFS-e e entradas), extrato e SPED para o escritorio.</li>
         <li><strong>Gerenciar Backup</strong> — Realize, baixe, restaure ou exclua copias do banco. Verifique atualizacao do aplicativo.</li>
         <li><strong>Impressoras</strong> — Cadastre conexao (Wi-Fi, Bluetooth, USB), modo (termica ou jato de tinta) e largura (58mm, 80mm ou A4) para cupom e NFC-e.</li>
         <li><strong>Licenca</strong> — Icone de computador no cabecalho: status da mensalidade, BIOS/UUID/disco e ativacao da chave. Teste de 30 dias; depois o sistema bloqueia.</li>
