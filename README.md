@@ -26,7 +26,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **Fornecedores** — Cadastro vinculado a produtos e contas a pagar
 - **Historico de vendas** — Consulta, cupom/DANFE, XML da NFC-e e cancelamento
 - **Relatorio geral** — Receita, lucro, ticket medio, rankings e graficos por periodo
-- **Contador** — Submenu: Listar NFe emitidas, Relatorio de Compras, Download XML NFes, Download extrato e SPED Fiscal
+- **Contador** — Submenu: Listar NFC-e emitidas, Relatorio de Compras, Pacote XML fiscal, Download extrato e SPED Fiscal
 - **Gerenciar Backup** — Criar, listar, baixar, restaurar e excluir copias do banco; verificar atualizacao
 - **Impressoras** — Cadastro com conexao (Wi-Fi, Bluetooth, USB), modo (termica/jato de tinta) e largura (58mm, 80mm, A4)
 - **Configuracoes** — Cadastro da empresa (logo, nome, contatos, CNPJ), cupom, taxas, chave PIX, NFC-e e Zona critica
@@ -166,9 +166,9 @@ Por padrao `nfce_simulacao=1` (treino sem SEFAZ).
 
 Menu **Contador** (submenu recolhivel; Administrador e Gerente).
 
-- **Listar NFe emitidas** — NFC-e do periodo (numero, chave, status, valor); DANFE, XML e ZIP
+- **Listar NFC-e emitidas** — NFC-e do PDV no periodo (numero, chave, status, valor); DANFE, XML e ZIP so de NFC-e
 - **Relatorio de Compras** — despesas do Financeiro, totais e CSV
-- **Download XML NFes** — ZIP com os XML das notas do periodo
+- **Pacote XML fiscal** — ZIP unico com pastas NFC-e, NF-e 55, NFS-e e XML de entrada (compras)
 - **Download extrato** — TXT ou CSV com vendas, caixa e financeiro
 - **SPED Fiscal** — arquivo EFD ICMS/IPI (blocos 0, C, H e 9) do mes de apuracao
 

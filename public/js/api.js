@@ -310,6 +310,8 @@ const API = {
   contador: {
     nfe: (p) => API.request(`/contador/nfe?${new URLSearchParams(p || {})}`),
     xmlZipUrl: (p) => `/api/contador/nfe/xml.zip?${new URLSearchParams(p || {})}`,
+    xmlFiscal: (p) => API.request(`/contador/xml-fiscal?${new URLSearchParams(p || {})}`),
+    xmlFiscalZipUrl: (p) => `/api/contador/xml-fiscal.zip?${new URLSearchParams(p || {})}`,
     compras: (p) => API.request(`/contador/compras?${new URLSearchParams(p || {})}`),
     comprasCsvUrl: (p) => `/api/contador/compras.csv?${new URLSearchParams(p || {})}`,
     extrato: (p) => API.request(`/contador/extrato?${new URLSearchParams(p || {})}`),

@@ -18,7 +18,8 @@
     "test:bancos": "node bancos/test.js",
     "test:fiscal": "node fiscal/test.js",
     "test:producao": "node producao/test.js",
-    "test:pix": "node pix/test.js"
+    "test:pix": "node pix/test.js",
+    "test:contador": "node contador/test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
