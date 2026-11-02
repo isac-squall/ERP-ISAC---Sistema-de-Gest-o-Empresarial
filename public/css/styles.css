@@ -1022,6 +1022,32 @@ a.btn-icon-square { text-decoration: none; }
 .kanban-card > span { font-size: 12px; color: var(--text-muted); }
 .kanban-valor { color: var(--primary) !important; font-weight: 600; }
 .kanban-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.kanban-meta { font-size: 11px; color: var(--text-muted); }
+.kanban-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.kanban-tag, .crm-chip {
+  font-size: 10px;
+  font-weight: 600;
+  background: #E3F2FD;
+  color: #1565C0;
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+.crm-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+.crm-filters .form-group { margin: 0; min-width: 140px; }
+.crm-timeline { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.crm-tl-item {
+  border-left: 2px solid var(--primary);
+  padding: 4px 0 4px 10px;
+  font-size: 12px;
+}
+.crm-tl-item strong { display: block; font-size: 12px; }
+.crm-tl-item span { color: var(--text-muted); font-size: 11px; }
 
 .fluxo-bar-wrap { height: 6px; background: #ECEFF1; border-radius: 3px; margin-top: 4px; overflow: hidden; }
 .fluxo-bar { height: 100%; background: var(--primary); border-radius: 3px; }

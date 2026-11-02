@@ -668,13 +668,15 @@ module.exports = [
     sessao: 'Funil de vendas',
     pagina: 'crm',
     titulo: 'Gerenciar oportunidades no kanban',
-    keywords: 'crm funil kanban lead qualificacao proposta negociacao ganho perdido pipeline oportunidade',
-    conteudo: `O CRM e um funil kanban: Lead, Qualificacao, Proposta, Negociacao, Ganho e Perdido. Cada card tem titulo, cliente, valor e probabilidade (10/30/50/70/100%). Pipeline soma as abertas; Ponderado multiplica valor pela probabilidade. Ganho e Perdido nao voltam de etapa. Acesso: Administrador, Gerente e Vendedor.`,
+    keywords: 'crm funil kanban lead qualificacao proposta negociacao ganho perdido pipeline oportunidade probabilidade tag vendedor whatsapp email timeline',
+    conteudo: `O CRM e um funil kanban: Lead, Qualificacao, Proposta, Negociacao, Ganho e Perdido. Probabilidade padrao por etapa: 10/30/50/80% (editavel no botao Probabilidades). Pipeline soma as abertas; Ponderado multiplica valor pela probabilidade do card. Filtros: periodo, vendedor e tags. Cada oportunidade tem timeline (ligacao, reuniao, e-mail, WhatsApp, proximo passo). Orcamento do PDV cria/avanca o card (Proposta, Negociacao ou Ganho). Ganho e Perdido nao voltam de etapa. Acesso: Administrador, Gerente e Vendedor.`,
     passos: [
       'Abra CRM no menu.',
-      'Clique em Nova oportunidade e informe titulo, cliente e valor.',
-      'Use Avancar, Ganhar ou Perder no card.',
-      'Opcional: WhatsApp do cliente no card.'
+      'Filtre por periodo, vendedor ou tag se quiser.',
+      'Clique em Nova oportunidade (titulo, cliente, valor, tags, probabilidade).',
+      'Use Avancar, Ganhar ou Perder no card; WhatsApp e e-mail abrem o contato e gravam no historico.',
+      'No card, registre ligacao, reuniao ou proximo passo na timeline.',
+      'Opcional: ajuste as porcentagens em Probabilidades.'
     ]
   },
   {

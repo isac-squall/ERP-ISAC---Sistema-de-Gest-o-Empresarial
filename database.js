@@ -511,6 +511,7 @@ ensureColumn('produtos', 'sku_ecommerce', 'TEXT');
 ensureColumn('orcamentos', 'venda_id', 'INTEGER');
 ensureColumn('orcamentos', 'aprovado_em', 'TEXT');
 ensureColumn('orcamentos', 'aprovado_por', 'INTEGER');
+ensureColumn('orcamentos', 'oportunidade_id', 'INTEGER');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS caixa_fechamentos (
@@ -547,6 +548,8 @@ db.exec(`
     previsao_fechamento TEXT,
     venda_id INTEGER,
     observacao TEXT,
+    tags TEXT DEFAULT '',
+    orcamento_id INTEGER,
     criado_em TEXT DEFAULT (datetime('now','localtime')),
     FOREIGN KEY (cliente_id) REFERENCES clientes(id),
     FOREIGN KEY (vendedor_id) REFERENCES usuarios(id),
@@ -554,7 +557,21 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_crm_etapa ON crm_oportunidades(etapa);
   CREATE INDEX IF NOT EXISTS idx_crm_cliente ON crm_oportunidades(cliente_id);
+  CREATE TABLE IF NOT EXISTS crm_interacoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    oportunidade_id INTEGER NOT NULL,
+    tipo TEXT DEFAULT 'Nota',
+    descricao TEXT,
+    proximo_passo TEXT,
+    usuario_id INTEGER,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (oportunidade_id) REFERENCES crm_oportunidades(id) ON DELETE CASCADE,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_crm_interacoes_opp ON crm_interacoes(oportunidade_id);
 `);
+ensureColumn('crm_oportunidades', 'tags', "TEXT DEFAULT ''");
+ensureColumn('crm_oportunidades', 'orcamento_id', 'INTEGER');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS contratos (
@@ -976,6 +993,10 @@ const defaults = {
   pix_chave: '',
   pix_nome: '',
   pix_cidade: '',
+  crm_prob_lead: '10',
+  crm_prob_qualificacao: '30',
+  crm_prob_proposta: '50',
+  crm_prob_negociacao: '80',
   nfce_habilitada: '0',
   nfce_ambiente: 'homologacao',
   nfce_uf: 'RN',
