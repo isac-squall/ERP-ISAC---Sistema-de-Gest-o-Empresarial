@@ -163,7 +163,11 @@ const API = {
     mover: (id, etapa) => API.request(`/crm/${id}/mover`, { method: 'POST', body: { etapa } }),
     ganhar: (id) => API.request(`/crm/${id}/ganhar`, { method: 'POST', body: {} }),
     perder: (id) => API.request(`/crm/${id}/perder`, { method: 'POST', body: {} }),
-    delete: (id) => API.request(`/crm/${id}`, { method: 'DELETE' })
+    delete: (id) => API.request(`/crm/${id}`, { method: 'DELETE' }),
+    config: () => API.request('/crm/config'),
+    saveConfig: (d) => API.request('/crm/config', { method: 'PUT', body: d }),
+    interacoes: (id) => API.request(`/crm/${id}/interacoes`),
+    addInteracao: (id, d) => API.request(`/crm/${id}/interacoes`, { method: 'POST', body: d })
   },
 
   contratos: {

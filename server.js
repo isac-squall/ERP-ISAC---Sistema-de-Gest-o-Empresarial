@@ -545,7 +545,7 @@ function isLicencaKey(chave) {
 
 function isPreservedConfigKey(chave) {
   const k = String(chave || '');
-  return isLicencaKey(chave) || k.startsWith('empresa_') || k.startsWith('ecommerce_') || k.startsWith('pix_');
+  return isLicencaKey(chave) || k.startsWith('empresa_') || k.startsWith('ecommerce_') || k.startsWith('pix_') || k.startsWith('crm_prob_');
 }
 
 function onlyDigits(v) {
@@ -747,7 +747,8 @@ app.post('/api/config/apagar-banco', limitarAcaoCritica, (req, res) => {
       const tabelas = [
         'sessoes', 'venda_itens', 'nfce', 'vendas', 'orcamentos', 'estoque_movimentos',
         'promocoes', 'produto_composicao', 'produto_categorias', 'produtos', 'ordens_servico', 'financeiro', 'caixa',
-        'caixa_fechamentos', 'clientes', 'fornecedores', 'usuarios', 'impressoras'
+        'caixa_fechamentos', 'clientes', 'fornecedores', 'usuarios', 'impressoras',
+        'crm_interacoes', 'crm_oportunidades'
       ];
       for (const t of tabelas) db.exec(`DELETE FROM ${t}`);
       db.exec("UPDATE caixa_status SET aberto = 0, valor_inicial = 0, aberto_em = NULL, fechado_em = NULL, usuario_id = NULL WHERE id = 1");
@@ -757,7 +758,7 @@ app.post('/api/config/apagar-banco', limitarAcaoCritica, (req, res) => {
         if (!isPreservedConfigKey(row.chave)) delCfg.run(row.chave);
       }
       try {
-        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('sessoes','venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produto_composicao','produto_categorias','produtos','ordens_servico','financeiro','caixa','caixa_fechamentos','clientes','fornecedores','usuarios','impressoras')");
+        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('sessoes','venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produto_composicao','produto_categorias','produtos','ordens_servico','financeiro','caixa','caixa_fechamentos','clientes','fornecedores','usuarios','impressoras','crm_interacoes','crm_oportunidades')");
       } catch {}
       db.prepare(`INSERT INTO usuarios (nome, email, senha, cargo, celular, data_nascimento, cpf, tipo_pessoa, ativo)
         VALUES (?,?,?,?,?,?,?,?,1)`).run(
@@ -2093,7 +2094,8 @@ app.post('/api/gerencia/orcamentos/:id/aprovar', (req, res) => {
     gerenciaMod.transicaoOrc(atual.status, 'Aprovado');
     db.prepare(`UPDATE orcamentos SET status='Aprovado', aprovado_em=datetime('now','localtime'), aprovado_por=? WHERE id=?`)
       .run(req.usuario?.id || null, atual.id);
-    res.json({ message: 'Orcamento aprovado', status: 'Aprovado' });
+    const opp = crmMod.avancarPorOrcamento({ ...atual, status: 'Aprovado' }, 'aprovar', { usuario_id: req.usuario?.id });
+    res.json({ message: 'Orcamento aprovado', status: 'Aprovado', oportunidade_id: opp?.id || null });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message || 'Falha ao aprovar' });
   }
@@ -2105,7 +2107,8 @@ app.post('/api/gerencia/orcamentos/:id/recusar', (req, res) => {
     if (!atual) return res.status(404).json({ error: 'Orcamento nao encontrado' });
     gerenciaMod.transicaoOrc(atual.status, 'Recusado');
     db.prepare("UPDATE orcamentos SET status='Recusado' WHERE id=?").run(atual.id);
-    res.json({ message: 'Orcamento recusado', status: 'Recusado' });
+    const opp = crmMod.avancarPorOrcamento({ ...atual, status: 'Recusado' }, 'recusar', { usuario_id: req.usuario?.id });
+    res.json({ message: 'Orcamento recusado', status: 'Recusado', oportunidade_id: opp?.id || null });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message || 'Falha ao recusar' });
   }
@@ -2133,7 +2136,10 @@ app.post('/api/gerencia/orcamentos/:id/converter', (req, res) => {
       origem: 'gerencia'
     });
     db.prepare("UPDATE orcamentos SET status='Convertido', venda_id=? WHERE id=?").run(venda.id, atual.id);
-    res.json({ message: 'Orcamento convertido em venda', status: 'Convertido', venda_id: venda.id, total: venda.total });
+    const opp = crmMod.avancarPorOrcamento({ ...atual, status: 'Convertido', venda_id: venda.id }, 'converter', {
+      usuario_id: req.usuario?.id, venda_id: venda.id
+    });
+    res.json({ message: 'Orcamento convertido em venda', status: 'Convertido', venda_id: venda.id, total: venda.total, oportunidade_id: opp?.id || null });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message || 'Falha ao converter' });
   }
@@ -2325,43 +2331,75 @@ function notaCompleta(id) {
 }
 
 // ============ CRM ============
-app.get('/api/crm', (req, res) => {
-  const { search = '', etapa, vendedor_id } = req.query;
-  let query = `SELECT o.*, c.nome as cliente_cadastro, c.telefone as cliente_telefone, u.nome as vendedor_nome
+function crmSelectBase() {
+  return `SELECT o.*, c.nome as cliente_cadastro, c.telefone as cliente_telefone, c.email as cliente_email,
+    u.nome as vendedor_nome
     FROM crm_oportunidades o
     LEFT JOIN clientes c ON o.cliente_id = c.id
-    LEFT JOIN usuarios u ON o.vendedor_id = u.id WHERE 1=1`;
+    LEFT JOIN usuarios u ON o.vendedor_id = u.id`;
+}
+
+app.get('/api/crm/config', (req, res) => {
+  const vendedores = db.prepare("SELECT id, nome FROM usuarios WHERE ativo=1 ORDER BY nome").all();
+  res.json({ probs: crmMod.lerProbs(), etapas: crmMod.ABERTAS, vendedores });
+});
+
+app.put('/api/crm/config', (req, res) => {
+  try {
+    const probs = crmMod.salvarProbs(req.body || {});
+    res.json({ message: 'Probabilidades atualizadas', probs });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.get('/api/crm', (req, res) => {
+  const { search = '', etapa, vendedor_id, tag, de, ate } = req.query;
+  let query = `${crmSelectBase()} WHERE 1=1`;
   const params = [];
   if (etapa) { query += ' AND o.etapa=?'; params.push(crmMod.normalizarEtapa(etapa)); }
   if (vendedor_id) { query += ' AND o.vendedor_id=?'; params.push(Number(vendedor_id)); }
+  if (de) { query += ' AND date(o.criado_em) >= date(?)'; params.push(de); }
+  if (ate) { query += ' AND date(o.criado_em) <= date(?)'; params.push(ate); }
+  if (tag) {
+    query += " AND (',' || LOWER(REPLACE(IFNULL(o.tags,''), ' ', '')) || ',') LIKE ?";
+    params.push(`%,${String(tag).trim().toLowerCase().replace(/\s+/g, '')},%`);
+  }
   if (search) {
-    query += ' AND (o.titulo LIKE ? OR IFNULL(o.cliente_nome,\'\') LIKE ? OR IFNULL(c.nome,\'\') LIKE ?)';
+    query += ' AND (o.titulo LIKE ? OR IFNULL(o.cliente_nome,\'\') LIKE ? OR IFNULL(c.nome,\'\') LIKE ? OR IFNULL(o.tags,\'\') LIKE ?)';
     const s = `%${search}%`;
-    params.push(s, s, s);
+    params.push(s, s, s, s);
   }
   query += ' ORDER BY o.id DESC';
   const data = db.prepare(query).all(...params);
-  res.json({ data, kanban: crmMod.agruparKanban(data), resumo: crmMod.resumirFunil(data) });
+  const vendedores = db.prepare("SELECT id, nome FROM usuarios WHERE ativo=1 ORDER BY nome").all();
+  const tags = [...new Set(data.flatMap(o => crmMod.listaTags(o.tags)))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  res.json({
+    data,
+    kanban: crmMod.agruparKanban(data),
+    resumo: crmMod.resumirFunil(data),
+    vendedores,
+    tags,
+    probs: crmMod.lerProbs()
+  });
 });
 
 app.get('/api/crm/:id', (req, res) => {
-  const row = db.prepare(`SELECT o.*, c.nome as cliente_cadastro, u.nome as vendedor_nome
-    FROM crm_oportunidades o LEFT JOIN clientes c ON o.cliente_id=c.id
-    LEFT JOIN usuarios u ON o.vendedor_id=u.id WHERE o.id=?`).get(req.params.id);
+  const row = db.prepare(`${crmSelectBase()} WHERE o.id=?`).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
+  row.interacoes = crmMod.listarInteracoes(row.id);
   res.json(row);
 });
 
 app.post('/api/crm', (req, res) => {
   try {
-    const d = crmMod.payloadOportunidade(req.body || {});
+    const d = crmMod.payloadOportunidade(req.body || {}, crmMod.lerProbs());
     if (!d.vendedor_id && req.usuario?.id) d.vendedor_id = req.usuario.id;
     const r = db.prepare(`INSERT INTO crm_oportunidades
-      (titulo, cliente_id, cliente_nome, valor, etapa, probabilidade, origem, vendedor_id, previsao_fechamento, observacao)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+      (titulo, cliente_id, cliente_nome, valor, etapa, probabilidade, origem, vendedor_id, previsao_fechamento, observacao, tags, orcamento_id, venda_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       d.titulo, d.cliente_id, d.cliente_nome, d.valor, d.etapa, d.probabilidade,
-      d.origem, d.vendedor_id, d.previsao_fechamento, d.observacao
+      d.origem, d.vendedor_id, d.previsao_fechamento, d.observacao, d.tags, d.orcamento_id, d.venda_id
     );
+    crmMod.registrarInteracao(r.lastInsertRowid, { tipo: 'Nota', descricao: 'Oportunidade criada' }, req.usuario?.id);
     res.json({ id: r.lastInsertRowid });
   } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
@@ -2370,15 +2408,18 @@ app.put('/api/crm/:id', (req, res) => {
   try {
     const atual = db.prepare('SELECT * FROM crm_oportunidades WHERE id=?').get(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
-    const d = crmMod.payloadOportunidade({ ...atual, ...(req.body || {}) });
+    const probs = crmMod.lerProbs();
+    const d = crmMod.payloadOportunidade({ ...atual, ...(req.body || {}) }, probs);
     if (req.body?.etapa && req.body.etapa !== atual.etapa) {
       d.etapa = crmMod.transicaoEtapa(atual.etapa, req.body.etapa);
-      if (req.body.probabilidade == null) d.probabilidade = crmMod.probabilidadeDaEtapa(d.etapa);
+      if (req.body.probabilidade == null || req.body.probabilidade === '') {
+        d.probabilidade = crmMod.probabilidadeDaEtapa(d.etapa, probs);
+      }
     }
     db.prepare(`UPDATE crm_oportunidades SET titulo=?, cliente_id=?, cliente_nome=?, valor=?, etapa=?,
-      probabilidade=?, origem=?, vendedor_id=?, previsao_fechamento=?, observacao=? WHERE id=?`).run(
+      probabilidade=?, origem=?, vendedor_id=?, previsao_fechamento=?, observacao=?, tags=? WHERE id=?`).run(
       d.titulo, d.cliente_id, d.cliente_nome, d.valor, d.etapa, d.probabilidade,
-      d.origem, d.vendedor_id, d.previsao_fechamento, d.observacao, req.params.id
+      d.origem, d.vendedor_id, d.previsao_fechamento, d.observacao, d.tags, req.params.id
     );
     res.json({ message: 'Oportunidade atualizada', etapa: d.etapa });
   } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
@@ -2389,8 +2430,9 @@ app.post('/api/crm/:id/mover', (req, res) => {
     const atual = db.prepare('SELECT * FROM crm_oportunidades WHERE id=?').get(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
     const etapa = crmMod.transicaoEtapa(atual.etapa, req.body?.etapa);
-    const probabilidade = crmMod.probabilidadeDaEtapa(etapa);
+    const probabilidade = crmMod.probabilidadeDaEtapa(etapa, crmMod.lerProbs());
     db.prepare('UPDATE crm_oportunidades SET etapa=?, probabilidade=? WHERE id=?').run(etapa, probabilidade, req.params.id);
+    crmMod.registrarInteracao(atual.id, { tipo: 'Nota', descricao: `Etapa ${atual.etapa} -> ${etapa}` }, req.usuario?.id);
     res.json({ message: 'Etapa atualizada', etapa, probabilidade });
   } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
@@ -2401,6 +2443,7 @@ app.post('/api/crm/:id/ganhar', (req, res) => {
     if (!atual) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
     crmMod.transicaoEtapa(atual.etapa, 'Ganho');
     db.prepare("UPDATE crm_oportunidades SET etapa='Ganho', probabilidade=100 WHERE id=?").run(req.params.id);
+    crmMod.registrarInteracao(atual.id, { tipo: 'Nota', descricao: 'Marcada como Ganho' }, req.usuario?.id);
     res.json({ message: 'Oportunidade ganha', etapa: 'Ganho' });
   } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
@@ -2411,11 +2454,28 @@ app.post('/api/crm/:id/perder', (req, res) => {
     if (!atual) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
     crmMod.transicaoEtapa(atual.etapa, 'Perdido');
     db.prepare("UPDATE crm_oportunidades SET etapa='Perdido', probabilidade=0 WHERE id=?").run(req.params.id);
+    crmMod.registrarInteracao(atual.id, { tipo: 'Nota', descricao: 'Marcada como Perdido' }, req.usuario?.id);
     res.json({ message: 'Oportunidade perdida', etapa: 'Perdido' });
   } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
+app.get('/api/crm/:id/interacoes', (req, res) => {
+  const atual = db.prepare('SELECT id FROM crm_oportunidades WHERE id=?').get(req.params.id);
+  if (!atual) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
+  res.json({ data: crmMod.listarInteracoes(atual.id) });
+});
+
+app.post('/api/crm/:id/interacoes', (req, res) => {
+  try {
+    const atual = db.prepare('SELECT id FROM crm_oportunidades WHERE id=?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Oportunidade nao encontrada' });
+    const row = crmMod.registrarInteracao(atual.id, req.body || {}, req.usuario?.id);
+    res.json(row);
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
 app.delete('/api/crm/:id', (req, res) => {
+  db.prepare('DELETE FROM crm_interacoes WHERE oportunidade_id=?').run(req.params.id);
   db.prepare('DELETE FROM crm_oportunidades WHERE id=?').run(req.params.id);
   res.json({ message: 'Oportunidade removida' });
 });
@@ -4344,7 +4404,13 @@ app.post('/api/orcamentos', (req, res) => {
     cliente_id || null, cliente_nome || 'Visitante', JSON.stringify(itens),
     subtotal || 0, desconto || 0, total || 0, observacao || null, usuario_id || null
   );
-  res.json({ id: result.lastInsertRowid, message: 'Orçamento salvo' });
+  const orc = {
+    id: result.lastInsertRowid, cliente_id: cliente_id || null,
+    cliente_nome: cliente_nome || 'Visitante', total: total || 0, usuario_id
+  };
+  const opp = crmMod.avancarPorOrcamento(orc, 'criar', { usuario_id });
+  if (opp?.id) db.prepare('UPDATE orcamentos SET oportunidade_id=? WHERE id=?').run(opp.id, orc.id);
+  res.json({ id: orc.id, message: 'Orçamento salvo', oportunidade_id: opp?.id || null });
 });
 
 app.delete('/api/orcamentos/:id', (req, res) => {

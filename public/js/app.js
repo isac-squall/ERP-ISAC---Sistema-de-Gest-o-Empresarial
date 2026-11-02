@@ -717,6 +717,19 @@ function abrirWhatsappCliente(telefone) {
   window.open('https://wa.me/' + full, '_blank');
 }
 
+function abrirEmailCliente(email) {
+  const e = String(email || '').trim();
+  if (!e) { showToast('Informe o e-mail do cliente', 'error'); return; }
+  window.open('mailto:' + e, '_blank');
+}
+
+async function crmRegistrarContato(id, tipo, extra) {
+  if (!id) return;
+  try {
+    await API.crm.addInteracao(id, { tipo, descricao: extra || `Contato via ${tipo}` });
+  } catch {}
+}
+
 async function deleteCliente(id) {
   if (!confirm('Deseja excluir este cliente?')) return;
   try {
@@ -727,13 +740,30 @@ async function deleteCliente(id) {
 
 const CRM_ETAPAS = ['Lead', 'Qualificacao', 'Proposta', 'Negociacao', 'Ganho', 'Perdido'];
 const CRM_ORIGENS = ['Indicacao', 'WhatsApp', 'Loja', 'Telefone', 'Site', 'Marketplace', 'Visita', 'Outro'];
+const CRM_INTERACOES = ['Ligacao', 'Reuniao', 'Email', 'WhatsApp', 'Nota', 'Proximo'];
+
+function crmListParams(st) {
+  const p = {};
+  if (st.search) p.search = st.search;
+  if (st.vendedor_id) p.vendedor_id = st.vendedor_id;
+  if (st.tag) p.tag = st.tag;
+  if (st.de) p.de = st.de;
+  if (st.ate) p.ate = st.ate;
+  return p;
+}
 
 async function renderCrm() {
   const st = pageState.crm;
   st.search = st.search || '';
-  const result = await API.crm.list({ search: st.search });
+  st.vendedor_id = st.vendedor_id || '';
+  st.tag = st.tag || '';
+  st.periodo = st.periodo || '';
+  const result = await API.crm.list(crmListParams(st));
   const r = result.resumo || { total: 0, abertas: 0, ganhas: 0, valor_aberto: 0, ponderado: 0 };
   const kanban = result.kanban || {};
+  const vendedores = result.vendedores || [];
+  const tags = result.tags || [];
+  const probs = result.probs || {};
   document.getElementById('content').innerHTML = `
     ${pageHeader('CRM', 'Dashboard / CRM')}
     <div class="stats-row stats-row-5">
@@ -743,12 +773,33 @@ async function renderCrm() {
       <div class="stat-card blue"><h4>Pipeline</h4><div class="stat-value">${formatCurrency(r.valor_aberto || 0)}</div></div>
       <div class="stat-card"><h4>Ponderado</h4><div class="stat-value">${formatCurrency(r.ponderado || 0)}</div></div>
     </div>
-    <div class="toolbar">
+    <div class="crm-filters">
       <div class="search-box">
         <i class="fas fa-search"></i>
-        <input type="text" placeholder="Titulo ou cliente..." value="${escapeHtml(st.search)}" id="crm-search">
+        <input type="text" placeholder="Titulo, cliente ou tag..." value="${escapeHtml(st.search)}" id="crm-search">
       </div>
-      <span class="toolbar-info">Funil de vendas</span>
+      <div class="form-group"><label>Periodo</label>
+        <select id="crm-periodo">
+          <option value="">Todos</option>
+          ${[['hoje','Hoje'],['7dias','7 dias'],['30dias','30 dias'],['mes','Mes'],['ano','Ano']].map(([k,l]) =>
+            `<option value="${k}" ${st.periodo === k ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>De</label><input type="date" id="crm-de" value="${st.de || ''}"></div>
+      <div class="form-group"><label>Ate</label><input type="date" id="crm-ate" value="${st.ate || ''}"></div>
+      <div class="form-group"><label>Vendedor</label>
+        <select id="crm-vendedor">
+          <option value="">Todos</option>
+          ${vendedores.map(u => `<option value="${u.id}" ${String(st.vendedor_id) === String(u.id) ? 'selected' : ''}>${escapeHtml(u.nome)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Tag</label>
+        <select id="crm-tag">
+          <option value="">Todas</option>
+          ${tags.map(t => `<option value="${escapeHtml(t)}" ${st.tag === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}
+        </select>
+      </div>
+      <button type="button" class="btn btn-outline" id="crm-probs" title="Probabilidade por etapa"><i class="fas fa-percent"></i> Probabilidades</button>
       <div class="toolbar-spacer"></div>
       <button class="btn btn-primary" id="crm-new"><i class="fas fa-plus"></i> Nova oportunidade</button>
     </div>
@@ -756,33 +807,91 @@ async function renderCrm() {
       ${CRM_ETAPAS.map(e => {
         const cards = kanban[e] || [];
         const soma = cards.reduce((s, o) => s + (Number(o.valor) || 0), 0);
+        const pct = probs[e] != null ? ` · ${probs[e]}%` : '';
         return `<div class="kanban-col">
-          <div class="kanban-head">${escapeHtml(e)} <span>${cards.length} · ${formatCurrency(soma)}</span></div>
+          <div class="kanban-head">${escapeHtml(e)}${pct} <span>${cards.length} · ${formatCurrency(soma)}</span></div>
           <div class="kanban-list">${cards.map(o => renderCrmCard(o)).join('') || '<div class="kanban-empty">Vazio</div>'}</div>
         </div>`;
       }).join('')}
     </div>`;
   document.getElementById('crm-new').onclick = () => showCrmForm();
+  document.getElementById('crm-probs').onclick = () => showCrmProbs(probs);
   const search = document.getElementById('crm-search');
   search.oninput = debounce(() => { st.search = search.value; renderCrm(); }, 300);
+  document.getElementById('crm-periodo').onchange = () => {
+    st.periodo = document.getElementById('crm-periodo').value;
+    if (st.periodo) {
+      const range = relatorioDefaultRange(st.periodo);
+      st.de = range.de; st.ate = range.ate;
+    } else { st.de = ''; st.ate = ''; }
+    renderCrm();
+  };
+  document.getElementById('crm-de').onchange = () => { st.de = document.getElementById('crm-de').value; st.periodo = 'custom'; renderCrm(); };
+  document.getElementById('crm-ate').onchange = () => { st.ate = document.getElementById('crm-ate').value; st.periodo = 'custom'; renderCrm(); };
+  document.getElementById('crm-vendedor').onchange = () => { st.vendedor_id = document.getElementById('crm-vendedor').value; renderCrm(); };
+  document.getElementById('crm-tag').onchange = () => { st.tag = document.getElementById('crm-tag').value; renderCrm(); };
 }
 
 function renderCrmCard(o) {
-  const tel = o.cliente_telefone ? `<button type="button" class="btn-icon" title="WhatsApp" onclick="abrirWhatsappCliente(${JSON.stringify(String(o.cliente_telefone))})"><i class="fab fa-whatsapp"></i></button>` : '';
+  const tel = o.cliente_telefone
+    ? `<button type="button" class="btn-icon" title="WhatsApp" onclick="crmAbrirWhatsapp(${o.id}, ${JSON.stringify(String(o.cliente_telefone))})"><i class="fab fa-whatsapp"></i></button>`
+    : '';
+  const mail = o.cliente_email
+    ? `<button type="button" class="btn-icon" title="E-mail" onclick="crmAbrirEmail(${o.id}, ${JSON.stringify(String(o.cliente_email))})"><i class="fas fa-envelope"></i></button>`
+    : '';
   const next = CRM_ETAPAS[CRM_ETAPAS.indexOf(o.etapa) + 1];
   const aberta = ['Lead', 'Qualificacao', 'Proposta', 'Negociacao'].includes(o.etapa);
+  const tags = String(o.tags || '').split(/[,;#]+/).map(s => s.trim()).filter(Boolean);
   return `<div class="kanban-card">
     <strong>${escapeHtml(o.titulo)}</strong>
     <span>${escapeHtml(o.cliente_cadastro || o.cliente_nome || 'Sem cliente')}</span>
     <span class="kanban-valor">${formatCurrency(o.valor)} · ${o.probabilidade || 0}%</span>
+    ${o.vendedor_nome ? `<span class="kanban-meta">${escapeHtml(o.vendedor_nome)}</span>` : ''}
+    ${tags.length ? `<div class="kanban-tags">${tags.map(t => `<span class="kanban-tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
     <div class="kanban-actions">
-      ${tel}
+      ${tel}${mail}
+      <button class="btn-icon" title="Historico" onclick="showCrmForm(${o.id})"><i class="fas fa-stream"></i></button>
       <button class="btn-icon edit" title="Editar" onclick="showCrmForm(${o.id})"><i class="fas fa-edit"></i></button>
       ${aberta && next && next !== 'Ganho' && next !== 'Perdido' ? `<button class="btn-icon" title="Avancar" onclick="crmMover(${o.id}, '${next}')"><i class="fas fa-arrow-right"></i></button>` : ''}
       ${aberta ? `<button class="btn-icon" title="Ganhar" onclick="crmGanhar(${o.id})"><i class="fas fa-check"></i></button>
       <button class="btn-icon delete" title="Perder" onclick="crmPerder(${o.id})"><i class="fas fa-times"></i></button>` : ''}
     </div>
   </div>`;
+}
+
+async function crmAbrirWhatsapp(id, telefone) {
+  abrirWhatsappCliente(telefone);
+  await crmRegistrarContato(id, 'WhatsApp');
+}
+
+async function crmAbrirEmail(id, email) {
+  abrirEmailCliente(email);
+  await crmRegistrarContato(id, 'Email');
+}
+
+async function showCrmProbs(probs) {
+  const p = probs || {};
+  openModal('Probabilidade por etapa', `
+    <form id="crm-prob-form">
+      <p class="muted">O ponderado usa valor x probabilidade da oportunidade. Ao avancar a etapa, aplica o percentual configurado.</p>
+      <div class="form-row">
+        <div class="form-group"><label>Lead %</label><input name="Lead" type="number" min="0" max="100" value="${p.Lead ?? 10}"></div>
+        <div class="form-group"><label>Qualificacao %</label><input name="Qualificacao" type="number" min="0" max="100" value="${p.Qualificacao ?? 30}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Proposta %</label><input name="Proposta" type="number" min="0" max="100" value="${p.Proposta ?? 50}"></div>
+        <div class="form-group"><label>Negociacao %</label><input name="Negociacao" type="number" min="0" max="100" value="${p.Negociacao ?? 80}"></div>
+      </div>
+    </form>`,
+    `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="crm-prob-save">Salvar</button>`);
+  document.getElementById('crm-prob-save').onclick = async () => {
+    const f = document.getElementById('crm-prob-form');
+    const body = Object.fromEntries(new FormData(f).entries());
+    try {
+      await API.crm.saveConfig(body);
+      closeModal(); showToast('Probabilidades salvas', 'success'); renderCrm();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
 }
 
 async function crmMover(id, etapa) {
@@ -799,10 +908,25 @@ async function crmPerder(id) {
   catch (err) { showToast(err.message, 'error'); }
 }
 
+function renderCrmTimeline(items) {
+  if (!items?.length) return '<p class="muted">Nenhuma interacao ainda.</p>';
+  return items.map(i => `<div class="crm-tl-item">
+    <strong>${escapeHtml(i.tipo)}</strong>
+    <span>${escapeHtml(i.descricao || '')}</span>
+    ${i.proximo_passo ? `<span>Proximo: ${escapeHtml(i.proximo_passo)}</span>` : ''}
+    <span>${escapeHtml(i.usuario_nome || '')} · ${formatDateTime(i.criado_em)}</span>
+  </div>`).join('');
+}
+
 async function showCrmForm(id) {
   let data = {};
   const clientes = await API.clientes.all().catch(() => []);
+  const cfg = await API.crm.config().catch(() => ({ vendedores: [] }));
+  const usuarios = cfg.vendedores || [];
   if (id) data = await API.crm.get(id);
+  const interacoes = data.interacoes || [];
+  const tel = data.cliente_telefone || (clientes.find(c => c.id === Number(data.cliente_id)) || {}).telefone;
+  const mail = data.cliente_email || (clientes.find(c => c.id === Number(data.cliente_id)) || {}).email;
   openModal(id ? 'Editar oportunidade' : 'Nova oportunidade', `
     <form id="entity-form">
       <div class="form-group"><label>Titulo *</label><input name="titulo" value="${escapeHtml(data.titulo || '')}" required></div>
@@ -822,23 +946,68 @@ async function showCrmForm(id) {
         </div>
       </div>
       <div class="form-row">
+        <div class="form-group"><label>Probabilidade %</label><input name="probabilidade" type="number" min="0" max="100" value="${data.probabilidade ?? ''}" placeholder="Padrao da etapa"></div>
+        <div class="form-group"><label>Vendedor</label>
+          <select name="vendedor_id">
+            <option value="">—</option>
+            ${(Array.isArray(usuarios) ? usuarios : []).map(u => `<option value="${u.id}" ${Number(data.vendedor_id) === u.id ? 'selected' : ''}>${escapeHtml(u.nome)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
         <div class="form-group"><label>Origem</label>
           <select name="origem">${CRM_ORIGENS.map(e => `<option ${data.origem === e ? 'selected' : ''}>${e}</option>`).join('')}</select>
         </div>
         <div class="form-group"><label>Previsao</label><input name="previsao_fechamento" type="date" value="${toInputDate(data.previsao_fechamento)}"></div>
       </div>
+      <div class="form-group"><label>Tags</label><input name="tags" value="${escapeHtml(data.tags || '')}" placeholder="vip, urgente, reforma"></div>
       <div class="form-group"><label>Observacao</label><textarea name="observacao" rows="2">${escapeHtml(data.observacao || '')}</textarea></div>
-    </form>`,
+    </form>
+    ${id ? `<div class="crm-contato-bar" style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">
+      ${tel ? `<button type="button" class="btn btn-outline" id="crm-wa"><i class="fab fa-whatsapp"></i> WhatsApp</button>` : ''}
+      ${mail ? `<button type="button" class="btn btn-outline" id="crm-mail"><i class="fas fa-envelope"></i> E-mail</button>` : ''}
+    </div>
+    <h4>Historico</h4>
+    <div class="crm-timeline" id="crm-timeline">${renderCrmTimeline(interacoes)}</div>
+    <form id="crm-inter-form" style="margin-top:8px">
+      <div class="form-row">
+        <div class="form-group"><label>Tipo</label>
+          <select name="tipo">${CRM_INTERACOES.map(t => `<option>${t}</option>`).join('')}</select>
+        </div>
+        <div class="form-group"><label>Proximo passo</label><input name="proximo_passo" placeholder="Retornar sexta 10h"></div>
+      </div>
+      <div class="form-group"><label>Anotacao</label><textarea name="descricao" rows="2" placeholder="Ligacao, reuniao, e-mail..."></textarea></div>
+      <button type="button" class="btn btn-teal" id="crm-inter-save">Registrar interacao</button>
+    </form>` : ''}`,
     `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
   document.getElementById('entity-save').onclick = async () => {
     const f = document.getElementById('entity-form');
     const body = Object.fromEntries(new FormData(f).entries());
     body.valor = Number(body.valor) || 0;
     body.cliente_id = body.cliente_id ? Number(body.cliente_id) : null;
+    body.vendedor_id = body.vendedor_id ? Number(body.vendedor_id) : null;
+    if (body.probabilidade === '') delete body.probabilidade;
+    else body.probabilidade = Number(body.probabilidade);
     try {
       if (id) await API.crm.update(id, body);
       else await API.crm.create(body);
       closeModal(); showToast('Salvo', 'success'); renderCrm();
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+  const wa = document.getElementById('crm-wa');
+  if (wa) wa.onclick = () => crmAbrirWhatsapp(id, tel);
+  const em = document.getElementById('crm-mail');
+  if (em) em.onclick = () => crmAbrirEmail(id, mail);
+  const interSave = document.getElementById('crm-inter-save');
+  if (interSave) interSave.onclick = async () => {
+    const f = document.getElementById('crm-inter-form');
+    const body = Object.fromEntries(new FormData(f).entries());
+    try {
+      await API.crm.addInteracao(id, body);
+      showToast('Interacao registrada', 'success');
+      const r = await API.crm.interacoes(id);
+      document.getElementById('crm-timeline').innerHTML = renderCrmTimeline(r.data || []);
+      f.reset();
     } catch (err) { showToast(err.message, 'error'); }
   };
 }
@@ -7141,7 +7310,7 @@ async function renderManual() {
         <li><strong>Gerência</strong> — Aprovacao de orcamentos, compras, conferencia de caixa, inventario e consulta de estoque (Administrador e Gerente).</li>
         <li><strong>Ordens de serviço</strong> — Controle status, datas e valor previsto de cada OS.</li>
         <li><strong>Financeiro</strong> — Vendas a vista entram pagas; Fiado vira contas a receber. Taxas de cartao/PIX e sangria/suprimento lancam sozinhos. Abas: contas bancarias (CSV), conciliacao, fluxo 30 dias e DRE (competencia, TXT/CSV).</li>
-        <li><strong>CRM</strong> — Funil kanban (Lead a Perdido). Avance, ganhe ou perca a oportunidade.</li>
+        <li><strong>CRM</strong> — Funil kanban (Lead a Perdido) com probabilidade editavel, filtros, timeline e WhatsApp/e-mail. Orcamento do PDV avanca o card.</li>
         <li><strong>Contratos</strong> — Recorrencia e MRR. Faturar lanca Receita no Financeiro. Encerre antes de excluir.</li>
         <li><strong>NF-e / NFS-e</strong> — Rascunho e autorizacao simulada (sem SEFAZ/prefeitura). Baixe o XML.</li>
         <li><strong>Producao</strong> — OP com BOM do kit. Concluir baixa insumos e entra o acabado. Curva ABC do mes.</li>
