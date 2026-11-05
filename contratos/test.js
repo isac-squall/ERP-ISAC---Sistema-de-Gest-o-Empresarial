@@ -36,8 +36,9 @@ const tx = db.transaction(() => {
 
   const c = db.prepare('SELECT * FROM contratos WHERE id=?').get(id);
   contratos.podeFaturar(c, '2026-01-10');
+  contratos.podeFaturar(c, '2026-01-05', contratos.DIAS_ANTECIPAR_FATURA);
   try {
-    contratos.podeFaturar(c, '2026-01-09');
+    contratos.podeFaturar(c, '2026-01-04', contratos.DIAS_ANTECIPAR_FATURA);
     assert.fail('cedo demais');
   } catch (e) {
     assert.ok(/ainda nao chegou/i.test(e.message));
@@ -45,19 +46,60 @@ const tx = db.transaction(() => {
   const apos = contratos.aposFaturar(c, '2026-01-10');
   assert.strictEqual(apos.proximo_faturamento, '2026-02-10');
   assert.strictEqual(apos.status, 'Ativo');
+  assert.strictEqual(contratos.dataVencimento(c, '2026-01-10'), '2026-01-10');
+  const lanc = contratos.lancamentoFatura(c, '2026-01-10');
+  assert.strictEqual(lanc.data_vencimento, '2026-01-10');
+  assert.ok(lanc.descricao.includes('2026-01-10'));
 
   db.prepare(`INSERT INTO financeiro
-    (tipo, categoria, descricao, valor, data_vencimento, status, cliente_id, origem)
-    VALUES (?,?,?,?,?,?,?,?)`).run(
-    'Receita', 'Contrato', `${MARK} fatura`, 300, '2026-01-10', 'Pendente', cli.lastInsertRowid, 'contrato'
+    (tipo, categoria, descricao, valor, data_vencimento, status, cliente_id, origem, contrato_id)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(
+    'Receita', 'Contrato', `${MARK} fatura`, 300, '2025-12-10', 'Pendente', cli.lastInsertRowid, 'contrato', id
   );
+  const adimpl = contratos.resumoAdimplencia(
+    db.prepare('SELECT * FROM financeiro WHERE contrato_id=?').all(id),
+    '2026-01-10'
+  );
+  assert.strictEqual(adimpl.situacao, 'Inadimplente');
+  assert.strictEqual(adimpl.qtd_atrasado, 1);
+
+  const payloadReaj = contratos.payloadContrato({
+    cliente_id: cli.lastInsertRowid,
+    descricao: `${MARK} Reajuste`,
+    valor: 1000,
+    periodicidade: 'Mensal',
+    inicio: '2025-01-10',
+    dia_vencimento: 10,
+    indice_reajuste: 'IGP-M',
+    auto_faturar: 1,
+    fim: '2026-01-20'
+  });
+  assert.strictEqual(payloadReaj.indice_reajuste, 'IGP-M');
+  assert.strictEqual(payloadReaj.auto_faturar, 1);
+  assert.strictEqual(payloadReaj.fim, '2026-01-20');
+  assert.ok(contratos.precisaReajuste(payloadReaj, '2026-01-10'));
+  assert.ok(contratos.vigenciaProxima(payloadReaj, '2026-01-01', 30));
+  const reaj = contratos.aplicarReajuste(payloadReaj, 4.5, '2026-01-10');
+  assert.strictEqual(reaj.valor, 1045);
+  assert.strictEqual(reaj.ultimo_reajuste, '2026-01-10');
+  assert.ok(contratos.deveAutoFaturar({ ...c, auto_faturar: 1 }, '2026-01-05'));
+  assert.ok(!contratos.deveAutoFaturar({ ...c, auto_faturar: 0 }, '2026-01-05'));
+
+  const anexo = contratos.validarAnexo('data:application/pdf;base64,AAAA', 'contrato.pdf');
+  assert.strictEqual(anexo.anexo_nome, 'contrato.pdf');
+  try {
+    contratos.validarAnexo('data:text/plain;base64,AAAA', 'x.txt');
+    assert.fail('anexo invalido');
+  } catch (e) {
+    assert.ok(/pdf ou imagem/i.test(e.message));
+  }
 
   const rows = db.prepare('SELECT * FROM contratos WHERE observacao=?').all(MARK);
   const resumo = contratos.resumirContratos(rows);
   assert.strictEqual(resumo.ativos, 1);
   assert.strictEqual(resumo.mrr, 300);
 
-  console.log('Contratos OK: periodicidade, faturamento e MRR');
+  console.log('Contratos OK: periodicidade, auto-fatura, adimplencia, reajuste, vigencia e anexo');
   throw new Error('__ROLLBACK__');
 });
 

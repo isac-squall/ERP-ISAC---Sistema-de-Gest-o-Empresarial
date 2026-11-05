@@ -367,7 +367,7 @@ async function refreshNotificacoes(fillPanel) {
 function navigate(page) {
   if (!canAccess(page)) {
     showToast('Sem permissão para esta página', 'error');
-    return;
+    return Promise.resolve();
   }
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el =>
@@ -378,7 +378,7 @@ function navigate(page) {
     group.querySelector('.nav-group-toggle')?.classList.toggle('active', inside);
   });
   pageState[page] = pageState[page] || { page: 1, limit: 15, search: '' };
-  renderPage();
+  return renderPage();
 }
 
 async function renderPage() {
@@ -441,15 +441,32 @@ function pageHeader(title, breadcrumb) {
 }
 
 // ===================== DASHBOARD =====================
+function dashChartTitulo(periodo) {
+  if (periodo === 'mes') return 'Receita do mes';
+  if (periodo === 'ano') return 'Receita do ano';
+  return 'Receita da semana';
+}
+
 async function renderDashboard() {
-  const [d, charts] = await Promise.all([API.dashboard(), API.charts('semana')]);
+  const st = pageState.dashboard;
+  st.periodo = st.periodo || 'semana';
+  const [d, charts] = await Promise.all([API.dashboard(), API.charts(st.periodo)]);
   const maxReceita = Math.max(...(charts.receita || []).map(r => r.receita || 0), 1);
   const cc = charts.contasClientes || {};
+  const saldo = Number(d.saldoLiquido != null ? d.saldoLiquido : (d.contasReceber || 0) - (d.contasPagar || 0));
+  const atrasadas = d.atrasadas || [];
+  const osProntas = d.osProntasLista || [];
   document.getElementById('content').innerHTML = `
     ${pageHeader('Dashboard', 'Dashboard')}
+    <div class="dash-quick">
+      ${canAccess('vendas') ? `<button type="button" class="btn btn-primary" onclick="navigate('vendas')"><i class="fas fa-cash-register"></i> Nova venda</button>` : ''}
+      ${canAccess('clientes') ? `<button type="button" class="btn btn-outline" onclick="navigate('clientes').then(() => showClienteForm())"><i class="fas fa-user-plus"></i> Cadastrar cliente</button>` : ''}
+      ${canAccess('ordens-servico') ? `<button type="button" class="btn btn-outline" onclick="navigate('ordens-servico').then(() => showOSForm())"><i class="fas fa-tools"></i> Nova OS</button>` : ''}
+      ${canAccess('financeiro') ? `<button type="button" class="btn btn-outline" onclick="pageState.financeiro=pageState.financeiro||{page:1,limit:15,search:''}; pageState.financeiro.tab='receber'; navigate('financeiro')"><i class="fas fa-hand-holding-usd"></i> Contas a receber</button>` : ''}
+    </div>
     <div class="stats-row">
       <div class="stat-card blue"><h4>Vendas hoje</h4><div class="stat-value">${formatCurrency(d.vendasHoje)}</div></div>
-      <div class="stat-card green"><h4>Vendas do mês</h4><div class="stat-value">${formatCurrency(d.vendasMes)}</div></div>
+      <div class="stat-card green"><h4>Vendas do mes</h4><div class="stat-value">${formatCurrency(d.vendasMes)}</div></div>
       <div class="stat-card teal"><h4>Valor previsto (OS)</h4><div class="stat-value">${formatCurrency(d.valorPrevisto)}</div></div>
     </div>
     <div class="stats-row">
@@ -465,11 +482,11 @@ async function renderDashboard() {
     <div class="dashboard-grid">
       <div class="card">
         <div class="card-head">
-          <h3>Receita da semana</h3>
-          <select id="chart-periodo">
-            <option value="semana">Semana</option>
-            <option value="mes">Mês</option>
-            <option value="ano">Ano</option>
+          <h3 id="dash-chart-title">${dashChartTitulo(st.periodo)}</h3>
+          <select id="chart-periodo" aria-label="Periodo do grafico">
+            <option value="semana" ${st.periodo === 'semana' ? 'selected' : ''}>Semana</option>
+            <option value="mes" ${st.periodo === 'mes' ? 'selected' : ''}>Mes</option>
+            <option value="ano" ${st.periodo === 'ano' ? 'selected' : ''}>Ano</option>
           </select>
         </div>
         <div class="chart-placeholder" id="dash-chart">
@@ -493,29 +510,80 @@ async function renderDashboard() {
             <div class="stat-value" style="color:var(--danger);font-size:22px">${formatCurrency(d.contasPagar)}</div>
           </div>
         </div>
+        <div class="dash-saldo">
+          <h4 class="muted">Saldo liquido (receber - pagar)</h4>
+          <div class="stat-value" style="color:${saldo >= 0 ? 'var(--success)' : 'var(--danger)'};font-size:22px">${formatCurrency(saldo)}</div>
+        </div>
+      </div>
+    </div>
+    <div class="dashboard-grid">
+      <div class="card">
+        <div class="card-head">
+          <h3>Contas atrasadas</h3>
+          ${canAccess('financeiro') ? `<button type="button" class="btn btn-outline btn-sm" onclick="pageState.financeiro=pageState.financeiro||{page:1,limit:15,search:''}; pageState.financeiro.tab='receber'; navigate('financeiro')">Ver todas</button>` : ''}
+        </div>
+        <table class="data-table">
+          <thead><tr><th>Cliente</th><th>Venc.</th><th>Valor</th><th></th></tr></thead>
+          <tbody>${atrasadas.length ? atrasadas.map(f => `
+            <tr>
+              <td>${escapeHtml(f.cliente_nome || f.descricao || '-')}</td>
+              <td>${formatDate(f.data_vencimento)}</td>
+              <td class="text-danger">${formatCurrency(f.valor)}</td>
+              <td>${f.cliente_telefone ? `<button type="button" class="btn-icon" title="Cobrar no WhatsApp" onclick="abrirWhatsappCliente(${JSON.stringify(String(f.cliente_telefone))}, ${JSON.stringify('Ola! Identificamos um titulo em atraso no valor de ' + formatCurrency(f.valor) + '.')})"><i class="fab fa-whatsapp"></i></button>` : ''}</td>
+            </tr>`).join('') : '<tr class="empty-row"><td colspan="4">Nenhuma conta atrasada</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h3>OS prontas para entrega</h3>
+          ${canAccess('ordens-servico') ? `<button type="button" class="btn btn-outline btn-sm" onclick="navigate('ordens-servico')">Ver OS</button>` : ''}
+        </div>
+        <table class="data-table">
+          <thead><tr><th>#</th><th>Cliente</th><th>Servico</th><th>Valor</th><th></th></tr></thead>
+          <tbody>${osProntas.length ? osProntas.map(o => `
+            <tr>
+              <td>${o.id}</td>
+              <td>${escapeHtml(o.cliente_nome || '-')}</td>
+              <td>${escapeHtml(o.equipamento || o.solicitacao || '-')}</td>
+              <td>${formatCurrency(o.valor_previsto)}</td>
+              <td>${o.cliente_telefone ? `<button type="button" class="btn-icon" title="Notificar cliente" onclick="abrirWhatsappCliente(${JSON.stringify(String(o.cliente_telefone))}, ${JSON.stringify('Ola! Sua ordem de servico #' + o.id + ' esta pronta para entrega.')})"><i class="fab fa-whatsapp"></i></button>` : ''}</td>
+            </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Nenhuma OS pronta</td></tr>'}
+          </tbody>
+        </table>
       </div>
     </div>
     <div class="card">
       <h3>Vendas recentes</h3>
       <table class="data-table">
         <thead><tr><th>#</th><th>Cliente</th><th>Total</th><th>Pagamento</th><th>Data</th></tr></thead>
-        <tbody>${d.vendasRecentes.length ? d.vendasRecentes.map(v => `
+        <tbody>${(d.vendasRecentes || []).length ? d.vendasRecentes.map(v => `
           <tr><td>${v.id}</td><td>${escapeHtml(v.cliente_nome || 'Avulso')}</td><td>${formatCurrency(v.total)}</td><td>${escapeHtml(v.forma_pagamento || '-')}</td><td>${formatDateTime(v.criado_em)}</td></tr>
         `).join('') : '<tr class="empty-row"><td colspan="5">Nenhuma venda recente</td></tr>'}
         </tbody>
       </table>
     </div>`;
   document.getElementById('chart-periodo').onchange = async (e) => {
-    const c = await API.charts(e.target.value);
+    st.periodo = e.target.value;
+    const c = await API.charts(st.periodo);
     const max = Math.max(...(c.receita || []).map(r => r.receita || 0), 1);
+    document.getElementById('dash-chart-title').textContent = dashChartTitulo(st.periodo);
     document.getElementById('dash-chart').innerHTML = renderChartBars(c.receita, max);
   };
 }
 
 function renderChartBars(rows, max) {
-  if (!rows || !rows.length) return '<p class="muted">Sem dados no período</p>';
+  if (!rows || !rows.length) return '<p class="muted">Sem dados no periodo</p>';
+  const teto = Number(max) || 1;
+  const temValor = rows.some(v => Number(v.receita) > 0);
+  if (!temValor) {
+    return rows.map(v => `
+      <div class="chart-bar chart-bar-empty" style="height:8px" title="${escapeHtml(v.label)} ${formatCurrency(0)}">
+        <span>${escapeHtml(v.label)}</span>
+      </div>`).join('');
+  }
   return rows.map(v => `
-    <div class="chart-bar" style="height:${((v.receita || 0) / max * 160)}px" title="${escapeHtml(v.label)} ${formatCurrency(v.receita)}">
+    <div class="chart-bar" style="height:${Math.max(6, (Number(v.receita) || 0) / teto * 160)}px" title="${escapeHtml(v.label)} ${formatCurrency(v.receita)}">
       <span>${escapeHtml(v.label)}</span>
     </div>`).join('');
 }
@@ -710,11 +778,12 @@ async function showClienteForm(id) {
   };
 }
 
-function abrirWhatsappCliente(telefone) {
+function abrirWhatsappCliente(telefone, texto) {
   const n = String(telefone || '').replace(/\D/g, '');
   if (!n) { showToast('Informe o telefone do cliente', 'error'); return; }
   const full = n.startsWith('55') ? n : (n.length >= 10 && n.length <= 11 ? '55' + n : n);
-  window.open('https://wa.me/' + full, '_blank');
+  const msg = String(texto || '').trim();
+  window.open('https://wa.me/' + full + (msg ? '?text=' + encodeURIComponent(msg) : ''), '_blank');
 }
 
 function abrirEmailCliente(email) {
@@ -1014,19 +1083,27 @@ async function showCrmForm(id) {
 
 const CTR_STATUS = ['Ativo', 'Pausado', 'Encerrado'];
 const CTR_PERIOD = ['Mensal', 'Trimestral', 'Semestral', 'Anual'];
+const CTR_INDICES = ['Nenhum', 'IGP-M', 'IPCA', 'Manual'];
+
+function ctrAdimplenciaClass(s) {
+  if (s === 'Adimplente') return 'Recebido';
+  if (s === 'Inadimplente') return 'Recusado';
+  if (s === 'Em aberto') return 'Aguardando';
+  return 'Aguardando';
+}
 
 async function renderContratos() {
   const st = pageState.contratos;
   st.status = st.status || '';
   const result = await API.contratos.list({ search: st.search, page: st.page, limit: st.limit, status: st.status });
-  const r = result.resumo || { total: 0, ativos: 0, mrr: 0, pausados: 0 };
+  const r = result.resumo || { total: 0, ativos: 0, mrr: 0, alerta_vigencia: 0, inadimplentes: 0 };
   document.getElementById('content').innerHTML = `
     ${pageHeader('Contratos', 'Dashboard / Contratos')}
     <div class="stats-row stats-row-4">
       <div class="stat-card teal"><h4>Contratos</h4><div class="stat-value">${r.total || 0}</div></div>
       <div class="stat-card green"><h4>Ativos</h4><div class="stat-value">${r.ativos || 0}</div></div>
       <div class="stat-card blue"><h4>MRR</h4><div class="stat-value">${formatCurrency(r.mrr || 0)}</div></div>
-      <div class="stat-card orange"><h4>Pausados</h4><div class="stat-value">${r.pausados || 0}</div></div>
+      <div class="stat-card orange"><h4>Vigencia / Inadimplentes</h4><div class="stat-value">${r.alerta_vigencia || 0} / ${r.inadimplentes || 0}</div></div>
     </div>
     <div class="fin-tabs">
       ${[{ key: '', label: 'Todos' }, ...CTR_STATUS.map(s => ({ key: s, label: s }))].map(t =>
@@ -1036,7 +1113,7 @@ async function renderContratos() {
     ${renderTableToolbar(st.search, `Total: ${result.total}`, 'Novo contrato')}
     <div class="table-wrapper">
       <table class="data-table">
-        <thead><tr><th>#</th><th>Status</th><th>Cliente</th><th>Descricao</th><th>Valor</th><th>Periodo</th><th>Proximo</th><th>Acoes</th></tr></thead>
+        <thead><tr><th>#</th><th>Status</th><th>Cliente</th><th>Descricao</th><th>Valor</th><th>Periodo</th><th>Proximo</th><th>Adimplencia</th><th>Acoes</th></tr></thead>
         <tbody id="table-body">${renderContratosRows(result.data)}</tbody>
       </table>
       <div id="table-pagination"></div>
@@ -1049,20 +1126,30 @@ async function renderContratos() {
 }
 
 function renderContratosRows(data) {
-  if (!data.length) return '<tr class="empty-row"><td colspan="8">Nenhum contrato</td></tr>';
-  return data.map(c => `<tr>
+  if (!data.length) return '<tr class="empty-row"><td colspan="9">Nenhum contrato</td></tr>';
+  return data.map(c => {
+    const sit = (c.adimplencia && c.adimplencia.situacao) || 'Sem faturas';
+    const alertas = [
+      c.alerta_vigencia ? '<span class="status-badge cancelada" title="Vigencia proxima">Fim</span>' : '',
+      c.precisa_reajuste ? '<span class="status-badge aguardando" title="Reajuste anual">Reajuste</span>' : '',
+      c.has_anexo ? '<i class="fas fa-paperclip" title="Anexo"></i>' : ''
+    ].filter(Boolean).join(' ');
+    return `<tr>
     <td>${c.id}</td>
-    <td><span class="status-badge ${statusClass(c.status === 'Ativo' ? 'Recebido' : c.status === 'Pausado' ? 'Aguardando' : 'Recusado')}">${escapeHtml(c.status)}</span></td>
+    <td><span class="status-badge ${statusClass(c.status === 'Ativo' ? 'Recebido' : c.status === 'Pausado' ? 'Aguardando' : 'Recusado')}">${escapeHtml(c.status)}</span> ${alertas}</td>
     <td>${escapeHtml(c.cliente_nome || '-')}</td>
     <td>${escapeHtml(c.descricao)}</td>
     <td>${formatCurrency(c.valor)}</td>
-    <td>${escapeHtml(c.periodicidade)}</td>
+    <td>${escapeHtml(c.periodicidade)}${c.auto_faturar ? ' <i class="fas fa-bolt" title="Auto-faturar"></i>' : ''}</td>
     <td>${formatDate(c.proximo_faturamento)}</td>
+    <td><span class="status-badge ${statusClass(ctrAdimplenciaClass(sit))}">${escapeHtml(sit)}</span></td>
     <td class="actions-cell">
       ${c.status === 'Ativo' ? `<button class="btn-icon" title="Faturar" onclick="faturarContrato(${c.id})"><i class="fas fa-file-invoice-dollar"></i></button>` : ''}
+      ${c.precisa_reajuste ? `<button class="btn-icon" title="Reajustar" onclick="reajustarContrato(${c.id})"><i class="fas fa-percent"></i></button>` : ''}
       <button class="btn-icon edit" onclick="showContratoForm(${c.id})"><i class="fas fa-edit"></i></button>
       ${c.status !== 'Encerrado' ? `<button class="btn-icon" title="Encerrar" onclick="encerrarContrato(${c.id})"><i class="fas fa-stop"></i></button>` : ''}
-    </td></tr>`).join('');
+    </td></tr>`;
+  }).join('');
 }
 
 async function loadContratos() {
@@ -1083,11 +1170,21 @@ async function encerrarContrato(id) {
   try { await API.contratos.update(id, { status: 'Encerrado' }); showToast('Encerrado', 'success'); renderContratos(); }
   catch (err) { showToast(err.message, 'error'); }
 }
+async function reajustarContrato(id) {
+  const pct = prompt('Percentual de reajuste (ex: 4.5 para IGP-M/IPCA):');
+  if (pct == null || pct === '') return;
+  try {
+    const r = await API.contratos.reajustar(id, { percentual: Number(pct) });
+    showToast(`Reajuste ${r.percentual}%: ${formatCurrency(r.valor)}`, 'success');
+    renderContratos();
+  } catch (err) { showToast(err.message, 'error'); }
+}
 
 async function showContratoForm(id) {
-  let data = { periodicidade: 'Mensal', dia_vencimento: 10, status: 'Ativo' };
+  let data = { periodicidade: 'Mensal', dia_vencimento: 10, status: 'Ativo', indice_reajuste: 'Nenhum', auto_faturar: 0 };
   const clientes = await API.clientes.all().catch(() => []);
   if (id) data = await API.contratos.get(id);
+  const sit = (data.adimplencia && data.adimplencia.situacao) || '';
   openModal(id ? 'Editar contrato' : 'Novo contrato', `
     <form id="entity-form">
       <div class="form-group"><label>Cliente *</label>
@@ -1105,16 +1202,48 @@ async function showContratoForm(id) {
       </div>
       <div class="form-row">
         <div class="form-group"><label>Inicio</label><input name="inicio" type="date" value="${toInputDate(data.inicio) || hojeLocalIso()}"></div>
-        <div class="form-group"><label>Dia vencimento</label><input name="dia_vencimento" type="number" min="1" max="28" value="${data.dia_vencimento || 10}"></div>
+        <div class="form-group"><label>Fim (vigencia)</label><input name="fim" type="date" value="${toInputDate(data.fim) || ''}"></div>
       </div>
+      <div class="form-row">
+        <div class="form-group"><label>Dia vencimento</label><input name="dia_vencimento" type="number" min="1" max="28" value="${data.dia_vencimento || 10}"></div>
+        <div class="form-group"><label>Indice reajuste</label>
+          <select name="indice_reajuste">${CTR_INDICES.map(p => `<option ${data.indice_reajuste === p ? 'selected' : ''}>${p}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" name="auto_faturar" value="1" ${data.auto_faturar ? 'checked' : ''}> Faturar automaticamente (5 dias antes)</label>
+      </div>
+      <div class="form-group"><label>Anexo (PDF ou imagem, max 5MB)</label>
+        <input type="file" id="contrato-anexo-file" accept="application/pdf,image/*">
+        <input type="hidden" name="anexo" id="contrato-anexo-value" value="">
+        <input type="hidden" name="anexo_nome" id="contrato-anexo-nome" value="${escapeHtml(data.anexo_nome || '')}">
+        <p class="muted" id="contrato-anexo-label">${data.has_anexo || data.anexo_nome ? escapeHtml(data.anexo_nome || 'Arquivo anexado') : 'Nenhum anexo'}</p>
+      </div>
+      ${sit ? `<p class="muted">Adimplencia: ${escapeHtml(sit)}${data.alerta_vigencia ? ' · Vigencia proxima' : ''}${data.precisa_reajuste ? ' · Reajuste anual devido' : ''}</p>` : ''}
       <div class="form-group"><label>Observacao</label><textarea name="observacao" rows="2">${escapeHtml(data.observacao || '')}</textarea></div>
     </form>`,
     `<button class="btn btn-outline modal-close-btn">Cancelar</button><button class="btn btn-primary" id="entity-save">Salvar</button>`);
+  const file = document.getElementById('contrato-anexo-file');
+  if (file) file.onchange = () => {
+    const f = file.files && file.files[0];
+    if (!f) return;
+    if (f.size > 5 * 1024 * 1024) { showToast('Anexo deve ter no maximo 5MB', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      document.getElementById('contrato-anexo-value').value = reader.result;
+      document.getElementById('contrato-anexo-nome').value = f.name;
+      document.getElementById('contrato-anexo-label').textContent = f.name;
+    };
+    reader.readAsDataURL(f);
+  };
   document.getElementById('entity-save').onclick = async () => {
     const body = Object.fromEntries(new FormData(document.getElementById('entity-form')).entries());
     body.valor = Number(body.valor) || 0;
     body.cliente_id = Number(body.cliente_id);
     body.dia_vencimento = Number(body.dia_vencimento) || 10;
+    body.auto_faturar = document.querySelector('#entity-form [name=auto_faturar]')?.checked ? 1 : 0;
+    if (!body.fim) body.fim = null;
+    if (!body.anexo) { delete body.anexo; delete body.anexo_nome; }
     try {
       if (id) await API.contratos.update(id, body);
       else await API.contratos.create(body);

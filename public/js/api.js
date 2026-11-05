@@ -176,6 +176,7 @@ const API = {
     create: (d) => API.request('/contratos', { method: 'POST', body: d }),
     update: (id, d) => API.request(`/contratos/${id}`, { method: 'PUT', body: d }),
     faturar: (id) => API.request(`/contratos/${id}/faturar`, { method: 'POST', body: {} }),
+    reajustar: (id, d) => API.request(`/contratos/${id}/reajustar`, { method: 'POST', body: d || {} }),
     delete: (id) => API.request(`/contratos/${id}`, { method: 'DELETE' })
   },
 

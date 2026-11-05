@@ -20,12 +20,13 @@ module.exports = [
     sessao: 'Visao geral',
     pagina: 'dashboard',
     titulo: 'Painel inicial com indicadores',
-    keywords: 'dashboard inicio metricas resumo vendas estoque os contas grafico',
-    conteudo: `O Dashboard e a tela inicial. Mostra vendas do dia e do mes, clientes, produtos, estoque baixo, ordens de servico abertas e prontas, contas a pagar e a receber, e vendas recentes. O grafico de receita pode ser filtrado por periodo. Use o sino no cabecalho para ver alertas de estoque baixo, OS pronta e contas atrasadas.`,
+    keywords: 'dashboard inicio metricas resumo vendas estoque os contas grafico atalho atrasado saldo',
+    conteudo: `O Dashboard e a tela inicial. No topo ha atalhos (Nova venda, Cadastrar cliente, Nova OS, Contas a receber). Mostra vendas do dia e do mes, saldo liquido (a receber menos a pagar), clientes, produtos, estoque baixo, OS abertas e prontas, contas e vendas recentes. Listas de contas atrasadas e OS prontas abrem WhatsApp para cobrar ou avisar o cliente. O grafico de receita (Semana, Mes, Ano) sempre mostra o eixo, mesmo sem movimento. Use o sino no cabecalho para alertas.`,
     passos: [
       'Acesse Dashboard no menu lateral.',
-      'Leia os cards de indicadores no topo.',
-      'Troque o periodo do grafico quando quiser comparar.',
+      'Use os botoes de acao rapida no topo.',
+      'Confira atrasados e OS prontas; clique no WhatsApp para avisar o cliente.',
+      'Troque Semana/Mes/Ano no grafico de receita.',
       'Clique no sino para ver notificacoes.'
     ]
   },
@@ -685,13 +686,14 @@ module.exports = [
     sessao: 'Recorrencia',
     pagina: 'contratos',
     titulo: 'Cadastrar e faturar contratos',
-    keywords: 'contrato recorrente mrr faturar mensal trimestral anual receita financeiro',
-    conteudo: `Contratos geram receita recorrente. Periodicidade Mensal, Trimestral, Semestral ou Anual. O card MRR converte o valor para mensal. Faturar lanca Receita categoria Contrato no Financeiro (Pendente) e avanca a proxima data. Contrato Ativo nao exclui: encerre antes. Acesso: Administrador e Gerente.`,
+    keywords: 'contrato recorrente mrr faturar mensal trimestral anual receita financeiro igpm ipca reajuste adimplencia vigencia anexo auto',
+    conteudo: `Contratos geram receita recorrente. Periodicidade Mensal, Trimestral, Semestral ou Anual. O card MRR converte o valor para mensal. Faturar lanca Receita categoria Contrato no Financeiro (Pendente) com vencimento no dia_vencimento da competencia e avanca a proxima data. Auto-faturar gera a fatura ate 5 dias antes. Indice IGP-M/IPCA/Manual dispara reajuste anual (informe o percentual). A lista mostra adimplencia e alerta de vigencia (30 dias). Anexe PDF ou imagem. Contrato Ativo nao exclui: encerre antes. Acesso: Administrador e Gerente.`,
     passos: [
       'Abra Contratos.',
-      'Novo contrato: cliente, descricao, valor, periodicidade e dia de vencimento.',
-      'Quando chegar a data, clique em Faturar.',
-      'Confira o lancamento em Contas a receber.'
+      'Novo contrato: cliente, descricao, valor, periodicidade, inicio, fim, dia de vencimento e indice.',
+      'Marque Faturar automaticamente para gerar a fatura 5 dias antes.',
+      'Confira o lancamento em Contas a receber (vencimento no dia escolhido).',
+      'Se o badge Reajuste aparecer, informe o percentual IGP-M/IPCA.'
     ]
   },
   {

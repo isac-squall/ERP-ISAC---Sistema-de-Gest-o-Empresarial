@@ -4,7 +4,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 
 ## Modulos
 
-- **Dashboard** — Vendas do dia e do mes, clientes, produtos, estoque baixo, OS abertas/prontas, contas e grafico de receita
+- **Dashboard** — Atalhos (venda, cliente, OS, receber), vendas do dia/mes, saldo liquido, contas atrasadas com WhatsApp, OS prontas para notificar e grafico Semana/Mes/Ano
 - **Realizar vendas** — PDV com carrinho, abas, lupa (Produto / Categoria / Ordem de servico), F7, NFC-e e cupom
 - **Gerenciar caixa** — Abertura, entrada (suprimento), saida (sangria), fechamento e historico
 - **Financeiro** — Contas a pagar e receber, vencidos, saldo previsto, previsao 7/15/30 dias, contas bancarias, extrato CSV, conciliacao e fluxo de caixa 30 dias
@@ -59,7 +59,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Loja online / API: webhooks em `/api/webhooks/{woocommerce|shopify|nuvemshop|vtex|mercadolivre|generico}`. Pedido pago faz upsert do cliente, cria venda (`origem=ecommerce`) e baixa estoque pelo SKU (codigo de barras). Cancelamento devolve estoque. Idempotencia por plataforma + id externo. Tokens Bearer `erp_live_...`. Mercado Livre: cole o Access Token; a notificacao nao traz itens — o ERP busca o pedido em `GET /orders/{id}`. Acesso: Administrador e Gerente. Teste: `npm run test:ecommerce`.
 - Gerencia: submenu Aprovacao Vendas (orcamentos do PDV: aprovar, recusar, converter em venda), Compras (aprovar/receber pedidos), Fechamento Caixas (conferir o caixa fechado), Inventario (contagem substitui saldo) e Consulta Estoque (somente leitura). Acesso: Administrador e Gerente. Teste: `npm run test:gerencia`.
 - CRM: kanban de oportunidades (Lead a Perdido); probabilidade por etapa editavel (Lead 10%, Qualificacao 30%, Proposta 50%, Negociacao 80%); filtros por periodo, vendedor e tags; timeline de ligacoes/reunioes/e-mails no card; WhatsApp e e-mail com historico; orcamento do PDV avanca o funil (criar=Proposta, aprovar=Negociacao, converter=Ganho). Acesso: Administrador, Gerente e Vendedor. Teste: `npm run test:crm`.
-- Contratos: cadastro recorrente; Faturar gera Receita Pendente no Financeiro e avanca a proxima data. Contrato Ativo nao exclui (encerra antes). Teste: `npm run test:contratos`.
+- Contratos: cadastro recorrente; Faturar (manual ou automatico 5 dias antes) gera Receita Pendente no Financeiro com vencimento no dia do contrato e avanca a proxima data. Adimplencia na lista; reajuste anual IGP-M/IPCA/Manual; alerta de vigencia (30 dias); anexo PDF/imagem. Contrato Ativo nao exclui (encerra antes). Teste: `npm run test:contratos`.
 - Bancos: contas (Corrente/Poupanca/Caixa/Digital), importacao de extrato CSV, conciliacao por valor+data e fluxo de caixa 30 dias. Abas no Financeiro. Teste: `npm run test:bancos`.
 - NF-e e NFS-e: rascunho, autorizacao simulada (chave/protocolo/XML locais) e cancelamento. Sem transmissao a SEFAZ ou prefeitura nesta entrega. Teste: `npm run test:fiscal`.
 - Producao: OP usa a composicao (BOM) do produto/kit; concluir baixa insumos e entra o acabado. Curva ABC pelo faturamento do mes (A ate 80%, B ate 95%, C o restante). Teste: `npm run test:producao`.
