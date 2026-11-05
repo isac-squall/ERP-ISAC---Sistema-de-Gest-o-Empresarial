@@ -366,9 +366,15 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // ============ DASHBOARD ============
+function vendaNaoCancelada() {
+  return "IFNULL(status,'') NOT LIKE 'Cancel%'";
+}
+
 app.get('/api/dashboard', (req, res) => {
-  const vendasHoje = db.prepare("SELECT COALESCE(SUM(total),0) as total FROM vendas WHERE date(criado_em) = date('now','localtime')").get();
-  const vendasMes = db.prepare("SELECT COALESCE(SUM(total),0) as total FROM vendas WHERE strftime('%Y-%m', criado_em) = strftime('%Y-%m', 'now','localtime')").get();
+  const filtroVenda = vendaNaoCancelada();
+  const vendasHoje = db.prepare(`SELECT COALESCE(SUM(total),0) as total FROM vendas WHERE ${filtroVenda} AND date(criado_em) = date('now','localtime')`).get();
+  const vendasMes = db.prepare(`SELECT COALESCE(SUM(total),0) as total FROM vendas WHERE ${filtroVenda} AND strftime('%Y-%m', criado_em) = strftime('%Y-%m', 'now','localtime')`).get();
+  const caixaHoje = db.prepare(`SELECT COALESCE(SUM(valor),0) as total FROM caixa WHERE tipo='Venda realizada' AND date(criado_em)=date('now','localtime')`).get();
   const totalClientes = db.prepare('SELECT COUNT(*) as total FROM clientes WHERE ativo = 1').get();
   const totalProdutos = db.prepare('SELECT COUNT(*) as total FROM produtos WHERE ativo = 1').get();
   const estoqueBaixo = db.prepare(`
@@ -388,14 +394,35 @@ app.get('/api/dashboard', (req, res) => {
   const valorPrevisto = db.prepare("SELECT COALESCE(SUM(valor_previsto),0) as total FROM ordens_servico WHERE status NOT IN ('Entregue','Cancelada')").get();
   const contasReceber = db.prepare("SELECT COALESCE(SUM(valor),0) as total FROM financeiro WHERE tipo = 'Receita' AND status = 'Pendente'").get();
   const contasPagar = db.prepare("SELECT COALESCE(SUM(valor),0) as total FROM financeiro WHERE tipo = 'Despesa' AND status = 'Pendente'").get();
+  const receber = Number(contasReceber.total) || 0;
+  const pagar = Number(contasPagar.total) || 0;
   const vendasRecentes = db.prepare(`
-    SELECT v.*, c.nome as cliente_nome FROM vendas v
+    SELECT v.id, v.total, v.forma_pagamento, v.criado_em, v.status, c.nome as cliente_nome FROM vendas v
     LEFT JOIN clientes c ON v.cliente_id = c.id
+    WHERE ${filtroVenda}
     ORDER BY v.criado_em DESC LIMIT 5
   `).all();
+  const atrasadas = db.prepare(`
+    SELECT f.id, f.descricao, f.valor, f.data_vencimento, c.nome as cliente_nome, c.telefone as cliente_telefone
+    FROM financeiro f
+    LEFT JOIN clientes c ON f.cliente_id = c.id
+    WHERE f.tipo='Receita' AND f.status='Pendente'
+      AND f.data_vencimento IS NOT NULL AND date(f.data_vencimento) < date('now','localtime')
+    ORDER BY f.data_vencimento ASC, f.valor DESC
+    LIMIT 8
+  `).all();
+  const osProntasLista = db.prepare(`
+    SELECT o.id, o.equipamento, o.valor_previsto, o.solicitacao, c.nome as cliente_nome, c.telefone as cliente_telefone
+    FROM ordens_servico o
+    LEFT JOIN clientes c ON o.cliente_id = c.id
+    WHERE o.status='Pronta para entrega'
+    ORDER BY o.id DESC
+    LIMIT 8
+  `).all();
   const caixaStatus = db.prepare('SELECT * FROM caixa_status WHERE id = 1').get();
+  const vendasHojeTotal = Number(vendasHoje.total) || Number(caixaHoje.total) || 0;
   res.json({
-    vendasHoje: vendasHoje.total,
+    vendasHoje: vendasHojeTotal,
     vendasMes: vendasMes.total,
     totalClientes: totalClientes.total,
     totalProdutos: totalProdutos.total,
@@ -403,44 +430,84 @@ app.get('/api/dashboard', (req, res) => {
     ordensAbertas: ordensAbertas.total,
     ordensProntas: ordensProntas.total,
     valorPrevisto: valorPrevisto.total,
-    contasReceber: contasReceber.total,
-    contasPagar: contasPagar.total,
+    contasReceber: receber,
+    contasPagar: pagar,
+    saldoLiquido: Math.round((receber - pagar) * 100) / 100,
     vendasRecentes,
+    atrasadas,
+    osProntasLista,
     caixaAberto: caixaStatus?.aberto === 1
   });
 });
 
+function eixoReceitaSemana() {
+  const nomes = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+  const filtro = vendaNaoCancelada();
+  const rows = db.prepare(`
+    SELECT date(criado_em) as dia,
+           COALESCE(SUM(total),0) as receita
+    FROM vendas WHERE ${filtro}
+      AND date(criado_em) >= date('now','localtime','-6 days')
+    GROUP BY dia
+  `).all();
+  const map = Object.fromEntries(rows.map(r => [r.dia, Number(r.receita) || 0]));
+  const hoje = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  const out = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() - i);
+    const iso = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    out.push({ label: nomes[d.getDay()], receita: map[iso] || 0 });
+  }
+  return out;
+}
+
+function eixoReceitaMes() {
+  const filtro = vendaNaoCancelada();
+  const rows = db.prepare(`
+    SELECT CAST(strftime('%d', criado_em) AS INTEGER) as dia,
+           COALESCE(SUM(total),0) as receita
+    FROM vendas WHERE ${filtro}
+      AND strftime('%Y-%m', criado_em) = strftime('%Y-%m','now','localtime')
+    GROUP BY dia
+  `).all();
+  const map = Object.fromEntries(rows.map(r => [Number(r.dia), Number(r.receita) || 0]));
+  const now = new Date();
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const out = [];
+  for (let d = 1; d <= last; d++) {
+    out.push({ label: String(d).padStart(2, '0'), receita: map[d] || 0 });
+  }
+  return out;
+}
+
+function eixoReceitaAno() {
+  const filtro = vendaNaoCancelada();
+  const rows = db.prepare(`
+    SELECT strftime('%Y-%m', criado_em) as ym,
+           COALESCE(SUM(total),0) as receita
+    FROM vendas WHERE ${filtro}
+      AND criado_em >= datetime('now','localtime','-11 months','start of month')
+    GROUP BY ym
+  `).all();
+  const map = Object.fromEntries(rows.map(r => [r.ym, Number(r.receita) || 0]));
+  const now = new Date();
+  const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  const out = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    out.push({ label: meses[d.getMonth()], receita: map[ym] || 0 });
+  }
+  return out;
+}
+
 app.get('/api/dashboard/charts', (req, res) => {
   const periodo = req.query.periodo || 'semana';
   let receita = [];
-  if (periodo === 'ano') {
-    receita = db.prepare(`
-      SELECT strftime('%Y-%m', criado_em) as label,
-             COALESCE(SUM(total),0) as receita,
-             COALESCE(SUM(total - desconto),0) as lucro
-      FROM vendas WHERE criado_em >= datetime('now','localtime','-11 months','start of month')
-      GROUP BY label ORDER BY label
-    `).all();
-  } else if (periodo === 'mes') {
-    receita = db.prepare(`
-      SELECT strftime('%d/%m', criado_em) as label,
-             COALESCE(SUM(total),0) as receita,
-             COALESCE(SUM(total - desconto),0) as lucro
-      FROM vendas WHERE strftime('%Y-%m', criado_em) = strftime('%Y-%m','now','localtime')
-      GROUP BY date(criado_em) ORDER BY date(criado_em)
-    `).all();
-  } else {
-    receita = db.prepare(`
-      SELECT CASE CAST(strftime('%w', criado_em) AS INTEGER)
-        WHEN 0 THEN 'Domingo' WHEN 1 THEN 'Segunda' WHEN 2 THEN 'Terça'
-        WHEN 3 THEN 'Quarta' WHEN 4 THEN 'Quinta' WHEN 5 THEN 'Sexta' ELSE 'Sábado' END as label,
-        CAST(strftime('%w', criado_em) AS INTEGER) as dow,
-        COALESCE(SUM(total),0) as receita,
-        COALESCE(SUM(total - desconto),0) as lucro
-      FROM vendas WHERE date(criado_em) >= date('now','localtime','weekday 0','-6 days')
-      GROUP BY dow ORDER BY CASE WHEN dow = 0 THEN 7 ELSE dow END
-    `).all();
-  }
+  if (periodo === 'ano') receita = eixoReceitaAno();
+  else if (periodo === 'mes') receita = eixoReceitaMes();
+  else receita = eixoReceitaSemana();
 
   const contasClientes = {
     venceHoje: db.prepare(`SELECT COUNT(*) as qtd, COALESCE(SUM(valor),0) as total FROM financeiro
@@ -2481,9 +2548,65 @@ app.delete('/api/crm/:id', (req, res) => {
 });
 
 // ============ CONTRATOS ============
+function lancamentosDoContrato(id) {
+  return db.prepare(
+    `SELECT id, valor, status, data_vencimento, data_pagamento FROM financeiro WHERE contrato_id=? ORDER BY id`
+  ).all(id);
+}
+
+function lancamentosPorContratos(ids) {
+  const map = {};
+  if (!ids.length) return map;
+  const ph = ids.map(() => '?').join(',');
+  const rows = db.prepare(
+    `SELECT id, contrato_id, valor, status, data_vencimento, data_pagamento FROM financeiro WHERE contrato_id IN (${ph})`
+  ).all(...ids);
+  for (const r of rows) {
+    (map[r.contrato_id] || (map[r.contrato_id] = [])).push(r);
+  }
+  return map;
+}
+
+function faturarContratoDb(c, hoje, anteciparDias) {
+  contratosMod.podeFaturar(c, hoje, anteciparDias);
+  const apos = contratosMod.aposFaturar(c, hoje);
+  const lanc = contratosMod.lancamentoFatura(c, hoje);
+  const fin = inserirFinanceiro(lanc);
+  db.prepare('UPDATE financeiro SET contrato_id=? WHERE id=?').run(c.id, fin.lastInsertRowid);
+  db.prepare('UPDATE contratos SET proximo_faturamento=?, ultimo_faturamento=?, status=? WHERE id=?')
+    .run(apos.proximo_faturamento, apos.ultimo_faturamento, apos.status, c.id);
+  return { financeiro_id: fin.lastInsertRowid, ...apos };
+}
+
+function autoFaturarContratos(hoje) {
+  const dia = hoje || hojeIso();
+  const rows = db.prepare(`SELECT * FROM contratos WHERE status='Ativo' AND auto_faturar=1`).all();
+  let geradas = 0;
+  for (const c of rows) {
+    if (!contratosMod.deveAutoFaturar(c, dia)) continue;
+    try {
+      faturarContratoDb(c, dia, contratosMod.DIAS_ANTECIPAR_FATURA);
+      geradas += 1;
+    } catch (_) { /* janela ou fim */ }
+  }
+  return geradas;
+}
+
+function contratoPublico(row, hoje, lancamentos, { comAnexo } = {}) {
+  const e = contratosMod.enriquecerContrato(row, hoje, lancamentos || []);
+  e.has_anexo = !!(e.has_anexo || e.anexo);
+  if (!comAnexo) delete e.anexo;
+  return e;
+}
+
 app.get('/api/contratos', (req, res) => {
+  autoFaturarContratos();
   const { search = '', page = 1, limit = 15, status } = req.query;
-  let query = `SELECT c.*, cl.nome as cliente_nome FROM contratos c
+  let query = `SELECT c.id, c.cliente_id, c.descricao, c.valor, c.periodicidade, c.dia_vencimento,
+    c.inicio, c.fim, c.status, c.proximo_faturamento, c.ultimo_faturamento, c.observacao, c.criado_em,
+    c.indice_reajuste, c.data_base_reajuste, c.ultimo_reajuste, c.auto_faturar, c.anexo_nome,
+    CASE WHEN c.anexo IS NOT NULL AND length(c.anexo) > 20 THEN 1 ELSE 0 END as has_anexo,
+    cl.nome as cliente_nome FROM contratos c
     LEFT JOIN clientes cl ON c.cliente_id = cl.id WHERE 1=1`;
   const params = [];
   if (status) { query += ' AND c.status=?'; params.push(contratosMod.normalizarStatus(status)); }
@@ -2493,9 +2616,12 @@ app.get('/api/contratos', (req, res) => {
     params.push(s, s, s);
   }
   query += ' ORDER BY c.id DESC';
+  const hoje = hojeIso();
   const rows = db.prepare(query).all(...params);
-  const pg = paginarLista(rows, page, limit);
-  res.json({ ...pg, resumo: contratosMod.resumirContratos(rows) });
+  const fins = lancamentosPorContratos(rows.map(r => r.id));
+  const enriched = rows.map(r => contratoPublico(r, hoje, fins[r.id] || []));
+  const pg = paginarLista(enriched, page, limit);
+  res.json({ ...pg, resumo: contratosMod.resumirContratos(enriched) });
 });
 
 app.get('/api/contratos/:id', (req, res) => {
@@ -2503,7 +2629,7 @@ app.get('/api/contratos/:id', (req, res) => {
     LEFT JOIN clientes cl ON c.cliente_id=cl.id WHERE c.id=?`).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Contrato nao encontrado' });
   row.itens = db.prepare('SELECT * FROM contrato_itens WHERE contrato_id=?').all(row.id);
-  res.json(row);
+  res.json(contratoPublico(row, hojeIso(), lancamentosDoContrato(row.id), { comAnexo: true }));
 });
 
 app.post('/api/contratos', (req, res) => {
@@ -2512,10 +2638,12 @@ app.post('/api/contratos', (req, res) => {
     const cli = db.prepare('SELECT id FROM clientes WHERE id=?').get(d.cliente_id);
     if (!cli) return res.status(400).json({ error: 'Cliente nao encontrado' });
     const r = db.prepare(`INSERT INTO contratos
-      (cliente_id, descricao, valor, periodicidade, dia_vencimento, inicio, fim, status, proximo_faturamento, observacao)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+      (cliente_id, descricao, valor, periodicidade, dia_vencimento, inicio, fim, status, proximo_faturamento, observacao,
+       indice_reajuste, data_base_reajuste, ultimo_reajuste, auto_faturar, anexo, anexo_nome)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       d.cliente_id, d.descricao, d.valor, d.periodicidade, d.dia_vencimento,
-      d.inicio, d.fim, d.status, d.proximo_faturamento, d.observacao
+      d.inicio, d.fim, d.status, d.proximo_faturamento, d.observacao,
+      d.indice_reajuste, d.data_base_reajuste, d.ultimo_reajuste, d.auto_faturar, d.anexo, d.anexo_nome
     );
     if (d.itens) {
       const ins = db.prepare('INSERT INTO contrato_itens (contrato_id, produto_id, descricao, quantidade, preco_unitario, subtotal) VALUES (?,?,?,?,?,?)');
@@ -2529,14 +2657,22 @@ app.put('/api/contratos/:id', (req, res) => {
   try {
     const atual = db.prepare('SELECT * FROM contratos WHERE id=?').get(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Contrato nao encontrado' });
-    const d = contratosMod.payloadContrato({ ...atual, ...(req.body || {}), itens: req.body?.itens });
+    const merge = { ...atual, ...(req.body || {}), itens: req.body?.itens };
+    if (req.body?.anexo === undefined) {
+      merge.anexo = atual.anexo;
+      merge.anexo_nome = atual.anexo_nome;
+    }
+    const d = contratosMod.payloadContrato(merge);
     if (req.body?.status && req.body.status !== atual.status) {
       d.status = contratosMod.transicaoStatus(atual.status, req.body.status);
     }
     db.prepare(`UPDATE contratos SET cliente_id=?, descricao=?, valor=?, periodicidade=?, dia_vencimento=?,
-      inicio=?, fim=?, status=?, proximo_faturamento=?, observacao=? WHERE id=?`).run(
+      inicio=?, fim=?, status=?, proximo_faturamento=?, observacao=?,
+      indice_reajuste=?, data_base_reajuste=?, ultimo_reajuste=?, auto_faturar=?, anexo=?, anexo_nome=? WHERE id=?`).run(
       d.cliente_id, d.descricao, d.valor, d.periodicidade, d.dia_vencimento,
-      d.inicio, d.fim, d.status, d.proximo_faturamento, d.observacao, req.params.id
+      d.inicio, d.fim, d.status, d.proximo_faturamento, d.observacao,
+      d.indice_reajuste, d.data_base_reajuste, d.ultimo_reajuste, d.auto_faturar, d.anexo, d.anexo_nome,
+      req.params.id
     );
     if (Array.isArray(req.body?.itens)) {
       db.prepare('DELETE FROM contrato_itens WHERE contrato_id=?').run(req.params.id);
@@ -2552,22 +2688,22 @@ app.post('/api/contratos/:id/faturar', (req, res) => {
     const c = db.prepare('SELECT * FROM contratos WHERE id=?').get(req.params.id);
     if (!c) return res.status(404).json({ error: 'Contrato nao encontrado' });
     const hoje = hojeIso();
-    contratosMod.podeFaturar(c, hoje);
-    const apos = contratosMod.aposFaturar(c, hoje);
-    const fin = inserirFinanceiro({
-      tipo: 'Receita',
-      categoria: 'Contrato',
-      descricao: `Contrato #${c.id} ${c.descricao}`,
-      valor: c.valor,
-      data_vencimento: hoje,
-      status: 'Pendente',
-      cliente_id: c.cliente_id,
-      origem: 'contrato'
-    });
-    db.prepare('UPDATE financeiro SET contrato_id=? WHERE id=?').run(c.id, fin.lastInsertRowid);
-    db.prepare('UPDATE contratos SET proximo_faturamento=?, ultimo_faturamento=?, status=? WHERE id=?')
-      .run(apos.proximo_faturamento, apos.ultimo_faturamento, apos.status, c.id);
-    res.json({ message: 'Fatura gerada', financeiro_id: fin.lastInsertRowid, proximo_faturamento: apos.proximo_faturamento, status: apos.status });
+    const out = faturarContratoDb(c, hoje, contratosMod.DIAS_ANTECIPAR_FATURA);
+    res.json({ message: 'Fatura gerada', financeiro_id: out.financeiro_id, proximo_faturamento: out.proximo_faturamento, status: out.status });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/contratos/:id/reajustar', (req, res) => {
+  try {
+    const c = db.prepare('SELECT * FROM contratos WHERE id=?').get(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Contrato nao encontrado' });
+    if (contratosMod.normalizarIndice(c.indice_reajuste) === 'Nenhum') {
+      return res.status(400).json({ error: 'Contrato sem indice de reajuste' });
+    }
+    const hoje = hojeIso();
+    const out = contratosMod.aplicarReajuste(c, req.body?.percentual, hoje);
+    db.prepare('UPDATE contratos SET valor=?, ultimo_reajuste=? WHERE id=?').run(out.valor, out.ultimo_reajuste, c.id);
+    res.json({ message: 'Reajuste aplicado', valor: out.valor, percentual: out.percentual, ultimo_reajuste: out.ultimo_reajuste });
   } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 

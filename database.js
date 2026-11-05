@@ -605,6 +605,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_contratos_cliente ON contratos(cliente_id);
   CREATE INDEX IF NOT EXISTS idx_contratos_prox ON contratos(proximo_faturamento);
 `);
+ensureColumn('contratos', 'indice_reajuste', "TEXT DEFAULT 'Nenhum'");
+ensureColumn('contratos', 'data_base_reajuste', 'TEXT');
+ensureColumn('contratos', 'ultimo_reajuste', 'TEXT');
+ensureColumn('contratos', 'auto_faturar', 'INTEGER DEFAULT 0');
+ensureColumn('contratos', 'anexo', 'TEXT');
+ensureColumn('contratos', 'anexo_nome', 'TEXT');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS contas_bancarias (
