@@ -252,7 +252,9 @@ const API = {
     get: (id) => API.request(`/ordens-servico/${id}`),
     create: (d) => API.request('/ordens-servico', { method: 'POST', body: d }),
     update: (id, d) => API.request(`/ordens-servico/${id}`, { method: 'PUT', body: d }),
-    delete: (id) => API.request(`/ordens-servico/${id}`, { method: 'DELETE' })
+    delete: (id) => API.request(`/ordens-servico/${id}`, { method: 'DELETE' }),
+    addItem: (id, d) => API.request(`/ordens-servico/${id}/itens`, { method: 'POST', body: d }),
+    removeItem: (id, itemId) => API.request(`/ordens-servico/${id}/itens/${itemId}`, { method: 'DELETE' })
   },
 
   usuarios: {

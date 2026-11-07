@@ -545,9 +545,9 @@ async function renderDashboard() {
             <tr>
               <td>${o.id}</td>
               <td>${escapeHtml(o.cliente_nome || '-')}</td>
-              <td>${escapeHtml(o.equipamento || o.solicitacao || '-')}</td>
-              <td>${formatCurrency(o.valor_previsto)}</td>
-              <td>${o.cliente_telefone ? `<button type="button" class="btn-icon" title="Notificar cliente" onclick="abrirWhatsappCliente(${JSON.stringify(String(o.cliente_telefone))}, ${JSON.stringify('Ola! Sua ordem de servico #' + o.id + ' esta pronta para entrega.')})"><i class="fab fa-whatsapp"></i></button>` : ''}</td>
+              <td>${escapeHtml(o.placa || o.modelo || o.equipamento || o.solicitacao || '-')}</td>
+              <td>${formatCurrency(o.valor_venda || o.valor_previsto)}</td>
+              <td>${o.cliente_telefone ? `<button type="button" class="btn-icon" title="Notificar cliente" onclick="abrirWhatsappCliente(${JSON.stringify(String(o.cliente_telefone))}, ${JSON.stringify('Ola! Sua ordem de servico #' + o.id + (o.placa ? ' da placa ' + o.placa : '') + ' esta pronta para entrega.')})"><i class="fab fa-whatsapp"></i></button>` : ''}</td>
             </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Nenhuma OS pronta</td></tr>'}
           </tbody>
         </table>
@@ -608,8 +608,8 @@ async function renderOrdensServico() {
     <div class="table-wrapper">
       <table class="data-table">
         <thead><tr>
-          <th>#</th><th>Status</th><th>Cliente</th><th>Serviços/Equipamentos</th>
-          <th>Solicitacao</th><th>Previsto</th><th>Final</th><th>Entrega</th><th>Criada em</th><th>Acoes</th>
+          <th>#</th><th>Status</th><th>Cliente</th><th>Veiculo</th>
+          <th>Solicitacao</th><th>Total</th><th>Lucro</th><th>Entrega</th><th>Acoes</th>
         </tr></thead>
         <tbody id="os-tbody">${renderOSTableRows(result.data)}</tbody>
       </table>
@@ -620,24 +620,38 @@ async function renderOrdensServico() {
   document.getElementById('table-new').onclick = () => showOSForm();
 }
 
+function osVeiculoLabel(o) {
+  const placa = o.placa ? String(o.placa) : '';
+  const modelo = o.modelo || o.equipamento || '';
+  if (placa && modelo) return `${placa} · ${modelo}`;
+  return placa || modelo || '-';
+}
+
 function renderOSTableRows(data) {
-  if (!data.length) return '<tr class="empty-row"><td colspan="10">Nenhum registro encontrado</td></tr>';
-  return data.map(o => `
+  if (!data.length) return '<tr class="empty-row"><td colspan="9">Nenhum registro encontrado</td></tr>';
+  return data.map(o => {
+    const total = Number(o.valor_venda) > 0 ? o.valor_venda : o.valor_previsto;
+    const lucro = o.valor_lucro != null ? o.valor_lucro : (Number(total) || 0) - (Number(o.valor_custo) || 0);
+    const wa = o.cliente_telefone && o.status === 'Pronta para entrega'
+      ? `<button class="btn-icon" title="Notificar WhatsApp" onclick="abrirWhatsappCliente(${JSON.stringify(String(o.cliente_telefone))}, ${JSON.stringify(o.mensagem_whatsapp || ('Ola! Sua ordem de servico #' + o.id + ' esta pronta para entrega.'))})"><i class="fab fa-whatsapp"></i></button>`
+      : '';
+    return `
     <tr>
       <td>${o.id}</td>
       <td><span class="status-badge ${statusClass(o.status)}">${o.status}</span></td>
       <td>${escapeHtml(o.cliente_nome || '-')}</td>
-      <td>${escapeHtml(o.equipamento || '-')}</td>
+      <td>${escapeHtml(osVeiculoLabel(o))}${o.km != null ? ` <small class="muted">${o.km} km</small>` : ''}</td>
       <td>${escapeHtml(o.solicitacao || '-')}</td>
-      <td>${formatDate(o.data_prevista)}</td>
-      <td>${formatDate(o.data_final)}</td>
+      <td>${formatCurrency(total)}</td>
+      <td class="${lucro < 0 ? 'neg' : ''}">${formatCurrency(lucro)}</td>
       <td>${formatDate(o.data_entrega)}</td>
-      <td>${formatDateTime(o.criado_em)}</td>
       <td class="actions-cell">
+        ${wa}
         <button class="btn-icon edit" onclick="showOSForm(${o.id})"><i class="fas fa-edit"></i></button>
         <button class="btn-icon delete" onclick="deleteOS(${o.id})"><i class="fas fa-trash"></i></button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 async function loadOrdensServico() {
@@ -650,11 +664,55 @@ async function loadOrdensServico() {
   document.querySelector('.toolbar-info').textContent = `Total de ordens: ${result.total}`;
 }
 
+function osTotaisHtml(data) {
+  const t = data.totais || {};
+  const venda = Number(t.valor_venda != null ? t.valor_venda : data.valor_venda) || Number(data.valor_previsto) || 0;
+  const custo = Number(t.valor_custo != null ? t.valor_custo : data.valor_custo) || 0;
+  const lucro = Number(t.valor_lucro != null ? t.valor_lucro : data.valor_lucro) || (venda - custo);
+  const pct = venda > 0 ? ((lucro / venda) * 100) : 0;
+  return `
+    <div class="os-lucro-card">
+      <div><span>Custo</span><strong>${formatCurrency(custo)}</strong></div>
+      <div><span>Venda</span><strong>${formatCurrency(venda)}</strong></div>
+      <div class="${lucro < 0 ? 'neg' : ''}"><span>Lucro</span><strong>${formatCurrency(lucro)} (${pct.toFixed(0)}%)</strong></div>
+    </div>`;
+}
+
+function osItensHtml(itens) {
+  if (!itens || !itens.length) return '<p class="muted">Nenhum item lancado. Peca baixa estoque ao incluir.</p>';
+  return `<table class="data-table os-itens-table"><thead><tr>
+    <th>Tipo</th><th>Descricao</th><th>Qtd</th><th>Custo</th><th>Venda</th><th></th>
+  </tr></thead><tbody>${itens.map(it => `<tr>
+    <td>${it.tipo === 'servico' ? 'Servico' : 'Peca'}</td>
+    <td>${escapeHtml(it.descricao)}</td>
+    <td>${it.quantidade}</td>
+    <td>${formatCurrency(it.preco_custo)}</td>
+    <td>${formatCurrency(it.preco_unitario)}</td>
+    <td><button type="button" class="btn-icon delete" data-os-item="${it.id}" title="Remover (estorna estoque)"><i class="fas fa-times"></i></button></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+
+function osHistHtml(hist) {
+  if (!hist || !hist.length) return '<p class="muted">Sem historico para esta placa/cliente.</p>';
+  return `<table class="data-table os-itens-table"><thead><tr>
+    <th>#</th><th>Status</th><th>Veiculo</th><th>KM</th><th>Total</th><th>Data</th>
+  </tr></thead><tbody>${hist.map(h => `<tr>
+    <td>${h.id}</td>
+    <td>${escapeHtml(h.status)}</td>
+    <td>${escapeHtml(osVeiculoLabel(h))}</td>
+    <td>${h.km != null ? h.km : '-'}</td>
+    <td>${formatCurrency(h.valor_venda || h.valor_previsto)}</td>
+    <td>${formatDate(h.criado_em)}</td>
+  </tr>`).join('')}</tbody></table>`;
+}
+
 async function showOSForm(id) {
-  let data = {};
+  let data = { status: 'Aberta', itens: [], historico: [], totais: { valor_custo: 0, valor_venda: 0, valor_lucro: 0 } };
   if (id) data = await API.ordensServico.get(id);
   const clientes = await API.clientes.all();
-  openModal(id ? 'Editar Ordem de Serviço' : 'Nova Ordem de Serviço', `
+  const fechada = ['Entregue', 'Cancelada'].includes(data.status);
+  document.querySelector('.modal-box')?.classList.add('wide');
+  openModal(id ? `OS #${id}` : 'Nova Ordem de Serviço', `
     <form id="os-form">
       <div class="form-row">
         <div class="form-group"><label>Status</label>
@@ -664,37 +722,124 @@ async function showOSForm(id) {
           </select></div>
         <div class="form-group"><label>Cliente</label>
           <select name="cliente_id"><option value="">Selecione...</option>
-            ${clientes.map(c => `<option value="${c.id}" ${data.cliente_id == c.id ? 'selected' : ''}>${c.nome}</option>`).join('')}
+            ${clientes.map(c => `<option value="${c.id}" ${data.cliente_id == c.id ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
           </select></div>
       </div>
-      <div class="form-group"><label>Serviços/Equipamentos</label>
-        <input name="equipamento" value="${escapeHtml(data.equipamento || '')}" placeholder="Ex.: Notebook Dell, formatação, troca de tela"></div>
-      <div class="form-group"><label>Solicitação</label><textarea name="solicitacao" rows="3">${escapeHtml(data.solicitacao || '')}</textarea></div>
-      <div class="form-row">
-        <div class="form-group"><label>Valor previsto</label><input name="valor_previsto" type="number" step="0.01" value="${data.valor_previsto || 0}"></div>
-        <div class="form-group"><label>Data prevista</label><input name="data_prevista" type="date" value="${toInputDate(data.data_prevista)}"></div>
+      <div class="form-row-3">
+        <div class="form-group"><label>Placa</label><input name="placa" value="${escapeHtml(data.placa || '')}" placeholder="ABC1D23" maxlength="8"></div>
+        <div class="form-group"><label>KM</label><input name="km" type="number" min="0" value="${data.km != null ? data.km : ''}"></div>
+        <div class="form-group"><label>Modelo / veiculo</label><input name="modelo" value="${escapeHtml(data.modelo || data.equipamento || '')}" placeholder="Honda CG 160"></div>
       </div>
+      <div class="form-group"><label>Solicitação</label><textarea name="solicitacao" rows="2">${escapeHtml(data.solicitacao || '')}</textarea></div>
       <div class="form-row">
-        <div class="form-group"><label>Data final</label><input name="data_final" type="date" value="${toInputDate(data.data_final)}"></div>
+        <div class="form-group"><label>Data prevista</label><input name="data_prevista" type="date" value="${toInputDate(data.data_prevista)}"></div>
         <div class="form-group"><label>Data entrega</label><input name="data_entrega" type="date" value="${toInputDate(data.data_entrega)}"></div>
       </div>
       <div class="form-group"><label>Observações</label><textarea name="observacoes" rows="2">${escapeHtml(data.observacoes || '')}</textarea></div>
-    </form>`,
-    `<button class="btn btn-outline modal-close-btn">Cancelar</button>
+      ${(!data.itens || !data.itens.length) ? `<div class="form-group"><label>Valor previsto (sem itens)</label><input name="valor_previsto" type="number" step="0.01" min="0" value="${data.valor_previsto || 0}"></div>` : ''}
+    </form>
+    ${osTotaisHtml(data)}
+    ${id ? `
+      <h4 class="os-sec">Pecas e servicos</h4>
+      <div id="os-itens-wrap">${osItensHtml(data.itens)}</div>
+      ${fechada ? '' : `
+      <div class="os-add-item">
+        <input id="os-item-busca" placeholder="Buscar peca ou servico no estoque">
+        <input id="os-item-desc" placeholder="Ou descricao avulsa">
+        <input id="os-item-qtd" type="number" min="0.001" step="0.001" value="1" title="Qtd">
+        <input id="os-item-preco" type="number" min="0" step="0.01" placeholder="Preco">
+        <select id="os-item-tipo"><option value="peca">Peca</option><option value="servico">Servico</option></select>
+        <button type="button" class="btn btn-outline" id="os-item-add">Incluir</button>
+      </div>
+      <div id="os-item-sug" class="os-item-sug hidden"></div>`}
+      <h4 class="os-sec">Historico da moto / cliente</h4>
+      <div id="os-hist-wrap">${osHistHtml(data.historico)}</div>
+    ` : '<p class="muted">Salve a OS para lancar pecas (baixa estoque) e servicos.</p>'}`,
+    `${data.cliente_telefone && data.status === 'Pronta para entrega' ? `<button class="btn btn-outline" id="os-wa"><i class="fab fa-whatsapp"></i> Notificar</button>` : ''}
+     <button class="btn btn-outline modal-close-btn">Cancelar</button>
      <button class="btn btn-primary" id="os-save">Salvar</button>`);
 
   document.querySelector('.modal-close-btn').onclick = closeModal;
+  document.getElementById('os-wa')?.addEventListener('click', () => {
+    abrirWhatsappCliente(data.cliente_telefone, data.mensagem_whatsapp);
+  });
   document.getElementById('os-save').onclick = async () => {
     const fd = new FormData(document.getElementById('os-form'));
     const body = Object.fromEntries(fd);
     body.cliente_id = body.cliente_id || null;
-    body.valor_previsto = parseFloat(body.valor_previsto) || 0;
+    body.km = body.km === '' ? null : body.km;
     try {
       if (id) await API.ordensServico.update(id, body);
-      else await API.ordensServico.create(body);
+      else {
+        const created = await API.ordensServico.create(body);
+        showToast('Ordem salva!', 'success');
+        closeModal();
+        await renderOrdensServico();
+        return showOSForm(created.id);
+      }
       closeModal(); showToast('Ordem salva!', 'success'); renderOrdensServico();
     } catch (err) { showToast(err.message, 'error'); }
   };
+
+  if (!id || fechada) return;
+
+  let osItemProd = null;
+  const buscaEl = document.getElementById('os-item-busca');
+  const sugEl = document.getElementById('os-item-sug');
+  const buscarProd = debounce(async () => {
+    const q = (buscaEl.value || '').trim();
+    osItemProd = null;
+    if (q.length < 2) { sugEl.classList.add('hidden'); sugEl.innerHTML = ''; return; }
+    try {
+      const r = await API.produtos.list({ search: q, page: 1, limit: 8 });
+      const rows = r.data || [];
+      if (!rows.length) { sugEl.innerHTML = '<div class="muted">Nenhum produto</div>'; sugEl.classList.remove('hidden'); return; }
+      sugEl.innerHTML = rows.map(p => `<button type="button" class="os-sug" data-pid="${p.id}">${escapeHtml(p.nome)} · ${formatCurrency(p.preco)} <small>${p.tipo === 'servico' ? 'servico' : 'estoque ' + (p.estoque_disponivel != null ? p.estoque_disponivel : p.estoque)}</small></button>`).join('');
+      sugEl.classList.remove('hidden');
+      sugEl.querySelectorAll('[data-pid]').forEach(btn => {
+        btn.onclick = () => {
+          const p = rows.find(x => x.id === +btn.dataset.pid);
+          if (!p) return;
+          osItemProd = p;
+          buscaEl.value = p.nome;
+          document.getElementById('os-item-desc').value = p.nome;
+          document.getElementById('os-item-preco').value = p.preco || 0;
+          document.getElementById('os-item-tipo').value = p.tipo === 'servico' ? 'servico' : 'peca';
+          sugEl.classList.add('hidden');
+        };
+      });
+    } catch { sugEl.classList.add('hidden'); }
+  }, 250);
+  buscaEl.oninput = buscarProd;
+
+  document.getElementById('os-item-add').onclick = async () => {
+    const body = {
+      produto_id: osItemProd?.id || null,
+      descricao: document.getElementById('os-item-desc').value,
+      quantidade: parseFloat(document.getElementById('os-item-qtd').value) || 1,
+      preco_unitario: parseFloat(document.getElementById('os-item-preco').value),
+      tipo: document.getElementById('os-item-tipo').value
+    };
+    if (osItemProd && (body.preco_unitario == null || Number.isNaN(body.preco_unitario))) body.preco_unitario = osItemProd.preco;
+    try {
+      const updated = await API.ordensServico.addItem(id, body);
+      showToast('Item lancado', 'success');
+      closeModal();
+      showOSForm(updated.id);
+    } catch (err) { showToast(err.message, 'error'); }
+  };
+
+  document.querySelectorAll('[data-os-item]').forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm('Remover este item? Peca volta ao estoque.')) return;
+      try {
+        await API.ordensServico.removeItem(id, btn.dataset.osItem);
+        showToast('Item removido', 'success');
+        closeModal();
+        showOSForm(id);
+      } catch (err) { showToast(err.message, 'error'); }
+    };
+  });
 }
 
 async function deleteOS(id) {
@@ -4205,7 +4350,7 @@ let posBuscaTimer = null;
 const POS_BUSCA = [
   { value: 'produto', label: 'Produto', hint: 'Nome, codigo de barras, SKU ou ID' },
   { value: 'categoria', label: 'Categoria', hint: 'Lista produtos da categoria digitada' },
-  { value: 'os', label: 'Ordem de serviço', hint: 'Cliente, aparelho, problema ou numero da OS' }
+  { value: 'os', label: 'Ordem de serviço', hint: 'Cliente, placa, modelo, problema ou numero da OS' }
 ];
 
 function posTabAtual() { return posTabs[posTabIndex]; }
@@ -4427,7 +4572,7 @@ async function renderVendas() {
     if (posSearchField === 'os') {
       await mostrarPosResultados(q);
       if (posOsResultados.length === 1) {
-        posAdicionarOS(posOsResultados[0]);
+        await posAdicionarOS(posOsResultados[0]);
         searchEl.value = '';
         esconderPosResultados();
       } else if (!posOsResultados.length) {
@@ -4505,16 +4650,16 @@ async function mostrarPosResultados(term) {
     box.innerHTML = posOsResultados.map(o => `
       <div class="pos-result" data-os="${o.id}">
         <div>
-          <strong>OS ${o.id} · ${escapeHtml(o.equipamento || 'Equipamento')}</strong><br>
+          <strong>OS ${o.id} · ${escapeHtml(o.placa || o.modelo || o.equipamento || 'OS')}</strong><br>
           <small>${escapeHtml(o.cliente_nome || 'Sem cliente')} · ${escapeHtml(o.solicitacao || o.status)}</small>
         </div>
-        <div class="pos-result-right">${formatCurrency(o.valor_previsto)}<br><small>${escapeHtml(o.status)}</small></div>
+        <div class="pos-result-right">${formatCurrency(o.valor_venda || o.valor_previsto)}<br><small>${escapeHtml(o.status)}</small></div>
       </div>`).join('');
     box.classList.remove('hidden');
     box.querySelectorAll('[data-os]').forEach(el => {
-      el.onclick = () => {
+      el.onclick = async () => {
         const os = posOsResultados.find(x => x.id === +el.dataset.os);
-        if (os) posAdicionarOS(os);
+        if (os) await posAdicionarOS(os);
         document.getElementById('pos-search').value = '';
         esconderPosResultados();
       };
@@ -4550,7 +4695,7 @@ function fecharPosBusca() {
   esconderPosResultados();
 }
 
-function posAdicionarOS(os) {
+async function posAdicionarOS(os) {
   if (!os) return;
   if (['Entregue', 'Cancelada'].includes(os.status)) {
     showToast('Esta ordem de serviço não pode ser cobrada', 'error');
@@ -4561,20 +4706,42 @@ function posAdicionarOS(os) {
     showToast('Esta OS já está no carrinho', 'error');
     return;
   }
-  tab.itens.push({
-    produto_id: null, servico: true, os_id: os.id,
-    nome: `OS ${os.id} · ${os.equipamento || 'Serviço'}`,
-    codigo: `OS-${os.id}`,
-    preco_unitario: Number(os.valor_previsto) || 0,
-    quantidade: 1, estoque: null
-  });
-  if (!tab.cliente_id && os.cliente_id) {
-    tab.cliente_id = os.cliente_id;
-    tab.cliente_nome = os.cliente_nome || tab.cliente_nome;
+  let full = os;
+  try { full = await API.ordensServico.get(os.id); } catch {}
+  if (['Entregue', 'Cancelada'].includes(full.status)) {
+    showToast('Esta ordem de serviço não pode ser cobrada', 'error');
+    return;
+  }
+  if (tab.itens.some(i => i.os_id === os.id)) return;
+  const linhas = (full.itens && full.itens.length)
+    ? full.itens.map(it => ({
+        produto_id: it.produto_id || null,
+        servico: it.tipo === 'servico',
+        os_id: os.id,
+        nome: `OS ${os.id} · ${it.descricao}`,
+        codigo: `OS-${os.id}`,
+        preco_unitario: Number(it.preco_unitario) || 0,
+        preco_custo: Number(it.preco_custo) || 0,
+        quantidade: Number(it.quantidade) || 1,
+        estoque: null,
+        tipo: it.tipo === 'servico' ? 'servico' : (it.produto_tipo || 'produto')
+      }))
+    : [{
+        produto_id: null, servico: true, os_id: os.id,
+        nome: `OS ${os.id} · ${full.modelo || full.equipamento || full.placa || 'Serviço'}`,
+        codigo: `OS-${os.id}`,
+        preco_unitario: Number(full.valor_venda || full.valor_previsto) || 0,
+        preco_custo: Number(full.valor_custo) || 0,
+        quantidade: 1, estoque: null, tipo: 'servico'
+      }];
+  tab.itens.push(...linhas);
+  if (!tab.cliente_id && (full.cliente_id || os.cliente_id)) {
+    tab.cliente_id = full.cliente_id || os.cliente_id;
+    tab.cliente_nome = full.cliente_nome || os.cliente_nome || tab.cliente_nome;
   }
   salvarPosTabs();
   updatePosUI();
-  showToast(`OS ${os.id} adicionada`, 'success');
+  showToast(`OS ${os.id} adicionada (${linhas.length} item${linhas.length > 1 ? 's' : ''})`, 'success');
 }
 
 function posPedirQuantidade(produto, padrao) {
@@ -5047,9 +5214,9 @@ function posFinalizarVenda() {
       const venda = await API.vendas.create({
         cliente_id: tab.cliente_id || null,
         itens: tab.itens.map(i => ({
-          produto_id: i.produto_id, descricao: i.servico ? i.nome : null,
+          produto_id: i.produto_id, descricao: i.nome || null,
           quantidade: i.quantidade, preco_unitario: i.preco_unitario,
-          preco_custo: i.preco_custo || 0, os_id: i.os_id || null
+          preco_custo: i.preco_custo || 0, os_id: i.os_id || null, tipo: i.tipo || null
         })),
         desconto: desc,
         forma_pagamento: forma,
@@ -7437,7 +7604,7 @@ async function renderManual() {
         <li><strong>Clientes / Produtos / Fornecedores</strong> — Cadastre, edite e pesquise registros com paginação.</li>
         <li><strong>Estoque</strong> — Pesquise itens por nome, codigo, marca ou local; filtre por categoria, situacao e tipo; registre entrada, ajuste ou inventario.</li>
         <li><strong>Gerência</strong> — Aprovacao de orcamentos, compras, conferencia de caixa, inventario e consulta de estoque (Administrador e Gerente).</li>
-        <li><strong>Ordens de serviço</strong> — Controle status, datas e valor previsto de cada OS.</li>
+        <li><strong>Ordens de serviço</strong> — Placa/km, pecas (baixa estoque), servicos, lucro e cobranca no PDV/NFC-e.</li>
         <li><strong>Financeiro</strong> — Vendas a vista entram pagas; Fiado vira contas a receber. Taxas de cartao/PIX e sangria/suprimento lancam sozinhos. Abas: contas bancarias (CSV), conciliacao, fluxo 30 dias e DRE (competencia, TXT/CSV).</li>
         <li><strong>CRM</strong> — Funil kanban (Lead a Perdido) com probabilidade editavel, filtros, timeline e WhatsApp/e-mail. Orcamento do PDV avanca o card.</li>
         <li><strong>Contratos</strong> — Recorrencia e MRR. Faturar lanca Receita no Financeiro. Encerre antes de excluir.</li>

@@ -612,6 +612,37 @@ ensureColumn('contratos', 'auto_faturar', 'INTEGER DEFAULT 0');
 ensureColumn('contratos', 'anexo', 'TEXT');
 ensureColumn('contratos', 'anexo_nome', 'TEXT');
 
+ensureColumn('ordens_servico', 'placa', 'TEXT');
+ensureColumn('ordens_servico', 'km', 'INTEGER');
+ensureColumn('ordens_servico', 'modelo', 'TEXT');
+ensureColumn('ordens_servico', 'valor_custo', 'REAL DEFAULT 0');
+ensureColumn('ordens_servico', 'valor_venda', 'REAL DEFAULT 0');
+ensureColumn('ordens_servico', 'valor_lucro', 'REAL DEFAULT 0');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ordem_servico_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    os_id INTEGER NOT NULL,
+    produto_id INTEGER,
+    tipo TEXT DEFAULT 'peca',
+    produto_tipo TEXT,
+    descricao TEXT NOT NULL,
+    quantidade REAL NOT NULL,
+    preco_unitario REAL DEFAULT 0,
+    preco_custo REAL DEFAULT 0,
+    subtotal REAL DEFAULT 0,
+    estoque_origem_id INTEGER,
+    estoque_consumo REAL DEFAULT 0,
+    composicao TEXT,
+    criado_em TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (os_id) REFERENCES ordens_servico(id) ON DELETE CASCADE,
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_os_itens_os ON ordem_servico_itens(os_id);
+  CREATE INDEX IF NOT EXISTS idx_ordens_servico_placa ON ordens_servico(placa);
+  CREATE INDEX IF NOT EXISTS idx_ordens_servico_cliente ON ordens_servico(cliente_id);
+`);
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS contas_bancarias (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -770,6 +801,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_caixa_venda ON caixa(venda_id);
   CREATE INDEX IF NOT EXISTS idx_estoque_mov_produto ON estoque_movimentos(produto_id, criado_em);
   CREATE INDEX IF NOT EXISTS idx_ordens_servico_status ON ordens_servico(status);
+  CREATE INDEX IF NOT EXISTS idx_ordens_servico_placa ON ordens_servico(placa);
+  CREATE INDEX IF NOT EXISTS idx_os_itens_os ON ordem_servico_itens(os_id);
   CREATE INDEX IF NOT EXISTS idx_nfce_venda ON nfce(venda_id);
   CREATE INDEX IF NOT EXISTS idx_produtos_codigo ON produtos(codigo);
   CREATE INDEX IF NOT EXISTS idx_produtos_estoque_origem ON produtos(estoque_origem_id);
@@ -1097,15 +1130,15 @@ if (!produtoExemplo) {
 }
 
 try {
-  const insertOSDemo = db.prepare(`INSERT INTO ordens_servico (status, cliente_id, equipamento, solicitacao, valor_previsto)
-    VALUES (?,?,?,?,?)`);
+  const insertOSDemo = db.prepare(`INSERT INTO ordens_servico (status, cliente_id, equipamento, modelo, placa, km, solicitacao, valor_previsto, valor_venda, valor_custo, valor_lucro)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
   const cli1 = db.prepare('SELECT id FROM clientes WHERE id=1').get();
   const cli2 = db.prepare('SELECT id FROM clientes WHERE id=2').get();
   if (cli1 && !db.prepare("SELECT id FROM ordens_servico WHERE equipamento LIKE '%notebook%' COLLATE NOCASE").get()) {
-    insertOSDemo.run('Pronta para entrega', 1, 'Notebook Dell Inspiron', 'Troca de tela e formatacao', 350);
+    insertOSDemo.run('Pronta para entrega', 1, 'Notebook Dell Inspiron', 'Notebook Dell Inspiron', null, null, 'Troca de tela e formatacao', 350, 350, 0, 350);
   }
   if (cli2 && !db.prepare("SELECT id FROM ordens_servico WHERE equipamento LIKE '%celular%' COLLATE NOCASE").get()) {
-    insertOSDemo.run('Pronta para entrega', 2, 'Celular Samsung Galaxy', 'Troca de bateria', 180);
+    insertOSDemo.run('Pronta para entrega', 2, 'Celular Samsung Galaxy', 'Celular Samsung Galaxy', null, null, 'Troca de bateria', 180, 180, 0, 180);
   }
 } catch (_) {}
 

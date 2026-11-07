@@ -54,8 +54,8 @@ module.exports = [
     sessao: 'Lupa de busca',
     pagina: 'vendas',
     titulo: 'Buscar produto, categoria ou ordem de servico',
-    keywords: 'lupa buscar pesquisa produto categoria ordem servico os notebook celular dropdown',
-    conteudo: `A lupa do PDV abre o menu BUSCAR EM com tres opcoes. Produto: nome, codigo de barras, SKU ou ID. Categoria: lista produtos da categoria digitada. Ordem de servico: cliente, aparelho, problema ou numero da OS. Clique na seta ao lado da lupa, escolha o tipo, digite e clique no resultado para adicionar ao carrinho. Ordens Entregue ou Cancelada nao entram na cobrança. A mesma OS nao pode ser adicionada duas vezes.`,
+    keywords: 'lupa buscar pesquisa produto categoria ordem servico os notebook celular placa peca dropdown',
+    conteudo: `A lupa do PDV abre o menu BUSCAR EM com tres opcoes. Produto: nome, codigo de barras, SKU ou ID. Categoria: lista produtos da categoria digitada. Ordem de servico: cliente, placa, modelo, problema ou numero da OS. Clique na seta ao lado da lupa, escolha o tipo, digite e clique no resultado para adicionar ao carrinho. A OS entra com cada peca e servico lancados (estoque da peca ja foi baixado na OS). Ordens Entregue ou Cancelada nao entram na cobranca. A mesma OS nao pode ser adicionada duas vezes.`,
     passos: [
       'Clique na lupa com a seta no campo de busca.',
       'Escolha Produto, Categoria ou Ordem de servico.',
@@ -70,13 +70,13 @@ module.exports = [
     sessao: 'Cobrar ordem de servico',
     pagina: 'vendas',
     titulo: 'Cobrar OS no caixa',
-    keywords: 'cobrar os ordem servico notebook celular valor previsto entregue finalizar',
-    conteudo: `Para cobrar uma OS, use a lupa em Ordem de servico e adicione a OS ao carrinho. O item aparece com a tag OS, quantidade 1 e o valor previsto. Ao finalizar a venda (F7), a ordem e marcada como Entregue. Se a venda for cancelada no historico, a OS volta para Pronta para entrega. Servicos avulsos (sem OS) tambem podem ser lancados pelo F8 na aba Servico.`,
+    keywords: 'cobrar os ordem servico notebook celular peca placa lucro valor previsto entregue finalizar nfce',
+    conteudo: `Para cobrar uma OS, use a lupa em Ordem de servico. O PDV puxa pecas e servicos da OS (tag OS em cada linha). Estoque da peca ja foi baixado ao lancar na OS, nao baixa de novo no caixa. Ao finalizar (F7), a ordem vai para Entregue e pode emitir NFC-e. Se a venda for cancelada, a OS volta para Pronta para entrega (peca nao retorna ao estoque). Servicos avulsos (sem OS) tambem podem ser lancados pelo F8 na aba Servico.`,
     passos: [
       'Na lupa, escolha Ordem de servico.',
-      'Selecione a OS (ex.: OS notebook ou OS celular).',
-      'Confira o valor no carrinho.',
-      'Finalize com F7.',
+      'Selecione a OS (placa, cliente ou numero).',
+      'Confira pecas e servicos no carrinho.',
+      'Finalize com F7 (NFC-e se habilitada).',
       'A OS passa para status Entregue.'
     ]
   },
@@ -314,14 +314,14 @@ module.exports = [
     sessao: 'Gestao de OS',
     pagina: 'ordens-servico',
     titulo: 'Abrir e acompanhar ordens de servico',
-    keywords: 'ordem servico os equipamento servicos equipamentos solicitacao status prevista entrega notebook celular',
-    conteudo: `Ordens de servico controla status (Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada), cliente, servicos/equipamentos, solicitacao, valor previsto e datas. No campo Servicos/Equipamentos voce cadastra aparelho (notebook, celular) ou servico (formatacao, instalacao). Cards mostram OS abertas, prontas e valor previsto. Para cobrar, va em Realizar vendas, lupa, Ordem de servico. OS de teste: Notebook Dell Inspiron (troca de tela) e Celular Samsung Galaxy (troca de bateria).`,
+    keywords: 'ordem servico os oficina peca servico baixa estoque placa km lucro historico moto whatsapp',
+    conteudo: `Ordens de servico de oficina: cliente, placa, km, modelo, pecas e servicos. Ao lancar peca do estoque, a quantidade e baixada na hora; ao remover o item, o estoque volta. Servico nao baixa estoque. O card mostra custo, venda e lucro. Historico lista outras OS da mesma placa ou cliente. Status: Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada. WhatsApp notifica quando estiver pronta. Para cobrar, va em Realizar vendas, lupa, Ordem de servico: o PDV puxa os itens e segue ate a NFC-e.`,
     passos: [
-      'Abra Ordens de servico.',
-      'Clique em Novo Servico.',
-      'Escolha cliente, servicos/equipamentos, problema e valor previsto.',
-      'Atualize o status conforme o conserto.',
-      'Quando estiver pronta, cobre no PDV pela lupa de OS.'
+      'Abra Ordens de servico e clique em Novo Servico.',
+      'Informe cliente, placa, km, modelo e o problema.',
+      'Salve e lance pecas (baixa estoque) e servicos.',
+      'Confira o card de lucro e o historico da moto.',
+      'Marque Pronta para entrega, notifique no WhatsApp e cobre no PDV.'
     ]
   },
   {

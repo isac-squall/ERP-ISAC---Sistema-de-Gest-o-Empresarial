@@ -21,7 +21,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - **R.H.** — Submenu: Funcionarios, Folhas de Ponto e Grades Horarias (cadastro no estilo SimpleDot)
 - **Gerência** — Submenu: Aprovacao Vendas, Compras, Fechamento Caixas, Inventario e Consulta Estoque
 - **Loja online / API** — Webhooks WooCommerce, Shopify, Nuvemshop, VTEX e Mercado Livre: pedido pago vira venda, cadastra cliente e baixa estoque
-- **Ordens de servico** — Status, cliente, Servicos/Equipamentos, valor previsto; cobranca no PDV
+- **Ordens de servico** — Oficina: pecas/servicos com baixa de estoque, placa/km, historico da moto, card de lucro e cobranca no PDV/NFC-e
 - **Usuarios** — Acessos e niveis (Administrador, Gerente, Vendedor, Caixa)
 - **Fornecedores** — Cadastro vinculado a produtos e contas a pagar
 - **Historico de vendas** — Consulta, cupom/DANFE, XML da NFC-e e cancelamento
@@ -37,7 +37,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 
 - Importar e exportar produtos (Excel, CSV, TXT, JSON, XML, SQL, HTML e Markdown)
 - NFC-e no PDV (certificado A1, CSC, homologacao/producao, DANFE e XML)
-- Lupa do PDV: Produto, Categoria ou Ordem de servico; OS Entregue ao finalizar a venda
+- Lupa do PDV: Produto, Categoria ou Ordem de servico; OS puxa pecas e servicos (estoque ja baixado na OS) e vai para Entregue ao finalizar
 - Assistente RAG por modulo/sessao (chat flutuante)
 - Relatorio geral e permissoes por cargo
 - Instalador Windows offline `dist/ERP-ISAC-Setup.exe`
@@ -60,6 +60,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Gerencia: submenu Aprovacao Vendas (orcamentos do PDV: aprovar, recusar, converter em venda), Compras (aprovar/receber pedidos), Fechamento Caixas (conferir o caixa fechado), Inventario (contagem substitui saldo) e Consulta Estoque (somente leitura). Acesso: Administrador e Gerente. Teste: `npm run test:gerencia`.
 - CRM: kanban de oportunidades (Lead a Perdido); probabilidade por etapa editavel (Lead 10%, Qualificacao 30%, Proposta 50%, Negociacao 80%); filtros por periodo, vendedor e tags; timeline de ligacoes/reunioes/e-mails no card; WhatsApp e e-mail com historico; orcamento do PDV avanca o funil (criar=Proposta, aprovar=Negociacao, converter=Ganho). Acesso: Administrador, Gerente e Vendedor. Teste: `npm run test:crm`.
 - Contratos: cadastro recorrente; Faturar (manual ou automatico 5 dias antes) gera Receita Pendente no Financeiro com vencimento no dia do contrato e avanca a proxima data. Adimplencia na lista; reajuste anual IGP-M/IPCA/Manual; alerta de vigencia (30 dias); anexo PDF/imagem. Contrato Ativo nao exclui (encerra antes). Teste: `npm run test:contratos`.
+- Ordens de servico (oficina): pecas e servicos na OS; peca baixa estoque na hora (estorno ao remover/cancelar); placa, km e historico da moto; card de lucro (custo/venda); PDV puxa os itens e segue NFC-e sem baixar estoque de novo. Teste: `npm run test:os`.
 - Bancos: contas (Corrente/Poupanca/Caixa/Digital), importacao de extrato CSV, conciliacao por valor+data e fluxo de caixa 30 dias. Abas no Financeiro. Teste: `npm run test:bancos`.
 - NF-e e NFS-e: rascunho, autorizacao simulada (chave/protocolo/XML locais) e cancelamento. Sem transmissao a SEFAZ ou prefeitura nesta entrega. Teste: `npm run test:fiscal`.
 - Producao: OP usa a composicao (BOM) do produto/kit; concluir baixa insumos e entra o acabado. Curva ABC pelo faturamento do mes (A ate 80%, B ate 95%, C o restante). Teste: `npm run test:producao`.
@@ -83,7 +84,8 @@ O caixa precisa estar aberto. A venda comeca vazia (Caixa livre).
 
 - Lupa **BUSCAR EM**: Produto (nome, codigo, SKU, ID), Categoria ou Ordem de servico
 - OS Entregue ou Cancelada nao entra no carrinho; a mesma OS nao pode ser adicionada duas vezes
-- Ao finalizar (F7), a OS vai para **Entregue**; se a venda for cancelada, volta para **Pronta para entrega**
+- A lupa puxa cada peca e servico da OS (nao so uma linha); estoque da peca ja foi baixado ao lancar na OS
+- Ao finalizar (F7), a OS vai para **Entregue**; se a venda for cancelada, volta para **Pronta para entrega** (estoque da peca nao volta, so se remover o item na OS)
 - Pagamentos: Dinheiro, Cartao Debito, Cartao Credito, PIX e Fiado. No PIX, o PDV gera o QR Code (EMV/BR Code) da chave cadastrada em Configuracoes, com o valor da venda e copia-e-cola
 - Venda a vista (Dinheiro/PIX/cartao) lanca Receita Pago no Financeiro; Fiado gera Contas a receber (parcela a cada 30 dias)
 - Taxas de credito, debito e PIX descontam o liquido no Financeiro (despesa Taxa operadora)
@@ -212,11 +214,13 @@ Menu **Impressoras** (Administrador e Gerente).
 
 ## Ordens de servico
 
-Campo **Servicos/Equipamentos**: aparelho (notebook, celular) ou servico (formatacao, instalacao).
+Oficina: cadastre cliente, **placa**, **km** e modelo. Lance pecas (baixa estoque na hora) e servicos. O card mostra custo, venda e lucro.
 
 Status: Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada.
 
-Para cobrar: **Realizar vendas** > lupa > Ordem de servico.
+Historico da moto: outras OS da mesma placa ou do mesmo cliente. WhatsApp avisa quando estiver pronta.
+
+Para cobrar: **Realizar vendas** > lupa > Ordem de servico. O PDV puxa os itens; finalize (F7) com NFC-e se estiver habilitada.
 
 ## Cadastro da empresa
 
