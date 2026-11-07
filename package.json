@@ -15,6 +15,7 @@
     "test:gerencia": "node gerencia/test.js",
     "test:crm": "node crm/test.js",
     "test:contratos": "node contratos/test.js",
+    "test:os": "node ordens-servico/test.js",
     "test:bancos": "node bancos/test.js",
     "test:fiscal": "node fiscal/test.js",
     "test:producao": "node producao/test.js",

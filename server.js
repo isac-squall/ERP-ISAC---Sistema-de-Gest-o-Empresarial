@@ -14,6 +14,7 @@ const ecomMod = require('./ecommerce');
 const gerenciaMod = require('./gerencia');
 const crmMod = require('./crm');
 const contratosMod = require('./contratos');
+const osMod = require('./ordens-servico');
 const bancosMod = require('./bancos');
 const fiscalMod = require('./fiscal');
 const producaoMod = require('./producao');
@@ -212,7 +213,7 @@ function permissoesDaRota(req) {
   }
   if (p.startsWith('/api/clientes')) return ['clientes', 'vendas', 'caixa'];
   if (p.startsWith('/api/fornecedores')) return ['fornecedores', 'produtos'];
-  if (p.startsWith('/api/ordens-servico')) return ['ordens-servico'];
+  if (p.startsWith('/api/ordens-servico')) return m === 'GET' ? ['ordens-servico', 'vendas'] : ['ordens-servico'];
   if (p.startsWith('/api/impressoras')) return m === 'GET' ? null : ['impressoras'];
   if (p.startsWith('/api/backups')) return ['backup'];
   if (p.startsWith('/api/contador/xml-fiscal.zip') || p.startsWith('/api/contador/xml-fiscal')) return ['contador-xml', 'contador-nfe'];
@@ -412,7 +413,7 @@ app.get('/api/dashboard', (req, res) => {
     LIMIT 8
   `).all();
   const osProntasLista = db.prepare(`
-    SELECT o.id, o.equipamento, o.valor_previsto, o.solicitacao, c.nome as cliente_nome, c.telefone as cliente_telefone
+    SELECT o.id, o.equipamento, o.modelo, o.placa, o.valor_previsto, o.valor_venda, o.solicitacao, c.nome as cliente_nome, c.telefone as cliente_telefone
     FROM ordens_servico o
     LEFT JOIN clientes c ON o.cliente_id = c.id
     WHERE o.status='Pronta para entrega'
@@ -813,7 +814,7 @@ app.post('/api/config/apagar-banco', limitarAcaoCritica, (req, res) => {
     const tx = db.transaction(() => {
       const tabelas = [
         'sessoes', 'venda_itens', 'nfce', 'vendas', 'orcamentos', 'estoque_movimentos',
-        'promocoes', 'produto_composicao', 'produto_categorias', 'produtos', 'ordens_servico', 'financeiro', 'caixa',
+        'promocoes', 'produto_composicao', 'produto_categorias', 'produtos', 'ordem_servico_itens', 'ordens_servico', 'financeiro', 'caixa',
         'caixa_fechamentos', 'clientes', 'fornecedores', 'usuarios', 'impressoras',
         'crm_interacoes', 'crm_oportunidades'
       ];
@@ -825,7 +826,7 @@ app.post('/api/config/apagar-banco', limitarAcaoCritica, (req, res) => {
         if (!isPreservedConfigKey(row.chave)) delCfg.run(row.chave);
       }
       try {
-        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('sessoes','venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produto_composicao','produto_categorias','produtos','ordens_servico','financeiro','caixa','caixa_fechamentos','clientes','fornecedores','usuarios','impressoras','crm_interacoes','crm_oportunidades')");
+        db.exec("DELETE FROM sqlite_sequence WHERE name IN ('sessoes','venda_itens','nfce','vendas','orcamentos','estoque_movimentos','promocoes','produto_composicao','produto_categorias','produtos','ordem_servico_itens','ordens_servico','financeiro','caixa','caixa_fechamentos','clientes','fornecedores','usuarios','impressoras','crm_interacoes','crm_oportunidades')");
       } catch {}
       db.prepare(`INSERT INTO usuarios (nome, email, senha, cargo, celular, data_nascimento, cpf, tipo_pessoa, ativo)
         VALUES (?,?,?,?,?,?,?,?,1)`).run(
@@ -2991,7 +2992,7 @@ app.post('/api/nfse/da-os/:id', (req, res) => {
       destinatario_cidade: os.cidade,
       destinatario_uf: os.estado,
       natureza: os.solicitacao || 'Prestacao de servicos',
-      itens: [{ descricao: os.solicitacao || os.equipamento || 'Servico', quantidade: 1, preco_unitario: os.valor_previsto || 0 }]
+      itens: osItensNfse(os)
     }, 'NFS-e');
     const auth = emitirNotaLocal(id);
     res.json({ id, ...auth });
@@ -3666,6 +3667,68 @@ app.delete('/api/promocoes/:id', (req, res) => {
 });
 
 // ============ ORDENS DE SERVIÇO ============
+function osItensDb(osId) {
+  return db.prepare('SELECT * FROM ordem_servico_itens WHERE os_id=? ORDER BY id').all(osId);
+}
+
+function osRecalcularTotais(osId) {
+  const itens = osItensDb(osId);
+  if (!itens.length) {
+    const row = db.prepare('SELECT valor_previsto FROM ordens_servico WHERE id=?').get(osId);
+    const venda = osMod.arredMoney(row?.valor_previsto);
+    db.prepare('UPDATE ordens_servico SET valor_custo=0, valor_venda=?, valor_lucro=? WHERE id=?')
+      .run(venda, venda, osId);
+    return { valor_custo: 0, valor_venda: venda, valor_lucro: venda, valor_previsto: venda };
+  }
+  const tot = osMod.totais(itens);
+  db.prepare('UPDATE ordens_servico SET valor_previsto=?, valor_custo=?, valor_venda=?, valor_lucro=? WHERE id=?')
+    .run(tot.valor_previsto, tot.valor_custo, tot.valor_venda, tot.valor_lucro, osId);
+  return tot;
+}
+
+function osRowCompleta(osId) {
+  const row = db.prepare(`
+    SELECT os.*, c.nome as cliente_nome, c.telefone as cliente_telefone
+    FROM ordens_servico os LEFT JOIN clientes c ON os.cliente_id = c.id WHERE os.id = ?
+  `).get(osId);
+  if (!row) return null;
+  const itens = osItensDb(osId);
+  const enr = osMod.enriquecer(row, itens);
+  enr.mensagem_whatsapp = osMod.mensagemWhatsApp(enr);
+  return enr;
+}
+
+function osHistorico(os) {
+  const params = [];
+  let q = `SELECT os.id, os.status, os.placa, os.km, os.modelo, os.equipamento, os.solicitacao,
+      os.valor_previsto, os.valor_venda, os.valor_lucro, os.criado_em, os.data_entrega, c.nome as cliente_nome
+    FROM ordens_servico os LEFT JOIN clientes c ON os.cliente_id = c.id WHERE os.id != ?`;
+  params.push(os.id);
+  const or = [];
+  if (os.placa) { or.push('os.placa = ?'); params.push(os.placa); }
+  if (os.cliente_id) { or.push('os.cliente_id = ?'); params.push(os.cliente_id); }
+  if (!or.length) return [];
+  q += ` AND (${or.join(' OR ')}) ORDER BY os.id DESC LIMIT 12`;
+  return db.prepare(q).all(...params);
+}
+
+function osItensNfse(os) {
+  const itens = osItensDb(os.id);
+  if (!itens.length) {
+    return [{ descricao: os.solicitacao || os.equipamento || 'Servico', quantidade: 1, preco_unitario: os.valor_previsto || 0 }];
+  }
+  return itens.map(i => ({
+    descricao: i.descricao,
+    quantidade: i.quantidade,
+    preco_unitario: i.preco_unitario
+  }));
+}
+
+function osExigirAberta(os) {
+  if (!os) osMod.fail('Ordem nao encontrada', 404);
+  if (osMod.osFechada(os.status)) osMod.fail('OS entregue ou cancelada nao pode ser alterada');
+}
+
 app.get('/api/ordens-servico/stats', (req, res) => {
   const abertas = db.prepare("SELECT COUNT(*) as total FROM ordens_servico WHERE status IN ('Aberta','Em andamento')").get();
   const prontas = db.prepare("SELECT COUNT(*) as total FROM ordens_servico WHERE status = 'Pronta para entrega'").get();
@@ -3674,46 +3737,140 @@ app.get('/api/ordens-servico/stats', (req, res) => {
 });
 
 app.get('/api/ordens-servico/:id', (req, res) => {
-  const row = db.prepare(`
-    SELECT os.*, c.nome as cliente_nome FROM ordens_servico os
-    LEFT JOIN clientes c ON os.cliente_id = c.id WHERE os.id = ?
-  `).get(req.params.id);
+  const row = osRowCompleta(req.params.id);
   if (!row) return res.status(404).json({ error: 'Ordem não encontrada' });
+  row.historico = osHistorico(row);
   res.json(row);
 });
 
 app.get('/api/ordens-servico', (req, res) => {
   const { search = '', page = 1, limit = 15 } = req.query;
-  let query = `SELECT os.*, c.nome as cliente_nome FROM ordens_servico os LEFT JOIN clientes c ON os.cliente_id = c.id WHERE 1=1`;
+  let query = `SELECT os.*, c.nome as cliente_nome, c.telefone as cliente_telefone FROM ordens_servico os LEFT JOIN clientes c ON os.cliente_id = c.id WHERE 1=1`;
   const params = [];
   if (search) {
-    query += ' AND (c.nome LIKE ? OR os.equipamento LIKE ? OR os.solicitacao LIKE ? OR os.status LIKE ? OR CAST(os.id AS TEXT) LIKE ?)';
+    query += ' AND (c.nome LIKE ? OR os.equipamento LIKE ? OR os.modelo LIKE ? OR os.placa LIKE ? OR os.solicitacao LIKE ? OR os.status LIKE ? OR CAST(os.id AS TEXT) LIKE ?)';
     const s = `%${search}%`;
-    params.push(s, s, s, s, s);
+    params.push(s, s, s, s, s, s, s);
   }
   query += ' ORDER BY os.id DESC';
-  const countQ = query.replace(/SELECT os\.\*, c\.nome as cliente_nome/, 'SELECT COUNT(*) as total');
+  const countQ = query.replace(/SELECT os\.\*, c\.nome as cliente_nome, c\.telefone as cliente_telefone/, 'SELECT COUNT(*) as total');
   const total = db.prepare(countQ).get(...params)?.total || 0;
   const offset = (page - 1) * limit;
-  const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset);
+  const data = db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, +limit, offset).map(o => ({
+    ...o,
+    mensagem_whatsapp: osMod.mensagemWhatsApp(o)
+  }));
   res.json({ data, total, page: +page, limit: +limit, totalPages: Math.ceil(total / limit) || 1 });
 });
 
 app.post('/api/ordens-servico', (req, res) => {
-  const { status, cliente_id, equipamento, solicitacao, valor_previsto, data_prevista, data_final, data_entrega, observacoes } = req.body;
-  const result = db.prepare(`INSERT INTO ordens_servico (status, cliente_id, equipamento, solicitacao, valor_previsto, data_prevista, data_final, data_entrega, observacoes) VALUES (?,?,?,?,?,?,?,?,?)`).run(status || 'Aberta', cliente_id, equipamento, solicitacao, valor_previsto || 0, data_prevista, data_final, data_entrega, observacoes);
-  res.json({ id: result.lastInsertRowid });
+  try {
+    const d = osMod.payloadOS(req.body || {});
+    const result = db.prepare(`INSERT INTO ordens_servico
+      (status, cliente_id, equipamento, modelo, placa, km, solicitacao, valor_previsto, valor_custo, valor_venda, valor_lucro, data_prevista, data_final, data_entrega, observacoes)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      d.status, d.cliente_id, d.equipamento, d.modelo, d.placa, d.km, d.solicitacao,
+      d.valor_previsto, 0, d.valor_previsto, d.valor_previsto,
+      d.data_prevista, d.data_final, d.data_entrega, d.observacoes
+    );
+    res.json(osRowCompleta(result.lastInsertRowid));
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 app.put('/api/ordens-servico/:id', (req, res) => {
-  const { status, cliente_id, equipamento, solicitacao, valor_previsto, data_prevista, data_final, data_entrega, observacoes } = req.body;
-  db.prepare(`UPDATE ordens_servico SET status=?, cliente_id=?, equipamento=?, solicitacao=?, valor_previsto=?, data_prevista=?, data_final=?, data_entrega=?, observacoes=? WHERE id=?`).run(status, cliente_id, equipamento, solicitacao, valor_previsto, data_prevista, data_final, data_entrega, observacoes, req.params.id);
-  res.json({ message: 'Ordem atualizada' });
+  try {
+    const atual = db.prepare('SELECT * FROM ordens_servico WHERE id=?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Ordem não encontrada' });
+    const d = osMod.payloadOS({ ...atual, ...(req.body || {}) });
+    const temItens = db.prepare('SELECT id FROM ordem_servico_itens WHERE os_id=? LIMIT 1').get(req.params.id);
+    const txn = db.transaction(() => {
+      if (d.status === 'Cancelada' && atual.status !== 'Cancelada' && atual.status !== 'Entregue') {
+        devolverEstoqueVenda(osItensDb(req.params.id).map(osMod.itemParaEstorno), req.usuario?.id, `Cancelamento OS #${req.params.id}`);
+      } else if (atual.status === 'Cancelada' && d.status !== 'Cancelada') {
+        for (const it of osItensDb(req.params.id)) {
+          if (it.produto_id && it.tipo === 'peca') {
+            baixarEstoqueItem(it, it.quantidade, req.usuario?.id, `Reabertura OS #${req.params.id}`);
+          }
+        }
+      }
+      db.prepare(`UPDATE ordens_servico SET status=?, cliente_id=?, equipamento=?, modelo=?, placa=?, km=?, solicitacao=?, data_prevista=?, data_final=?, data_entrega=?, observacoes=? WHERE id=?`)
+        .run(d.status, d.cliente_id, d.equipamento, d.modelo, d.placa, d.km, d.solicitacao, d.data_prevista, d.data_final, d.data_entrega, d.observacoes, req.params.id);
+      if (!temItens && req.body && req.body.valor_previsto != null) {
+        db.prepare('UPDATE ordens_servico SET valor_previsto=? WHERE id=?').run(osMod.arredMoney(req.body.valor_previsto), req.params.id);
+      }
+      osRecalcularTotais(req.params.id);
+    });
+    txn();
+    res.json(osRowCompleta(req.params.id));
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 app.delete('/api/ordens-servico/:id', (req, res) => {
-  db.prepare('DELETE FROM ordens_servico WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Ordem removida' });
+  try {
+    const atual = db.prepare('SELECT * FROM ordens_servico WHERE id=?').get(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Ordem não encontrada' });
+    if (osMod.normalizarStatus(atual.status) === 'Entregue') osMod.fail('OS entregue nao pode ser excluida');
+    const itens = osItensDb(req.params.id);
+    const txn = db.transaction(() => {
+      if (atual.status !== 'Cancelada') {
+        devolverEstoqueVenda(itens.map(osMod.itemParaEstorno), req.usuario?.id, `Estorno OS #${req.params.id}`);
+      }
+      db.prepare('DELETE FROM ordem_servico_itens WHERE os_id=?').run(req.params.id);
+      db.prepare('DELETE FROM ordens_servico WHERE id=?').run(req.params.id);
+    });
+    txn();
+    res.json({ message: 'Ordem removida' });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.post('/api/ordens-servico/:id/itens', (req, res) => {
+  try {
+    const os = db.prepare('SELECT * FROM ordens_servico WHERE id=?').get(req.params.id);
+    osExigirAberta(os);
+    const body = req.body || {};
+    let produto = null;
+    if (body.produto_id) {
+      produto = db.prepare('SELECT * FROM produtos WHERE id=?').get(body.produto_id);
+      if (!produto) osMod.fail('Produto nao encontrado', 404);
+    }
+    const item = osMod.validarItem(body, produto);
+    const tipoProd = produto ? produtosTipos.normalizarTipo(produto.tipo) : (item.tipo === 'servico' ? 'servico' : null);
+    const txn = db.transaction(() => {
+      let baixa = { estoque_origem_id: null, estoque_consumo: 0, tipo: tipoProd, composicao: null };
+      if (item.produto_id && item.tipo === 'peca') {
+        baixa = baixarEstoqueItem(item, item.quantidade, req.usuario?.id, `OS #${os.id}`);
+      }
+      const r = db.prepare(`INSERT INTO ordem_servico_itens
+        (os_id, produto_id, tipo, produto_tipo, descricao, quantidade, preco_unitario, preco_custo, subtotal, estoque_origem_id, estoque_consumo, composicao)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        os.id, item.produto_id, item.tipo, baixa.tipo || tipoProd, item.descricao, item.quantidade,
+        item.preco_unitario, item.preco_custo, item.subtotal,
+        baixa.estoque_origem_id, baixa.estoque_consumo, baixa.composicao
+      );
+      osRecalcularTotais(os.id);
+      return r.lastInsertRowid;
+    });
+    txn();
+    res.json(osRowCompleta(os.id));
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+});
+
+app.delete('/api/ordens-servico/:id/itens/:itemId', (req, res) => {
+  try {
+    const os = db.prepare('SELECT * FROM ordens_servico WHERE id=?').get(req.params.id);
+    osExigirAberta(os);
+    const item = db.prepare('SELECT * FROM ordem_servico_itens WHERE id=? AND os_id=?').get(req.params.itemId, os.id);
+    if (!item) return res.status(404).json({ error: 'Item nao encontrado' });
+    const txn = db.transaction(() => {
+      if (item.produto_id && item.tipo === 'peca') {
+        devolverEstoqueVenda([osMod.itemParaEstorno(item)], req.usuario?.id, `Estorno item OS #${os.id}`);
+      }
+      db.prepare('DELETE FROM ordem_servico_itens WHERE id=?').run(item.id);
+      osRecalcularTotais(os.id);
+    });
+    txn();
+    res.json(osRowCompleta(os.id));
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 // ============ USUÁRIOS ============
@@ -3964,6 +4121,7 @@ function devolverUnidadeEstoque(alvoId, qtdDevolve, usuarioId, observacao) {
 function devolverEstoqueVenda(itens, usuarioId, observacao) {
   for (const item of itens) {
     if (!item.produto_id) continue;
+    if (item.os_id) continue;
     const tipo = produtosTipos.normalizarTipo(item.tipo);
     if (tipo === 'servico') continue;
     const atual = db.prepare('SELECT tipo, controla_estoque FROM produtos WHERE id = ?').get(item.produto_id);
@@ -4349,6 +4507,7 @@ function criarVendaInterna({
   const marcarOS = db.prepare("UPDATE ordens_servico SET status='Entregue', data_entrega=datetime('now','localtime') WHERE id=? AND status NOT IN ('Entregue','Cancelada')");
 
   const txn = db.transaction(() => {
+    const osMarcadas = new Set();
     let subtotal = 0;
     for (const item of itens) {
       subtotal += item.quantidade * item.preco_unitario;
@@ -4372,20 +4531,21 @@ function criarVendaInterna({
       if ((!custo || Number.isNaN(custo)) && item.produto_id) {
         custo = Number(db.prepare('SELECT preco_custo FROM produtos WHERE id = ?').get(item.produto_id)?.preco_custo) || 0;
       }
-      let baixa = { estoque_origem_id: null, estoque_consumo: 0, tipo: null, composicao: null };
-      if (item.produto_id) {
+      let baixa = { estoque_origem_id: null, estoque_consumo: 0, tipo: item.tipo || null, composicao: null };
+      if (item.produto_id && !item.os_id) {
         baixa = baixarEstoqueItem(item, quantidade, usuario_id, `Venda #${venda.lastInsertRowid}`);
       }
       insertItem.run(venda.lastInsertRowid, item.produto_id || null, item.descricao || null,
         quantidade, preco, quantidade * preco, item.os_id || null, custo || 0,
         baixa.estoque_origem_id, baixa.estoque_consumo, baixa.tipo, baixa.composicao);
-      if (item.os_id) {
+      if (item.os_id && !osMarcadas.has(Number(item.os_id))) {
         const os = db.prepare('SELECT id, status FROM ordens_servico WHERE id = ?').get(item.os_id);
         if (!os) throw new Error(`Ordem de serviço #${item.os_id} não encontrada`);
         if (['Entregue', 'Cancelada'].includes(os.status)) {
           throw new Error(`Ordem de serviço #${item.os_id} não pode ser cobrada`);
         }
         marcarOS.run(item.os_id);
+        osMarcadas.add(Number(item.os_id));
       }
     }
     if (!fiado && exigirCaixa) {

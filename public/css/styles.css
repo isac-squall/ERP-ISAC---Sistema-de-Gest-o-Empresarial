@@ -405,6 +405,23 @@ a.btn-icon-square { text-decoration: none; }
 .kit-table input { width: 90px; padding: 6px 8px; }
 .modal-box.wide { max-width: 760px; }
 .modal-box.wide.xl { max-width: 1100px; }
+.os-lucro-card {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg);
+}
+.os-lucro-card span { display: block; font-size: 12px; color: var(--text-muted); }
+.os-lucro-card strong { font-size: 16px; }
+.os-lucro-card .neg strong { color: var(--danger); }
+.os-sec { margin: 16px 0 8px; font-size: 14px; }
+.os-itens-table { font-size: 13px; }
+.os-add-item { display: grid; grid-template-columns: 1.4fr 1fr 70px 90px 100px auto; gap: 8px; margin-top: 8px; align-items: center; }
+.os-add-item input, .os-add-item select { width: 100%; }
+.os-item-sug { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); max-height: 180px; overflow: auto; }
+.os-sug { display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0; background: transparent; color: var(--text); cursor: pointer; }
+.os-sug:hover { background: rgba(33,150,243,0.08); }
+.os-sug small { color: var(--text-muted); }
+td.neg { color: var(--danger); }
 .xml-entrada-table input,
 .xml-entrada-table select { width: 100%; min-width: 64px; padding: 6px 8px; }
 .xml-entrada-table td { font-size: 12px; }
@@ -1521,6 +1538,7 @@ a.btn-icon-square { text-decoration: none; }
   .pos-client { min-width: 0; flex: 1; }
   .pos-table { min-width: 560px; }
   .form-row, .form-row-3 { grid-template-columns: 1fr; }
+  .os-lucro-card, .os-add-item { grid-template-columns: 1fr 1fr; }
   .tipo-opcoes { grid-template-columns: 1fr 1fr; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .rep-filters { align-items: stretch; }
