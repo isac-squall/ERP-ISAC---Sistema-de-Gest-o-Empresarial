@@ -740,9 +740,22 @@ async function showOSForm(id) {
               `<option ${data.status === s ? 'selected' : ''}>${s}</option>`).join('')}
           </select></div>
         <div class="form-group"><label>Cliente</label>
-          <select name="cliente_id"><option value="">Selecione...</option>
-            ${clientes.map(c => `<option value="${c.id}" ${data.cliente_id == c.id ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
-          </select></div>
+          <div class="input-with-action">
+            <select name="cliente_id" id="os-cliente-id"><option value="">Selecione...</option>
+              ${clientes.map(c => `<option value="${c.id}" ${data.cliente_id == c.id ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
+            </select>
+            <button type="button" class="btn-icon-square" id="os-cliente-toggle" title="Cadastrar cliente"><i class="fas fa-user-plus"></i></button>
+          </div></div>
+      </div>
+      <div id="os-cliente-novo" class="os-cliente-novo hidden">
+        <div class="form-row">
+          <div class="form-group"><label>Nome *</label><input id="os-cli-nome" placeholder="Nome do cliente"></div>
+          <div class="form-group"><label>Telefone / WhatsApp</label><input id="os-cli-tel" placeholder="(00) 00000-0000"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>CPF/CNPJ</label><input id="os-cli-doc"></div>
+          <div class="form-group os-cli-salvar-wrap"><button type="button" class="btn btn-outline" id="os-cli-salvar">Salvar cliente</button></div>
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>Tipo de aparelho</label>
@@ -806,6 +819,33 @@ async function showOSForm(id) {
     document.querySelectorAll('.os-campo-imei').forEach(el => el.classList.toggle('hidden', t !== 'Celular' && t !== 'Tablet'));
   };
   if (tipoEl) { tipoEl.onchange = aplicarCamposAparelho; aplicarCamposAparelho(); }
+  const novoCli = document.getElementById('os-cliente-novo');
+  document.getElementById('os-cliente-toggle')?.addEventListener('click', () => {
+    novoCli?.classList.toggle('hidden');
+    if (novoCli && !novoCli.classList.contains('hidden')) document.getElementById('os-cli-nome')?.focus();
+  });
+  document.getElementById('os-cli-salvar')?.addEventListener('click', async () => {
+    const nome = String(document.getElementById('os-cli-nome')?.value || '').trim();
+    if (!nome) { showToast('Informe o nome do cliente', 'error'); return; }
+    try {
+      const r = await API.clientes.create({
+        nome,
+        telefone: String(document.getElementById('os-cli-tel')?.value || '').trim(),
+        cpf_cnpj: String(document.getElementById('os-cli-doc')?.value || '').trim()
+      });
+      const sel = document.getElementById('os-cliente-id');
+      const opt = document.createElement('option');
+      opt.value = r.id;
+      opt.textContent = nome;
+      opt.selected = true;
+      sel.appendChild(opt);
+      novoCli.classList.add('hidden');
+      document.getElementById('os-cli-nome').value = '';
+      document.getElementById('os-cli-tel').value = '';
+      document.getElementById('os-cli-doc').value = '';
+      showToast('Cliente cadastrado', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  });
   document.getElementById('os-save').onclick = async () => {
     const fd = new FormData(document.getElementById('os-form'));
     const body = Object.fromEntries(fd);

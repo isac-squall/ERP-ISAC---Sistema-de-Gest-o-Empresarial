@@ -211,7 +211,9 @@ function permissoesDaRota(req) {
   if (p.startsWith('/api/produtos') || p.startsWith('/api/promocoes') || p.startsWith('/api/categorias')) {
     return m === 'GET' ? ['produtos', 'vendas'] : ['produtos'];
   }
-  if (p.startsWith('/api/clientes')) return ['clientes', 'vendas', 'caixa'];
+  if (p.startsWith('/api/clientes')) {
+    return m === 'GET' || m === 'POST' ? ['clientes', 'vendas', 'caixa', 'ordens-servico'] : ['clientes', 'vendas', 'caixa'];
+  }
   if (p.startsWith('/api/fornecedores')) return ['fornecedores', 'produtos'];
   if (p.startsWith('/api/ordens-servico')) return m === 'GET' ? ['ordens-servico', 'vendas'] : ['ordens-servico'];
   if (p.startsWith('/api/impressoras')) return m === 'GET' ? null : ['impressoras'];
