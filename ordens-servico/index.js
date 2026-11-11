@@ -6,6 +6,7 @@ function fail(msg, status) {
 
 const STATUS = ['Aberta', 'Em andamento', 'Pronta para entrega', 'Entregue', 'Cancelada'];
 const TIPOS_ITEM = ['peca', 'servico'];
+const TIPOS_APARELHO = ['Veiculo', 'Celular', 'Notebook', 'Tablet', 'TV', 'Console', 'Outro'];
 
 function arredMoney(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -29,6 +30,56 @@ function osFechada(status) {
 
 function normalizarPlaca(p) {
   return String(p || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+}
+
+function normalizarImei(v) {
+  return String(v || '').replace(/\D/g, '').slice(0, 15);
+}
+
+function normalizarSerial(v) {
+  return String(v || '').trim().toUpperCase().slice(0, 40);
+}
+
+function inferirTipoAparelho(os) {
+  const raw = String(os?.tipo_aparelho || '').trim();
+  if (raw && raw !== 'Outro') return normalizarTipoAparelho(raw);
+  if (os?.placa) return 'Veiculo';
+  const t = `${os?.modelo || ''} ${os?.equipamento || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (t.includes('celular') || t.includes('smartphone') || t.includes('iphone')) return 'Celular';
+  if (t.includes('notebook') || t.includes('laptop') || t.includes('netbook')) return 'Notebook';
+  if (t.includes('tablet') || t.includes('ipad')) return 'Tablet';
+  if (/\btv\b/.test(t) || t.includes('televis')) return 'TV';
+  if (t.includes('playstation') || t.includes('xbox') || t.includes('nintendo') || t.includes('console')) return 'Console';
+  if (raw) return normalizarTipoAparelho(raw);
+  return 'Outro';
+}
+
+function normalizarTipoAparelho(tipo) {
+  const s = String(tipo || '').trim();
+  if (TIPOS_APARELHO.includes(s)) return s;
+  const t = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (t.includes('veic') || t.includes('moto') || t.includes('carro') || t === 'placa') return 'Veiculo';
+  if (t.includes('cel') || t.includes('smart') || t.includes('fone')) return 'Celular';
+  if (t.includes('note') || t.includes('laptop') || t.includes('pc')) return 'Notebook';
+  if (t.includes('tablet') || t.includes('ipad')) return 'Tablet';
+  if (t === 'tv' || t.includes('televis')) return 'TV';
+  if (t.includes('console') || t.includes('game')) return 'Console';
+  return 'Outro';
+}
+
+function rotuloAparelho(os) {
+  const tipo = inferirTipoAparelho(os);
+  const modelo = String(os?.modelo || os?.equipamento || '').trim();
+  const marca = String(os?.marca || '').trim();
+  const nome = [marca, modelo].filter(Boolean).join(' ') || modelo;
+  if (tipo === 'Veiculo') {
+    const placa = os?.placa ? String(os.placa) : '';
+    if (placa && nome) return `${placa} · ${nome}`;
+    return placa || nome || 'Veiculo';
+  }
+  if (tipo === 'Celular' && os?.imei) return `${nome || 'Celular'} · IMEI ${os.imei}`;
+  if (os?.serial && nome) return `${nome} · ${os.serial}`;
+  return nome || tipo;
 }
 
 function normalizarTipoItem(tipo, produtoTipo) {
@@ -82,21 +133,30 @@ function totais(itens) {
 }
 
 function payloadOS(body) {
-  const placa = normalizarPlaca(body.placa);
+  const tipo_aparelho = inferirTipoAparelho(body);
+  const placa = tipo_aparelho === 'Veiculo' ? normalizarPlaca(body.placa) : '';
   let km = null;
-  if (body.km !== undefined && body.km !== null && String(body.km).trim() !== '') {
+  if (tipo_aparelho === 'Veiculo' && body.km !== undefined && body.km !== null && String(body.km).trim() !== '') {
     km = parseInt(body.km, 10);
     if (!Number.isFinite(km) || km < 0) fail('KM invalido');
   }
+  const marca = String(body.marca || '').trim().slice(0, 60);
   const modelo = String(body.modelo || body.equipamento || '').trim();
-  const equipamento = modelo || String(body.equipamento || '').trim();
+  const equipamento = [marca, modelo].filter(Boolean).join(' ') || modelo || tipo_aparelho;
   return {
     status: normalizarStatus(body.status),
     cliente_id: body.cliente_id ? Number(body.cliente_id) : null,
+    tipo_aparelho,
     equipamento,
     modelo: modelo || null,
+    marca: marca || null,
     placa: placa || null,
     km,
+    imei: (tipo_aparelho === 'Celular' || tipo_aparelho === 'Tablet') ? (normalizarImei(body.imei) || null) : null,
+    serial: normalizarSerial(body.serial) || null,
+    senha: String(body.senha || '').trim().slice(0, 80) || null,
+    cor: String(body.cor || '').trim().slice(0, 40) || null,
+    acessorios: String(body.acessorios || '').trim().slice(0, 200) || null,
     solicitacao: String(body.solicitacao || '').trim() || null,
     valor_previsto: arredMoney(body.valor_previsto),
     data_prevista: body.data_prevista || null,
@@ -107,10 +167,11 @@ function payloadOS(body) {
 }
 
 function mensagemWhatsApp(os) {
-  const placa = os.placa ? ` da placa ${os.placa}` : '';
+  const aparelho = rotuloAparelho(os);
+  const extra = aparelho && aparelho !== 'Outro' ? ` (${aparelho})` : '';
   const total = arredMoney(Number(os.valor_venda) > 0 ? os.valor_venda : os.valor_previsto);
   const fmt = total.toFixed(2).replace('.', ',');
-  return `Ola! Sua ordem de servico #${os.id}${placa} esta pronta para entrega. Total: R$ ${fmt}.`;
+  return `Ola! Sua ordem de servico #${os.id}${extra} esta pronta para entrega. Total: R$ ${fmt}.`;
 }
 
 function itensParaPdv(os, itens) {
@@ -118,7 +179,7 @@ function itensParaPdv(os, itens) {
   if (!lista.length) {
     return [{
       produto_id: null,
-      descricao: `OS ${os.id} · ${os.equipamento || os.modelo || 'Servico'}`,
+      descricao: `OS ${os.id} · ${rotuloAparelho(os) || os.equipamento || os.modelo || 'Servico'}`,
       quantidade: 1,
       preco_unitario: arredMoney(os.valor_previsto),
       preco_custo: 0,
@@ -168,11 +229,17 @@ function itemParaEstorno(item) {
 module.exports = {
   STATUS,
   TIPOS_ITEM,
+  TIPOS_APARELHO,
   fail,
   arredMoney,
   normalizarStatus,
   osFechada,
   normalizarPlaca,
+  normalizarImei,
+  normalizarSerial,
+  inferirTipoAparelho,
+  normalizarTipoAparelho,
+  rotuloAparelho,
   normalizarTipoItem,
   validarItem,
   totais,

@@ -47,11 +47,28 @@ const payload = osMod.payloadOS({
 });
 assert.strictEqual(payload.placa, 'XYZ1A23');
 assert.strictEqual(payload.km, 12000);
+assert.strictEqual(payload.tipo_aparelho, 'Veiculo');
 assert.strictEqual(payload.equipamento, 'Honda CG 160');
 assert.strictEqual(payload.status, 'Aberta');
 
+const cel = osMod.payloadOS({
+  tipo_aparelho: 'celular',
+  marca: 'Samsung',
+  modelo: 'Galaxy S21',
+  imei: '123456789012345',
+  senha: '1234',
+  cor: 'Preto'
+});
+assert.strictEqual(cel.tipo_aparelho, 'Celular');
+assert.strictEqual(cel.imei, '123456789012345');
+assert.strictEqual(cel.placa, null);
+assert.strictEqual(cel.equipamento, 'Samsung Galaxy S21');
+assert.strictEqual(osMod.rotuloAparelho(cel), 'Samsung Galaxy S21 · IMEI 123456789012345');
+assert.strictEqual(osMod.inferirTipoAparelho({ equipamento: 'Notebook Dell' }), 'Notebook');
+assert.strictEqual(osMod.inferirTipoAparelho({ tipo_aparelho: 'Outro', placa: 'ABC1D23' }), 'Veiculo');
+
 try {
-  osMod.payloadOS({ km: -1 });
+  osMod.payloadOS({ tipo_aparelho: 'Veiculo', km: -1 });
   assert.fail('km negativo');
 } catch (e) {
   assert.ok(/KM/.test(e.message));
@@ -114,7 +131,7 @@ const tx = db.transaction(() => {
   const hist = db.prepare('SELECT id FROM ordens_servico WHERE placa=? AND id!=?').all('ABC1D23', osId);
   assert.ok(Array.isArray(hist));
 
-  console.log('OS OK: placa, itens, totais, lucro, PDV e WhatsApp');
+  console.log('OS OK: placa, aparelho, itens, totais, lucro, PDV e WhatsApp');
   throw new Error('__ROLLBACK__');
 });
 

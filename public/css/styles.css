@@ -422,6 +422,7 @@ a.btn-icon-square { text-decoration: none; }
 .os-sug:hover { background: rgba(33,150,243,0.08); }
 .os-sug small { color: var(--text-muted); }
 td.neg { color: var(--danger); }
+.os-campos-veiculo.hidden, .os-campos-eletronico.hidden, .os-campo-imei.hidden { display: none; }
 .xml-entrada-table input,
 .xml-entrada-table select { width: 100%; min-width: 64px; padding: 6px 8px; }
 .xml-entrada-table td { font-size: 12px; }

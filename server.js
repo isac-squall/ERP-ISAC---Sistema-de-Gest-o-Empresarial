@@ -3700,12 +3700,14 @@ function osRowCompleta(osId) {
 
 function osHistorico(os) {
   const params = [];
-  let q = `SELECT os.id, os.status, os.placa, os.km, os.modelo, os.equipamento, os.solicitacao,
-      os.valor_previsto, os.valor_venda, os.valor_lucro, os.criado_em, os.data_entrega, c.nome as cliente_nome
+  let q = `SELECT os.id, os.status, os.placa, os.km, os.modelo, os.marca, os.tipo_aparelho, os.imei, os.serial,
+      os.equipamento, os.solicitacao, os.valor_previsto, os.valor_venda, os.valor_lucro, os.criado_em, os.data_entrega, c.nome as cliente_nome
     FROM ordens_servico os LEFT JOIN clientes c ON os.cliente_id = c.id WHERE os.id != ?`;
   params.push(os.id);
   const or = [];
   if (os.placa) { or.push('os.placa = ?'); params.push(os.placa); }
+  if (os.imei) { or.push('os.imei = ?'); params.push(os.imei); }
+  if (os.serial) { or.push('os.serial = ?'); params.push(os.serial); }
   if (os.cliente_id) { or.push('os.cliente_id = ?'); params.push(os.cliente_id); }
   if (!or.length) return [];
   q += ` AND (${or.join(' OR ')}) ORDER BY os.id DESC LIMIT 12`;
@@ -3748,9 +3750,9 @@ app.get('/api/ordens-servico', (req, res) => {
   let query = `SELECT os.*, c.nome as cliente_nome, c.telefone as cliente_telefone FROM ordens_servico os LEFT JOIN clientes c ON os.cliente_id = c.id WHERE 1=1`;
   const params = [];
   if (search) {
-    query += ' AND (c.nome LIKE ? OR os.equipamento LIKE ? OR os.modelo LIKE ? OR os.placa LIKE ? OR os.solicitacao LIKE ? OR os.status LIKE ? OR CAST(os.id AS TEXT) LIKE ?)';
+    query += ' AND (c.nome LIKE ? OR os.equipamento LIKE ? OR os.modelo LIKE ? OR os.marca LIKE ? OR os.placa LIKE ? OR os.imei LIKE ? OR os.serial LIKE ? OR os.tipo_aparelho LIKE ? OR os.solicitacao LIKE ? OR os.status LIKE ? OR CAST(os.id AS TEXT) LIKE ?)';
     const s = `%${search}%`;
-    params.push(s, s, s, s, s, s, s);
+    params.push(s, s, s, s, s, s, s, s, s, s, s);
   }
   query += ' ORDER BY os.id DESC';
   const countQ = query.replace(/SELECT os\.\*, c\.nome as cliente_nome, c\.telefone as cliente_telefone/, 'SELECT COUNT(*) as total');
@@ -3767,9 +3769,10 @@ app.post('/api/ordens-servico', (req, res) => {
   try {
     const d = osMod.payloadOS(req.body || {});
     const result = db.prepare(`INSERT INTO ordens_servico
-      (status, cliente_id, equipamento, modelo, placa, km, solicitacao, valor_previsto, valor_custo, valor_venda, valor_lucro, data_prevista, data_final, data_entrega, observacoes)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      d.status, d.cliente_id, d.equipamento, d.modelo, d.placa, d.km, d.solicitacao,
+      (status, cliente_id, equipamento, modelo, placa, km, tipo_aparelho, marca, imei, serial, senha, cor, acessorios, solicitacao, valor_previsto, valor_custo, valor_venda, valor_lucro, data_prevista, data_final, data_entrega, observacoes)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      d.status, d.cliente_id, d.equipamento, d.modelo, d.placa, d.km,
+      d.tipo_aparelho, d.marca, d.imei, d.serial, d.senha, d.cor, d.acessorios, d.solicitacao,
       d.valor_previsto, 0, d.valor_previsto, d.valor_previsto,
       d.data_prevista, d.data_final, d.data_entrega, d.observacoes
     );
@@ -3793,8 +3796,8 @@ app.put('/api/ordens-servico/:id', (req, res) => {
           }
         }
       }
-      db.prepare(`UPDATE ordens_servico SET status=?, cliente_id=?, equipamento=?, modelo=?, placa=?, km=?, solicitacao=?, data_prevista=?, data_final=?, data_entrega=?, observacoes=? WHERE id=?`)
-        .run(d.status, d.cliente_id, d.equipamento, d.modelo, d.placa, d.km, d.solicitacao, d.data_prevista, d.data_final, d.data_entrega, d.observacoes, req.params.id);
+      db.prepare(`UPDATE ordens_servico SET status=?, cliente_id=?, equipamento=?, modelo=?, placa=?, km=?, tipo_aparelho=?, marca=?, imei=?, serial=?, senha=?, cor=?, acessorios=?, solicitacao=?, data_prevista=?, data_final=?, data_entrega=?, observacoes=? WHERE id=?`)
+        .run(d.status, d.cliente_id, d.equipamento, d.modelo, d.placa, d.km, d.tipo_aparelho, d.marca, d.imei, d.serial, d.senha, d.cor, d.acessorios, d.solicitacao, d.data_prevista, d.data_final, d.data_entrega, d.observacoes, req.params.id);
       if (!temItens && req.body && req.body.valor_previsto != null) {
         db.prepare('UPDATE ordens_servico SET valor_previsto=? WHERE id=?').run(osMod.arredMoney(req.body.valor_previsto), req.params.id);
       }

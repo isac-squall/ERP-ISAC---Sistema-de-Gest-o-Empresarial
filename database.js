@@ -615,6 +615,13 @@ ensureColumn('contratos', 'anexo_nome', 'TEXT');
 ensureColumn('ordens_servico', 'placa', 'TEXT');
 ensureColumn('ordens_servico', 'km', 'INTEGER');
 ensureColumn('ordens_servico', 'modelo', 'TEXT');
+ensureColumn('ordens_servico', 'tipo_aparelho', "TEXT DEFAULT 'Outro'");
+ensureColumn('ordens_servico', 'marca', 'TEXT');
+ensureColumn('ordens_servico', 'imei', 'TEXT');
+ensureColumn('ordens_servico', 'serial', 'TEXT');
+ensureColumn('ordens_servico', 'senha', 'TEXT');
+ensureColumn('ordens_servico', 'cor', 'TEXT');
+ensureColumn('ordens_servico', 'acessorios', 'TEXT');
 ensureColumn('ordens_servico', 'valor_custo', 'REAL DEFAULT 0');
 ensureColumn('ordens_servico', 'valor_venda', 'REAL DEFAULT 0');
 ensureColumn('ordens_servico', 'valor_lucro', 'REAL DEFAULT 0');
@@ -1130,15 +1137,15 @@ if (!produtoExemplo) {
 }
 
 try {
-  const insertOSDemo = db.prepare(`INSERT INTO ordens_servico (status, cliente_id, equipamento, modelo, placa, km, solicitacao, valor_previsto, valor_venda, valor_custo, valor_lucro)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+  const insertOSDemo = db.prepare(`INSERT INTO ordens_servico (status, cliente_id, equipamento, modelo, placa, km, tipo_aparelho, marca, solicitacao, valor_previsto, valor_venda, valor_custo, valor_lucro)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   const cli1 = db.prepare('SELECT id FROM clientes WHERE id=1').get();
   const cli2 = db.prepare('SELECT id FROM clientes WHERE id=2').get();
   if (cli1 && !db.prepare("SELECT id FROM ordens_servico WHERE equipamento LIKE '%notebook%' COLLATE NOCASE").get()) {
-    insertOSDemo.run('Pronta para entrega', 1, 'Notebook Dell Inspiron', 'Notebook Dell Inspiron', null, null, 'Troca de tela e formatacao', 350, 350, 0, 350);
+    insertOSDemo.run('Pronta para entrega', 1, 'Dell Inspiron', 'Inspiron', null, null, 'Notebook', 'Dell', 'Troca de tela e formatacao', 350, 350, 0, 350);
   }
   if (cli2 && !db.prepare("SELECT id FROM ordens_servico WHERE equipamento LIKE '%celular%' COLLATE NOCASE").get()) {
-    insertOSDemo.run('Pronta para entrega', 2, 'Celular Samsung Galaxy', 'Celular Samsung Galaxy', null, null, 'Troca de bateria', 180, 180, 0, 180);
+    insertOSDemo.run('Pronta para entrega', 2, 'Samsung Galaxy', 'Galaxy', null, null, 'Celular', 'Samsung', 'Troca de bateria', 180, 180, 0, 180);
   }
 } catch (_) {}
 

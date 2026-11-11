@@ -60,7 +60,7 @@ Sistema ERP completo para loja e assistencia tecnica: PDV, caixa, estoque, finan
 - Gerencia: submenu Aprovacao Vendas (orcamentos do PDV: aprovar, recusar, converter em venda), Compras (aprovar/receber pedidos), Fechamento Caixas (conferir o caixa fechado), Inventario (contagem substitui saldo) e Consulta Estoque (somente leitura). Acesso: Administrador e Gerente. Teste: `npm run test:gerencia`.
 - CRM: kanban de oportunidades (Lead a Perdido); probabilidade por etapa editavel (Lead 10%, Qualificacao 30%, Proposta 50%, Negociacao 80%); filtros por periodo, vendedor e tags; timeline de ligacoes/reunioes/e-mails no card; WhatsApp e e-mail com historico; orcamento do PDV avanca o funil (criar=Proposta, aprovar=Negociacao, converter=Ganho). Acesso: Administrador, Gerente e Vendedor. Teste: `npm run test:crm`.
 - Contratos: cadastro recorrente; Faturar (manual ou automatico 5 dias antes) gera Receita Pendente no Financeiro com vencimento no dia do contrato e avanca a proxima data. Adimplencia na lista; reajuste anual IGP-M/IPCA/Manual; alerta de vigencia (30 dias); anexo PDF/imagem. Contrato Ativo nao exclui (encerra antes). Teste: `npm run test:contratos`.
-- Ordens de servico (oficina): pecas e servicos na OS; peca baixa estoque na hora (estorno ao remover/cancelar); placa, km e historico da moto; card de lucro (custo/venda); PDV puxa os itens e segue NFC-e sem baixar estoque de novo. Teste: `npm run test:os`.
+- Ordens de servico: tipo de aparelho (Veiculo, Celular, Notebook, Tablet, TV, Console, Outro); veiculo usa placa/km; celular/tablet usam IMEI, serial e senha; pecas baixam estoque; card de lucro; PDV puxa os itens ate a NFC-e. Teste: `npm run test:os`.
 - Bancos: contas (Corrente/Poupanca/Caixa/Digital), importacao de extrato CSV, conciliacao por valor+data e fluxo de caixa 30 dias. Abas no Financeiro. Teste: `npm run test:bancos`.
 - NF-e e NFS-e: rascunho, autorizacao simulada (chave/protocolo/XML locais) e cancelamento. Sem transmissao a SEFAZ ou prefeitura nesta entrega. Teste: `npm run test:fiscal`.
 - Producao: OP usa a composicao (BOM) do produto/kit; concluir baixa insumos e entra o acabado. Curva ABC pelo faturamento do mes (A ate 80%, B ate 95%, C o restante). Teste: `npm run test:producao`.
@@ -214,7 +214,7 @@ Menu **Impressoras** (Administrador e Gerente).
 
 ## Ordens de servico
 
-Oficina: cadastre cliente, **placa**, **km** e modelo. Lance pecas (baixa estoque na hora) e servicos. O card mostra custo, venda e lucro.
+Oficina e assistencia: escolha o **tipo de aparelho** (Veiculo, Celular, Notebook, Tablet, TV, Console ou Outro). Veiculo usa placa/km; celular/tablet usam IMEI, serial e senha; notebook e demais usam serial/senha. Lance pecas (baixa estoque na hora) e servicos. O card mostra custo, venda e lucro.
 
 Status: Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada.
 

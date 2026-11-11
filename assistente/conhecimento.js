@@ -315,12 +315,12 @@ module.exports = [
     pagina: 'ordens-servico',
     titulo: 'Abrir e acompanhar ordens de servico',
     keywords: 'ordem servico os oficina peca servico baixa estoque placa km lucro historico moto whatsapp',
-    conteudo: `Ordens de servico de oficina: cliente, placa, km, modelo, pecas e servicos. Ao lancar peca do estoque, a quantidade e baixada na hora; ao remover o item, o estoque volta. Servico nao baixa estoque. O card mostra custo, venda e lucro. Historico lista outras OS da mesma placa ou cliente. Status: Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada. WhatsApp notifica quando estiver pronta. Para cobrar, va em Realizar vendas, lupa, Ordem de servico: o PDV puxa os itens e segue ate a NFC-e.`,
+    conteudo: `Ordens de servico para oficina e assistencia: escolha o tipo de aparelho (Veiculo, Celular, Notebook, Tablet, TV, Console ou Outro). Veiculo: placa e km. Celular/tablet: IMEI, serial e senha. Notebook e outros: serial, senha e acessorios. Ao lancar peca do estoque, a quantidade e baixada na hora; ao remover o item, o estoque volta. Servico nao baixa estoque. O card mostra custo, venda e lucro. Historico lista outras OS do mesmo IMEI, serial, placa ou cliente. Status: Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada. WhatsApp notifica quando estiver pronta. Para cobrar, va em Realizar vendas, lupa, Ordem de servico: o PDV puxa os itens e segue ate a NFC-e.`,
     passos: [
       'Abra Ordens de servico e clique em Novo Servico.',
-      'Informe cliente, placa, km, modelo e o problema.',
+      'Escolha o tipo (veiculo, celular, notebook...) e preencha marca, modelo e identificacao (placa, IMEI ou serial).',
       'Salve e lance pecas (baixa estoque) e servicos.',
-      'Confira o card de lucro e o historico da moto.',
+      'Confira o card de lucro e o historico do aparelho.',
       'Marque Pronta para entrega, notifique no WhatsApp e cobre no PDV.'
     ]
   },

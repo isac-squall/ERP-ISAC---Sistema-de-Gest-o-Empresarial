@@ -545,7 +545,7 @@ async function renderDashboard() {
             <tr>
               <td>${o.id}</td>
               <td>${escapeHtml(o.cliente_nome || '-')}</td>
-              <td>${escapeHtml(o.placa || o.modelo || o.equipamento || o.solicitacao || '-')}</td>
+              <td>${escapeHtml(o.placa || [o.marca, o.modelo || o.equipamento].filter(Boolean).join(' ') || o.solicitacao || '-')}</td>
               <td>${formatCurrency(o.valor_venda || o.valor_previsto)}</td>
               <td>${o.cliente_telefone ? `<button type="button" class="btn-icon" title="Notificar cliente" onclick="abrirWhatsappCliente(${JSON.stringify(String(o.cliente_telefone))}, ${JSON.stringify('Ola! Sua ordem de servico #' + o.id + (o.placa ? ' da placa ' + o.placa : '') + ' esta pronta para entrega.')})"><i class="fab fa-whatsapp"></i></button>` : ''}</td>
             </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Nenhuma OS pronta</td></tr>'}
@@ -608,7 +608,7 @@ async function renderOrdensServico() {
     <div class="table-wrapper">
       <table class="data-table">
         <thead><tr>
-          <th>#</th><th>Status</th><th>Cliente</th><th>Veiculo</th>
+          <th>#</th><th>Status</th><th>Cliente</th><th>Aparelho</th>
           <th>Solicitacao</th><th>Total</th><th>Lucro</th><th>Entrega</th><th>Acoes</th>
         </tr></thead>
         <tbody id="os-tbody">${renderOSTableRows(result.data)}</tbody>
@@ -620,11 +620,30 @@ async function renderOrdensServico() {
   document.getElementById('table-new').onclick = () => showOSForm();
 }
 
+const OS_TIPOS_APARELHO = ['Veiculo', 'Celular', 'Notebook', 'Tablet', 'TV', 'Console', 'Outro'];
+
+function osTipoAparelho(o) {
+  const s = String(o?.tipo_aparelho || '').trim();
+  if (s && s !== 'Outro' && OS_TIPOS_APARELHO.includes(s)) return s;
+  if (o?.placa) return 'Veiculo';
+  const t = `${o?.modelo || ''} ${o?.equipamento || ''}`.toLowerCase();
+  if (t.includes('celular') || t.includes('iphone')) return 'Celular';
+  if (t.includes('notebook') || t.includes('laptop')) return 'Notebook';
+  if (t.includes('tablet') || t.includes('ipad')) return 'Tablet';
+  return s || 'Outro';
+}
+
 function osVeiculoLabel(o) {
-  const placa = o.placa ? String(o.placa) : '';
-  const modelo = o.modelo || o.equipamento || '';
-  if (placa && modelo) return `${placa} · ${modelo}`;
-  return placa || modelo || '-';
+  const tipo = osTipoAparelho(o);
+  const nome = [o.marca, o.modelo || o.equipamento].filter(Boolean).join(' ') || o.modelo || o.equipamento || '';
+  if (tipo === 'Veiculo') {
+    const placa = o.placa ? String(o.placa) : '';
+    if (placa && nome) return `${placa} · ${nome}`;
+    return placa || nome || 'Veiculo';
+  }
+  if (tipo === 'Celular' && o.imei) return `${nome || 'Celular'} · IMEI ${o.imei}`;
+  if (o.serial && nome) return `${nome} · ${o.serial}`;
+  return nome || tipo || '-';
 }
 
 function renderOSTableRows(data) {
@@ -640,7 +659,7 @@ function renderOSTableRows(data) {
       <td>${o.id}</td>
       <td><span class="status-badge ${statusClass(o.status)}">${o.status}</span></td>
       <td>${escapeHtml(o.cliente_nome || '-')}</td>
-      <td>${escapeHtml(osVeiculoLabel(o))}${o.km != null ? ` <small class="muted">${o.km} km</small>` : ''}</td>
+      <td>${escapeHtml(osVeiculoLabel(o))}${osTipoAparelho(o) === 'Veiculo' && o.km != null ? ` <small class="muted">${o.km} km</small>` : ` <small class="muted">${escapeHtml(osTipoAparelho(o))}</small>`}</td>
       <td>${escapeHtml(o.solicitacao || '-')}</td>
       <td>${formatCurrency(total)}</td>
       <td class="${lucro < 0 ? 'neg' : ''}">${formatCurrency(lucro)}</td>
@@ -693,21 +712,21 @@ function osItensHtml(itens) {
 }
 
 function osHistHtml(hist) {
-  if (!hist || !hist.length) return '<p class="muted">Sem historico para esta placa/cliente.</p>';
+  if (!hist || !hist.length) return '<p class="muted">Sem historico para este aparelho/cliente.</p>';
   return `<table class="data-table os-itens-table"><thead><tr>
-    <th>#</th><th>Status</th><th>Veiculo</th><th>KM</th><th>Total</th><th>Data</th>
+    <th>#</th><th>Status</th><th>Aparelho</th><th>Identificacao</th><th>Total</th><th>Data</th>
   </tr></thead><tbody>${hist.map(h => `<tr>
     <td>${h.id}</td>
     <td>${escapeHtml(h.status)}</td>
     <td>${escapeHtml(osVeiculoLabel(h))}</td>
-    <td>${h.km != null ? h.km : '-'}</td>
+    <td>${escapeHtml(h.placa || h.imei || h.serial || (h.km != null ? h.km + ' km' : '-'))}</td>
     <td>${formatCurrency(h.valor_venda || h.valor_previsto)}</td>
     <td>${formatDate(h.criado_em)}</td>
   </tr>`).join('')}</tbody></table>`;
 }
 
 async function showOSForm(id) {
-  let data = { status: 'Aberta', itens: [], historico: [], totais: { valor_custo: 0, valor_venda: 0, valor_lucro: 0 } };
+  let data = { status: 'Aberta', tipo_aparelho: 'Veiculo', itens: [], historico: [], totais: { valor_custo: 0, valor_venda: 0, valor_lucro: 0 } };
   if (id) data = await API.ordensServico.get(id);
   const clientes = await API.clientes.all();
   const fechada = ['Entregue', 'Cancelada'].includes(data.status);
@@ -725,11 +744,27 @@ async function showOSForm(id) {
             ${clientes.map(c => `<option value="${c.id}" ${data.cliente_id == c.id ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
           </select></div>
       </div>
-      <div class="form-row-3">
+      <div class="form-row">
+        <div class="form-group"><label>Tipo de aparelho</label>
+          <select name="tipo_aparelho" id="os-tipo-aparelho">
+            ${OS_TIPOS_APARELHO.map(t => `<option ${osTipoAparelho(data) === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select></div>
+        <div class="form-group"><label>Marca</label><input name="marca" value="${escapeHtml(data.marca || '')}" placeholder="Samsung, Dell, Honda..."></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Modelo</label><input name="modelo" value="${escapeHtml(data.modelo || data.equipamento || '')}" placeholder="Galaxy S21, Inspiron, CG 160"></div>
+        <div class="form-group"><label>Cor</label><input name="cor" value="${escapeHtml(data.cor || '')}" placeholder="Preto, prata..."></div>
+      </div>
+      <div class="os-campos-veiculo form-row">
         <div class="form-group"><label>Placa</label><input name="placa" value="${escapeHtml(data.placa || '')}" placeholder="ABC1D23" maxlength="8"></div>
         <div class="form-group"><label>KM</label><input name="km" type="number" min="0" value="${data.km != null ? data.km : ''}"></div>
-        <div class="form-group"><label>Modelo / veiculo</label><input name="modelo" value="${escapeHtml(data.modelo || data.equipamento || '')}" placeholder="Honda CG 160"></div>
       </div>
+      <div class="os-campos-eletronico form-row-3">
+        <div class="form-group os-campo-imei"><label>IMEI</label><input name="imei" value="${escapeHtml(data.imei || '')}" placeholder="15 digitos" maxlength="15"></div>
+        <div class="form-group"><label>N. serie</label><input name="serial" value="${escapeHtml(data.serial || '')}" placeholder="Serial"></div>
+        <div class="form-group"><label>Senha / padrao</label><input name="senha" value="${escapeHtml(data.senha || '')}" placeholder="Senha do aparelho"></div>
+      </div>
+      <div class="form-group"><label>Acessorios deixados</label><input name="acessorios" value="${escapeHtml(data.acessorios || '')}" placeholder="Carregador, capa, chave reserva..."></div>
       <div class="form-group"><label>Solicitação</label><textarea name="solicitacao" rows="2">${escapeHtml(data.solicitacao || '')}</textarea></div>
       <div class="form-row">
         <div class="form-group"><label>Data prevista</label><input name="data_prevista" type="date" value="${toInputDate(data.data_prevista)}"></div>
@@ -752,7 +787,7 @@ async function showOSForm(id) {
         <button type="button" class="btn btn-outline" id="os-item-add">Incluir</button>
       </div>
       <div id="os-item-sug" class="os-item-sug hidden"></div>`}
-      <h4 class="os-sec">Historico da moto / cliente</h4>
+      <h4 class="os-sec">Historico do aparelho / cliente</h4>
       <div id="os-hist-wrap">${osHistHtml(data.historico)}</div>
     ` : '<p class="muted">Salve a OS para lancar pecas (baixa estoque) e servicos.</p>'}`,
     `${data.cliente_telefone && data.status === 'Pronta para entrega' ? `<button class="btn btn-outline" id="os-wa"><i class="fab fa-whatsapp"></i> Notificar</button>` : ''}
@@ -763,11 +798,21 @@ async function showOSForm(id) {
   document.getElementById('os-wa')?.addEventListener('click', () => {
     abrirWhatsappCliente(data.cliente_telefone, data.mensagem_whatsapp);
   });
+  const tipoEl = document.getElementById('os-tipo-aparelho');
+  const aplicarCamposAparelho = () => {
+    const t = tipoEl?.value || 'Outro';
+    document.querySelectorAll('.os-campos-veiculo').forEach(el => el.classList.toggle('hidden', t !== 'Veiculo'));
+    document.querySelectorAll('.os-campos-eletronico').forEach(el => el.classList.toggle('hidden', t === 'Veiculo'));
+    document.querySelectorAll('.os-campo-imei').forEach(el => el.classList.toggle('hidden', t !== 'Celular' && t !== 'Tablet'));
+  };
+  if (tipoEl) { tipoEl.onchange = aplicarCamposAparelho; aplicarCamposAparelho(); }
   document.getElementById('os-save').onclick = async () => {
     const fd = new FormData(document.getElementById('os-form'));
     const body = Object.fromEntries(fd);
     body.cliente_id = body.cliente_id || null;
     body.km = body.km === '' ? null : body.km;
+    if (body.tipo_aparelho !== 'Veiculo') { body.placa = ''; body.km = null; }
+    if (body.tipo_aparelho === 'Veiculo') { body.imei = ''; body.serial = ''; body.senha = ''; }
     try {
       if (id) await API.ordensServico.update(id, body);
       else {
@@ -4350,7 +4395,7 @@ let posBuscaTimer = null;
 const POS_BUSCA = [
   { value: 'produto', label: 'Produto', hint: 'Nome, codigo de barras, SKU ou ID' },
   { value: 'categoria', label: 'Categoria', hint: 'Lista produtos da categoria digitada' },
-  { value: 'os', label: 'Ordem de serviço', hint: 'Cliente, placa, modelo, problema ou numero da OS' }
+  { value: 'os', label: 'Ordem de serviço', hint: 'Cliente, placa, IMEI, modelo, problema ou numero da OS' }
 ];
 
 function posTabAtual() { return posTabs[posTabIndex]; }
@@ -4650,7 +4695,7 @@ async function mostrarPosResultados(term) {
     box.innerHTML = posOsResultados.map(o => `
       <div class="pos-result" data-os="${o.id}">
         <div>
-          <strong>OS ${o.id} · ${escapeHtml(o.placa || o.modelo || o.equipamento || 'OS')}</strong><br>
+          <strong>OS ${o.id} · ${escapeHtml(osVeiculoLabel(o))}</strong><br>
           <small>${escapeHtml(o.cliente_nome || 'Sem cliente')} · ${escapeHtml(o.solicitacao || o.status)}</small>
         </div>
         <div class="pos-result-right">${formatCurrency(o.valor_venda || o.valor_previsto)}<br><small>${escapeHtml(o.status)}</small></div>
@@ -4728,7 +4773,7 @@ async function posAdicionarOS(os) {
       }))
     : [{
         produto_id: null, servico: true, os_id: os.id,
-        nome: `OS ${os.id} · ${full.modelo || full.equipamento || full.placa || 'Serviço'}`,
+        nome: `OS ${os.id} · ${osVeiculoLabel(full) || 'Serviço'}`,
         codigo: `OS-${os.id}`,
         preco_unitario: Number(full.valor_venda || full.valor_previsto) || 0,
         preco_custo: Number(full.valor_custo) || 0,
@@ -7604,7 +7649,7 @@ async function renderManual() {
         <li><strong>Clientes / Produtos / Fornecedores</strong> — Cadastre, edite e pesquise registros com paginação.</li>
         <li><strong>Estoque</strong> — Pesquise itens por nome, codigo, marca ou local; filtre por categoria, situacao e tipo; registre entrada, ajuste ou inventario.</li>
         <li><strong>Gerência</strong> — Aprovacao de orcamentos, compras, conferencia de caixa, inventario e consulta de estoque (Administrador e Gerente).</li>
-        <li><strong>Ordens de serviço</strong> — Placa/km, pecas (baixa estoque), servicos, lucro e cobranca no PDV/NFC-e.</li>
+        <li><strong>Ordens de serviço</strong> — Veiculo, celular, notebook e outros; pecas (baixa estoque), lucro e cobranca no PDV/NFC-e.</li>
         <li><strong>Financeiro</strong> — Vendas a vista entram pagas; Fiado vira contas a receber. Taxas de cartao/PIX e sangria/suprimento lancam sozinhos. Abas: contas bancarias (CSV), conciliacao, fluxo 30 dias e DRE (competencia, TXT/CSV).</li>
         <li><strong>CRM</strong> — Funil kanban (Lead a Perdido) com probabilidade editavel, filtros, timeline e WhatsApp/e-mail. Orcamento do PDV avanca o card.</li>
         <li><strong>Contratos</strong> — Recorrencia e MRR. Faturar lanca Receita no Financeiro. Encerre antes de excluir.</li>
