@@ -314,10 +314,11 @@ module.exports = [
     sessao: 'Gestao de OS',
     pagina: 'ordens-servico',
     titulo: 'Abrir e acompanhar ordens de servico',
-    keywords: 'ordem servico os oficina peca servico baixa estoque placa km lucro historico moto whatsapp',
-    conteudo: `Ordens de servico para oficina e assistencia: escolha o tipo de aparelho (Veiculo, Celular, Notebook, Tablet, TV, Console ou Outro). Veiculo: placa e km. Celular/tablet: IMEI, serial e senha. Notebook e outros: serial, senha e acessorios. Ao lancar peca do estoque, a quantidade e baixada na hora; ao remover o item, o estoque volta. Servico nao baixa estoque. O card mostra custo, venda e lucro. Historico lista outras OS do mesmo IMEI, serial, placa ou cliente. Status: Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada. WhatsApp notifica quando estiver pronta. Para cobrar, va em Realizar vendas, lupa, Ordem de servico: o PDV puxa os itens e segue ate a NFC-e.`,
+    keywords: 'ordem servico os oficina peca servico baixa estoque placa km lucro historico moto whatsapp cadastrar cliente',
+    conteudo: `Ordens de servico para oficina e assistencia: escolha o tipo de aparelho (Veiculo, Celular, Notebook, Tablet, TV, Console ou Outro). Veiculo: placa e km. Celular/tablet: IMEI, serial e senha. Notebook e outros: serial, senha e acessorios. No form da OS, o botao + cadastra cliente na hora (nome, telefone, CPF/CNPJ) sem ir ao modulo de Clientes. Ao lancar peca do estoque, a quantidade e baixada na hora; ao remover o item, o estoque volta. Servico nao baixa estoque. O card mostra custo, venda e lucro. Historico lista outras OS do mesmo IMEI, serial, placa ou cliente. Status: Aberta, Em andamento, Pronta para entrega, Entregue, Cancelada. WhatsApp notifica quando estiver pronta. Para cobrar, va em Realizar vendas, lupa, Ordem de servico: o PDV puxa os itens e segue ate a NFC-e.`,
     passos: [
       'Abra Ordens de servico e clique em Novo Servico.',
+      'Selecione o cliente ou clique em + para cadastrar nome, telefone e CPF/CNPJ na hora.',
       'Escolha o tipo (veiculo, celular, notebook...) e preencha marca, modelo e identificacao (placa, IMEI ou serial).',
       'Salve e lance pecas (baixa estoque) e servicos.',
       'Confira o card de lucro e o historico do aparelho.',

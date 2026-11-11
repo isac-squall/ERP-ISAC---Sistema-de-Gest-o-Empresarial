@@ -423,6 +423,10 @@ a.btn-icon-square { text-decoration: none; }
 .os-sug small { color: var(--text-muted); }
 td.neg { color: var(--danger); }
 .os-campos-veiculo.hidden, .os-campos-eletronico.hidden, .os-campo-imei.hidden { display: none; }
+.os-cliente-novo {
+  margin: 0 0 12px; padding: 12px; border: 1px dashed var(--border); border-radius: 6px; background: var(--bg);
+}
+.os-cli-salvar-wrap { display: flex; align-items: flex-end; }
 .xml-entrada-table input,
 .xml-entrada-table select { width: 100%; min-width: 64px; padding: 6px 8px; }
 .xml-entrada-table td { font-size: 12px; }
