@@ -28,8 +28,6 @@ BrandingText "ERP ISAC"
 
 Section "Instalar"
   DetailPrint "Encerrando versao anterior..."
-  nsExec::ExecToLog 'taskkill /F /IM erp-isac.exe'
-  Pop $0
   IfFileExists "$INSTDIR\Parar.bat" 0 +3
     nsExec::ExecToLog '"$INSTDIR\Parar.bat"'
     Pop $0
@@ -45,32 +43,56 @@ Section "Instalar"
 
   SetOverwrite try
   SetOutPath "$INSTDIR\runtime"
-  File /r "runtime/*.*"
+  File /r "runtime\*.*"
   SetOverwrite on
 
   SetOutPath "$INSTDIR\app"
-  File "app/server.js"
-  File "app/database.js"
-  File "app/package.json"
-  File "app/package-lock.json"
-  File "app/README.md"
-  File /nonfatal "app/erp.db"
+  File "app\server.js"
+  File "app\database.js"
+  File "app\senha.js"
+  File "app\package.json"
+  File "app\package-lock.json"
+  File "app\README.md"
   SetOutPath "$INSTDIR\app\public"
-  File /r "app/public/*.*"
+  File /r "app\public\*.*"
   SetOutPath "$INSTDIR\app\assistente"
-  File /r "app/assistente/*.*"
+  File /r "app\assistente\*.*"
+  SetOutPath "$INSTDIR\app\bancos"
+  File /r "app\bancos\*.*"
+  SetOutPath "$INSTDIR\app\compras"
+  File /r "app\compras\*.*"
+  SetOutPath "$INSTDIR\app\contratos"
+  File /r "app\contratos\*.*"
+  SetOutPath "$INSTDIR\app\crm"
+  File /r "app\crm\*.*"
+  SetOutPath "$INSTDIR\app\dre"
+  File /r "app\dre\*.*"
+  SetOutPath "$INSTDIR\app\ecommerce"
+  File /r "app\ecommerce\*.*"
+  SetOutPath "$INSTDIR\app\fiscal"
+  File /r "app\fiscal\*.*"
+  SetOutPath "$INSTDIR\app\gerencia"
+  File /r "app\gerencia\*.*"
   SetOutPath "$INSTDIR\app\nfce"
-  File /r "app/nfce/*.*"
+  File /r "app\nfce\*.*"
+  SetOutPath "$INSTDIR\app\ordens-servico"
+  File /r "app\ordens-servico\*.*"
+  SetOutPath "$INSTDIR\app\pix"
+  File /r "app\pix\*.*"
+  SetOutPath "$INSTDIR\app\producao"
+  File /r "app\producao\*.*"
   SetOutPath "$INSTDIR\app\produtos"
-  File /r "app/produtos/*.*"
+  File /r "app\produtos\*.*"
+  SetOutPath "$INSTDIR\app\rh"
+  File /r "app\rh\*.*"
   SetOutPath "$INSTDIR\app\backup"
-  File /r "app/backup/*.*"
+  File /r "app\backup\*.*"
   SetOutPath "$INSTDIR\app\contador"
-  File /r "app/contador/*.*"
+  File /r "app\contador\*.*"
   SetOutPath "$INSTDIR\app\licenca"
-  File /r "app/licenca/*.*"
+  File /r "app\licenca\*.*"
   SetOutPath "$INSTDIR\app\node_modules"
-  File /r "app/node_modules/*.*"
+  File /r "app\node_modules\*.*"
 
   CreateShortCut "$DESKTOP\ERP ISAC.lnk" "$INSTDIR\Iniciar.vbs"
   CreateDirectory "$SMPROGRAMS\ERP ISAC"
@@ -86,8 +108,6 @@ Section "Instalar"
 SectionEnd
 
 Section "Uninstall"
-  nsExec::ExecToLog 'taskkill /F /IM erp-isac.exe'
-  Pop $0
   IfFileExists "$INSTDIR\Parar.bat" 0 +3
     nsExec::ExecToLog '"$INSTDIR\Parar.bat"'
     Pop $0

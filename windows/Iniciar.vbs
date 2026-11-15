@@ -45,11 +45,15 @@ sh.Run "http://localhost:3000", 1, False
 Function PortaOk()
   On Error Resume Next
   Dim xhr
-  Set xhr = CreateObject("MSXML2.XMLHTTP")
-  xhr.Open "GET", "http://127.0.0.1:3000/", False
+  Set xhr = CreateObject("MSXML2.ServerXMLHTTP.6.0")
   xhr.setTimeouts 2000, 2000, 2000, 2000
+  xhr.Open "GET", "http://127.0.0.1:3000/", False
   xhr.Send
-  PortaOk = (Err.Number = 0 And xhr.Status >= 200 And xhr.Status < 500)
+  If Err.Number = 0 Then
+    PortaOk = (xhr.Status >= 200 And xhr.Status < 500)
+  Else
+    PortaOk = False
+  End If
   Err.Clear
   On Error GoTo 0
 End Function
